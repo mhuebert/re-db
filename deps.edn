@@ -1,0 +1,9 @@
+{:paths ["src/main"]
+ :deps {thheller/shadow-cljs {:mvn/version "2.15.9"}
+        applied-science/js-interop {:mvn/version "0.3.1"}
+        net.cgrand/macrovich {:mvn/version "0.2.1"}
+        com.lucasbradstreet/cljs-uuid-utils {:mvn/version "1.0.2"}
+        reagent/reagent {:mvn/version "1.1.0"}
+        metosin/malli {:mvn/version "0.6.1"}
+        datascript/datascript {:mvn/version "1.2.8"}}
+ :aliases {:test {:extra-paths ["src/test"]}}}

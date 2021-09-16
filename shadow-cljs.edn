@@ -1,0 +1,15 @@
+{:deps true
+ :dev-http {8008 "public"}
+ :builds
+ {:test
+  {:target :browser-test
+   :test-dir "public/test"
+   :ns-regexp "-test$"
+   :devtools {:http-port 8009
+              :http-root "public/test"}}
+  :bench
+  {:target :browser
+   :output-dir "public/bench/js"
+   :modules {:bench {:entries [re-db.bench]}}
+   :devtools {:http-port 8010
+              :http-root "public/bench"}}}}
