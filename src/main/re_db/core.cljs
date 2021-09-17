@@ -55,19 +55,17 @@
 (defn- update-index [db e a v pv ^boolean is-ref ^boolean is-unique ^boolean is-indexed]
   (let [;; add
         db (if (some? v)
-             (let [v (cond-> v is-ref (resolve-e db))]
-               (cond-> db
-                       is-indexed (update-in [:ave a v] (if is-unique
-                                                          (set-unique a v)
-                                                          conj-set) e)
-                       is-ref (update-in [:vae v a] conj-set e)))
+             (cond-> db
+                     is-indexed (update-in [:ave a v] (if is-unique
+                                                        (set-unique a v)
+                                                        conj-set) e)
+                     is-ref (update-in [:vae v a] conj-set e))
              db)
         ;; remove
         db (if (some? pv)
-             (let [pv (cond-> pv is-ref (resolve-e db))]
-               (cond-> db
-                       is-indexed (disj-in [:ave a pv] e)
-                       is-ref (disj-in [:vae pv a] e)))
+             (cond-> db
+                     is-indexed (disj-in [:ave a pv] e)
+                     is-ref (disj-in [:vae pv a] e))
              db)]
     db))
 
@@ -96,14 +94,17 @@
                        (update-index db e a v pv is-ref is-unique is-indexed))))
              _a_?
              (conj (fn [db e a v pv]
-                     (let [exists? (if is-many (seq v) (some? v))]
-                       (if exists?
+                     (let [v? (if is-many (seq v) (some? v))]
+                       (if v?
                          (update-in db [:_a_ a] conj-set e)
                          (update-in db [:_a_ a] disj e)))))))))
 
 (defn- update-indexes [db e a v pv schema]
   (if-some [index (j/get schema :index-fn)]
-    (index db e a v pv)
+    (let [is-ref (ref? schema)
+          v (cond-> v is-ref (resolve-e db))
+          pv (cond-> pv is-ref (resolve-e db))]
+      (index db e a v pv))
     db))
 
 (defn- clear-empty-ent [db e]
