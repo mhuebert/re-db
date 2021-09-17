@@ -7,7 +7,6 @@
             [re-db.util :refer [difference-in disj-in dissoc-in guard update-set]]))
 
 (def ^:dynamic ^boolean *report-datoms?* true)              ;; if false, datoms are not tracked & listeners are not notified. faster.
-(def ^:dynamic *db-log* nil)                                ;; maintains log of transactions while bound
 
 (def conj-set (fnil conj #{}))
 (def into-set (fnil into #{}))
@@ -88,9 +87,9 @@
                        ;; cardinality-many attrs must update index for each item in set
                        (as-> db db
                              ;; additions
-                             (reduce (fn [db v] (update-index db e a v nil is-ref is-unique is-indexed)) db v)
+                             (if v (reduce (fn [db v] (update-index db e a v nil is-ref is-unique is-indexed)) db v) db)
                              ;; removals
-                             (reduce (fn [db pv] (update-index db e a nil pv is-ref is-unique is-indexed)) db pv))
+                             (if pv (reduce (fn [db pv] (update-index db e a nil pv is-ref is-unique is-indexed)) db pv) db))
                        (update-index db e a v pv is-ref is-unique is-indexed))))
              _a_?
              (conj (fn [db e a v pv]
@@ -101,11 +100,12 @@
 
 (defn- update-indexes [db e a v pv schema]
   (if-some [index (j/get schema :index-fn)]
-    (let [is-ref (ref? schema)
-          v (cond-> v is-ref (resolve-e db))
-          pv (cond-> pv is-ref (resolve-e db))]
-      (index db e a v pv))
+    (index db e a v pv)
     db))
+
+;; transactions
+
+(defn conj-datom [datoms datom] (cond-> datoms *report-datoms?* (conj! datom)))
 
 (defn- clear-empty-ent [db e]
   (cond-> db
@@ -120,37 +120,38 @@
         (if-some [removals (guard (set/intersection v pv) seq)]
           [(-> (difference-in db [:eav e a] removals)
                (update-indexes e a nil removals attr-schema))
-           (cond-> datoms *report-datoms?* (conj! [e a nil removals]))]
+           (conj-datom datoms [e a nil removals])]
           state)
         [(-> (update-in db [:eav e] dissoc a)
              (update-indexes e a nil pv attr-schema)
              (clear-empty-ent e))
-         (cond-> datoms *report-datoms?* (conj! [e a nil pv]))]))
+         (conj-datom datoms [e a nil pv])]))
     state))
 
 ;; retracts each attribute in the entity
 (defn- retract-entity [state [_ e]]
   (reduce-kv (fn [state a v]
                (retract-attr state [nil e a v]))
-          state
-          (get-entity (state 0) e)))
+             state
+             (get-entity (state 0) e)))
 
 (defn- add
   [[db datoms :as state] [_ e a v]]
   (let [attr-schema (get-schema db a)
         db (if (contains? (:eav db) e) db (assoc-in db [:eav e] {:db/id e}))
-        pv (fast/get-in db [:eav e a])]
+        pv (fast/get-in db [:eav e a])
+        v (cond-> v (ref? attr-schema) (resolve-e db))]
     (if (many? attr-schema)
       (if-some [additions (guard (set/difference v pv) seq)]
         [(-> (assoc-in db [:eav e a] (into-set pv additions))
              (update-indexes e a additions nil attr-schema))
-         (cond-> datoms *report-datoms?* (conj! [e a additions nil]))]
+         (conj-datom datoms [e a additions nil])]
         state)
       (if (= pv v)
         state
         [(-> (assoc-in db [:eav e a] v)
              (update-indexes e a v pv attr-schema))
-         (cond-> datoms *report-datoms?* (conj! [e a v pv]))]))))
+         (conj-datom datoms [e a v pv])]))))
 
 (defn commit-datom [[db datoms] [e a v pv :as datom]]
   (let [attr-schema (get-schema db a)]
@@ -208,46 +209,45 @@
        (if (= v pv)
          state
          (if (many? attr-schema)
-           (let [v (set/difference v pv)
-                 pv (set/difference pv v)]
-             [(update-indexes (state 0) e a v pv attr-schema)
-              (cond-> (state 1)
-                      *report-datoms?*
-                      (conj! [e a v pv]))])
+           (let [v (guard (set/difference v pv) seq)
+                 pv (guard (set/difference pv v) seq)]
+             (if (or v pv)
+               [(update-indexes (state 0) e a v pv attr-schema)
+                (conj-datom (state 1) [e a v pv])]
+               state))
            [(update-indexes (state 0) e a v pv attr-schema)
-            (cond-> (state 1) *report-datoms?* (conj! [e a v pv]))]))))
+            (conj-datom (state 1) [e a v pv])]))))
    state
    (get-entity (state 0) e)))
 
 (declare add-map)
 
-;; an entity may embed other entities as maps in ref attributes - these are
-;; found and transacted as independent entities.
-(defn- upsert-nested-entities
+;; handle upserts & entity-id resolution
+(defn- resolve-map-refs
   [[{:as db db-schema :schema} datoms] e]
   (let [m (get-entity db e)
-        [db datoms m] (reduce-kv (fn [[db-snap datoms m :as ret] a v]
-                                   (let [attr-schema (db-schema a)]
-                                     (if-not (ref? attr-schema)
-                                       ret
-                                       (if (many? attr-schema)
-                                         (reduce
-                                          (fn [[db-snap datoms entity :as ret] val]
-                                            (if (map? val)
-                                              (let [sub-entity (resolve-map-e db-snap val)]
-                                                (conj (add-map [db-snap datoms] sub-entity)
-                                                      (update entity a (fn [v] (-> v
-                                                                                   (disj val)
-                                                                                   (conj (:db/id sub-entity)))))))
-                                              ret))
-                                          [db-snap datoms m]
-                                          v)
-                                         (if (map? v)
-                                           (let [sub-entity (resolve-map-e db-snap v)]
-                                             (conj (add-map [db-snap datoms] sub-entity)
-                                                   (assoc m a (:db/id sub-entity))))
-                                           ret))
-                                       )))
+        [db datoms m] (reduce-kv (fn [[db datoms m :as ret] a v]
+                                   (if-some [attr-schema (guard (db-schema a) ref?)]
+                                     (if (many? attr-schema)
+                                       (reduce
+                                        (fn [[db datoms entity :as ret] val]
+                                          (cond (vector? val)
+                                                [db datoms (update entity a #(-> % (disj val) (conj (or (resolve-e val db) val))))]
+                                                (map? val)
+                                                (let [sub-entity (resolve-map-e db val)]
+                                                  (conj (add-map [db datoms] sub-entity)
+                                                        (update entity a #(-> % (disj val) (conj (:db/id sub-entity))))))
+                                                :else ret))
+                                        [db datoms m]
+                                        v)
+                                       (cond (vector? v)
+                                             [db datoms (assoc m a (or (resolve-e v db) v))]
+                                             (map? v)
+                                             (let [sub-entity (resolve-map-e db v)]
+                                               (conj (add-map [db datoms] sub-entity)
+                                                     (assoc m a (:db/id sub-entity))))
+                                             :else ret))
+                                     ret))
                                  [db datoms m]
                                  m)]
     [(assoc-in db [:eav (:db/id m)] m) datoms m]))
@@ -256,7 +256,7 @@
   [[db datoms :as state] m]
   (let [{:as m e :db/id} (resolve-map-e db m)]
     (-> [(assoc-in db [:eav e] m) datoms]
-        (upsert-nested-entities e)
+        (resolve-map-refs e)
         (add-map-indexes e (get-entity db e)))))
 
 (defn- commit-tx [state tx]
@@ -300,10 +300,6 @@
                                                        (sequential? txs) (transaction @conn txs)
                                                        :else (throw (js/Error "Transact! was not passed a valid transaction")))]
        (reset! conn db-after)
-       (when (some? *db-log*)
-         (reset! *db-log* (-> @*db-log*
-                              (assoc :db-after db-after)
-                              (update :datoms into datoms))))
        (when (and notify-listeners? (not *prevent-notify*))
          (doseq [f (vals (:listeners db-after))]
            (f conn tx)))
