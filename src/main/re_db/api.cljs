@@ -20,10 +20,10 @@
 (m/defpartial select-keys {:f '(read/select-keys *conn* _)}
   [id ks])
 
-(m/defpartial entity-ids {:f '(read/entity-ids *conn* _)}
+(m/defpartial ids-where {:f '(read/ids-where *conn* _)}
   [qs])
 
-(m/defpartial entities {:f '(read/entities *conn* _)}
+(m/defpartial where {:f '(read/where *conn* _)}
   [qs])
 
 (m/defpartial contains? {:f '(read/contains? *conn* _)}

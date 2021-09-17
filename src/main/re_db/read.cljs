@@ -3,6 +3,7 @@
   (:require [re-db.core :as db]
             [re-db.fast :as fast]
             [re-db.reagent :as re-db.reagent]
+            [re-db.util :refer [guard]]
             [reagent.core :as reagent]
             [clojure.core :as core]
             [clojure.set :as set]))
@@ -83,42 +84,89 @@
 
 (fast/defmemo-1 reverse-attr reverse-attr*)
 
-(defn touch
-  "Add refs to entity"
-  [conn {e :db/id :as entity}]
-  (reduce-kv
-    (fn [m attr es]
-      (assoc m (reverse-attr attr) es))
-    entity
-    (fast/get-in @conn [:vae e])))
+(defn _av
+  "Returns entity-ids for entities where attribute (a) equals value (v)"
+  [conn [a v :as av]]
+  (let [db @conn
+        schema (db/get-schema db a)
+        v (cond->> v (db/ref? schema) (resolve-id conn))]
+    (re-db.reagent/log-read! conn :_av av)
+    (if (db/indexed? schema)
+      (or (fast/get-in db [:ave a v]) #{})
+      (do
+        (js/console.warn (str "Missing _av index on " a))
+        (->> (:eav @conn)
+             (reduce-kv
+              (fn [out e m]
+                (cond-> out
+                        (= (m a) v)
+                        (conj e)))
+              #{}))))))
 
+(defn _a_
+  "Returns [e v] pairs for entities containing attribute (a).
+   Optional `return-values?` param for returning only the entity-id."
+  ([conn a] (_a_ conn a true))
+  ([conn a return-values?]
+   (re-db.reagent/log-read! conn :_a_ a)
+   (let [db @conn]
+     (if (db/_a_? (db/get-schema db a))
+       (fast/get-in db [:_a_ a])
+       (do
+         (js/console.warn (str "Missing _a_ index on " a))
+         (->> (:eav db)
+              (reduce-kv
+               (if return-values?
+                 (fn [out e m] (if-some [v (m a)]
+                                 (conj out [e v])
+                                 out))
+                 (fn [out e m] (if (some? (m a))
+                                 (conj out e)
+                                 out)))
+               #{})))))))
 
-(defn entity-ids
-  [conn qs]
-  (assert (satisfies? IDeref conn))
-  (->> qs
-       (mapv (fn [q]
-               (set (cond (fn? q)
-                          (reduce-kv (fn [s id entity] (if ^boolean (q entity) (conj s id) s)) #{} (core/get @conn :eav))
-
-                          (keyword? q)
-                          (do (re-db.reagent/log-read! conn :_a_ q)
-                              (reduce-kv (fn [s id entity] (if ^boolean (core/contains? entity q) (conj s id) s)) #{} (core/get @conn :eav)))
-
-                          :else
-                          (let [[attr v] q
-                                db-snap @conn
-                                schema (db/get-schema db-snap attr)
-                                v (cond->> v (db/ref? schema) (resolve-id conn))]
-                            (re-db.reagent/log-read! conn :_av [attr v])
-                            (if (db/indexed? schema)
-                              (fast/get-in db-snap [:ave attr v])
-                              (do
-                                (js/console.warn (str "no index on " attr))
-                                (entity-ids conn [#(= v (core/get % attr))]))))))))
-       (apply set/intersection)))
+(defn ___fn
+  "Return entities for which `f` returns truthy"
+  ([conn f] (___fn conn f true))
+  ([conn f ^boolean return-entity?]
+   (->> (:eav @conn)
+        (reduce-kv
+         (if return-entity?
+           (fn [s e m] (cond-> s (f m) (conj m)))
+           (fn [s e m] (cond-> s (f m) (conj e))))
+         #{}))))
 
 (declare entity Entity)
+
+(defn touch
+  "Add reverse references to entity"
+  ([conn m] (touch conn m true))
+  ([conn {v :db/id :as m} wrap-entity?]
+   (reduce-kv
+    (if wrap-entity?
+      (fn [m a e] (assoc m (reverse-attr a) (entity conn e)))
+      (fn [m a e] (assoc m (reverse-attr a) e)))
+    m
+    (fast/get-in @conn [:vae v]))))
+
+(defn- ids-where-1 [conn q]
+  (cond (vector? q) (_av conn q)
+        (fn? q) (___fn conn q false)
+        (keyword? q) (_a_ conn q false)
+        :else (throw (js/Error. (str "Invalid where-1 clause:" q)))))
+
+(defn ids-where
+  [conn [q & qs]]
+  (reduce (fn [out q]
+            (if (seq out)
+              (set/intersection out (ids-where-1 conn q))
+              (reduced out)))
+          (ids-where-1 conn q)
+          qs))
+
+(defn where
+  [conn qs]
+  (map #(entity conn %) (ids-where conn qs)))
 
 (defn -resolve-id! [^Entity entity !db id]
   ;; entity ids are late-binding, you can pass a lookup ref for an entity that isn't yet in the db.
@@ -168,13 +216,9 @@
 (defn entity [conn id]
   (Entity. conn (resolve-id conn id) false))
 
-(defn entities
-  [conn qs]
-  (map #(entity conn %) (entity-ids conn qs)))
-
 (defn create-conn [schema]
   (doto (db/create-conn schema)
-      (db/listen! ::read re-db.reagent/invalidate-datoms!)))
+    (db/listen! ::read re-db.reagent/invalidate-datoms!)))
 
 (defn listen
   ([conn callback]

@@ -14,37 +14,17 @@
 
 ;; Lookup functions
 
-(defn get-schema [db a]
-  (fast/get-in db [:schema a]))
-
-(defn get-entity [db e]
-  (fast/get-in db [:eav e]))
+(defn get-schema [db a] (fast/get-in db [:schema a]))
+(defn get-entity [db e] (fast/get-in db [:eav e]))
 
 ;; Schema properties are mirrored in javascript properties for fast lookups
 
-(defn indexed?
-  "Returns true if attribute is indexed."
-  [schema]
-  ;(or (some? (:db/index schema)) (some? (:db/unique schema)))
-  (true? (j/get schema :indexed?)))
-
-(defn many?
-  "Returns true for attributes with cardinality `many`, which store a set of values for each attribute."
-  [schema]
-  ;(= :db.cardinality/many (:db/cardinality schema))
-  (true? (j/get schema :many?)))
-
-(defn unique?
-  "Returns true for attributes where :db/index is :db.index/unique."
-  [schema]
-  ;(= :db.unique/identity (:db/unique schema))
-  (true? (j/get schema :unique?)))
-
-(defn ref?
-  "Returns true if attribute is a ref (pointer to another entity or entities)"
-  [schema]
-  ;(= :db.type/ref (:db/valueType schema))
-  (true? (j/get schema :vae?)))
+;; Attribute-schema lookups (fast path)
+(defn indexed? [attr-schema] (true? (j/get attr-schema :indexed?)))
+(defn _a_? [attr-schema] (true? (j/get attr-schema :_a_?)))
+(defn many? [attr-schema] (true? (j/get attr-schema :many?)))
+(defn unique? [attr-schema] (true? (j/get attr-schema :unique?)))
+(defn ref? [attr-schema] (true? (j/get attr-schema :vae?)))
 
 (defn resolve-e
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
@@ -61,7 +41,10 @@
        "; attempted to write duplicate value " v " on id " e
        " but already have " pe "."))
 
-(defn set-unique [a v]
+(defn set-unique
+  "Returns a checked setter for unique attributes
+  - throws a meaningful error if encounters a non-empty set"
+  [a v]
   (fn [coll e]
     (if (seq coll)
       (throw (js/Error. (unique-err-msg a v e coll)))
@@ -88,22 +71,35 @@
              db)]
     db))
 
+(defn compindex [[f & fs]]
+  (reduce (fn [f1 f2]
+            (fn [db e a v pv]
+              (f2 (f1 db e a v pv) e a v pv))) f fs))
 
 (defn make-index-fn [schema]
   (let [is-ref (ref? schema)
         is-unique (unique? schema)
         is-many (many? schema)
-        is-indexed (indexed? schema)]
-    (when (or is-ref is-indexed)
-      (fn [db e a v pv]
-        (if is-many
-          ;; cardinality-many attrs must update index for each item in set
-          (as-> db db
-                ;; additions
-                (reduce (fn [db v] (update-index db e a v nil is-ref is-unique is-indexed)) db v)
-                ;; removals
-                (reduce (fn [db pv] (update-index db e a nil pv is-ref is-unique is-indexed)) db pv))
-          (update-index db e a v pv is-ref is-unique is-indexed))))))
+        is-indexed (indexed? schema)
+        _a_? (_a_? schema)]
+    (compindex
+     (cond-> []
+             (or is-ref is-indexed)
+             (conj (fn [db e a v pv]
+                     (if is-many
+                       ;; cardinality-many attrs must update index for each item in set
+                       (as-> db db
+                             ;; additions
+                             (reduce (fn [db v] (update-index db e a v nil is-ref is-unique is-indexed)) db v)
+                             ;; removals
+                             (reduce (fn [db pv] (update-index db e a nil pv is-ref is-unique is-indexed)) db pv))
+                       (update-index db e a v pv is-ref is-unique is-indexed))))
+             _a_?
+             (conj (fn [db e a v pv]
+                     (let [exists? (if is-many (seq v) (some? v))]
+                       (if exists?
+                         (update-in db [:_a_ a] conj-set e)
+                         (update-in db [:_a_ a] disj e)))))))))
 
 (defn- update-indexes [db e a v pv schema]
   (if-some [index (j/get schema :index-fn)]
@@ -327,7 +323,8 @@
                                              :indexed? (boolean (or index unique?))
                                              :many? (= cardinality :db.cardinality/many)
                                              :unique? (boolean unique?)
-                                             :vae? (= valueType :db.type/ref))
+                                             :vae? (= valueType :db.type/ref)
+                                             :_a_? (:db.index/_a_ attr-schema))
                        attr-schema (j/assoc! attr-schema :index-fn (make-index-fn attr-schema))]
                    (-> db-schema
                        (assoc attr attr-schema)

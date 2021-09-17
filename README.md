@@ -4,26 +4,26 @@ Currently ALPHA.
 
 Re-DB is a fast, reactive client-side triple-store for handling global state in ClojureScript apps. It is inspired by [Datomic](https://www.datomic.com) and [DataScript](https://github.com/tonsky/datascript) and works in conjunction with [Reagent](https://reagent-project.github.io).
 
-re: "fast" - compared to DataScript, re-db makes different tradeoffs for performance - transactions are 5-10x faster, depending on your schema and entity size. Much of this gain is due to our data layout - entities are stored as maps, with indexes off to the side. When we transact a list of maps, not much work has to be done for keys that aren't indexed. This is especially helpful during page load, when many apps face slow down due to ingesting an initial data set from the server. (TODO: benchmark reads / query alternatives)
+**re: "fast"** - compared to DataScript, re-db makes different tradeoffs for performance - transactions are 5-10x faster, depending on your schema and entity size. Much of this gain is due to our data layout - entities are stored as maps, with indexes off to the side. When we transact a list of maps, not much work has to be done for keys that aren't indexed. This is especially helpful during page load, when many apps face slow down due to ingesting an initial data set from the server. (TODO: benchmark reads / query alternatives)
 
-re: "reactive" - re-db's built-in [Reagent](https://reagent-project.github.io) support means that views update automatically when underlying data changes. Behind the scenes we track what "patterns" you're reading at a fine-grained level. Unlike prior art in this space (see [posh](https://github.com/mpdairy/posh)) we don't attempt to support datalog, only lookups and an entity api. If you're in love with datalog you probably won't like this. But I find that Datalog is often overkill for simple use-cases, where it's often harder to read than direct lookups & relationship traversals via lookups.
+**re: "reactive"** - re-db's built-in [Reagent](https://reagent-project.github.io) support means that views update automatically when underlying data changes. Behind the scenes we track what "patterns" you're reading at a fine-grained level. Unlike prior art in this space (see [posh](https://github.com/mpdairy/posh)) we don't attempt to support datalog, only lookups and an entity api. This may not be your cup of tea; personally I often find Datalog to be overkill, and more difficult to read/write than lookups + core functions like filter/sort.
 
 ## Background
 
 Some of the motivating ideas behind this (style of) library are:
 
 - Data is modelled as a collection of entities (clojure maps)
-- Entities can point to each other, forming a graph (schema: `{:db/valueType :db.type/ref}`)
-- Attributes can be indexed, for fast (simple) queries (schema: `{:db/index true}`)
-- Unique attributes can be used to identify entities (schema: `{:db/unique :db.unique/identity}`)
-- Attributes can have "sets" as values - each value is then indexed (schema: `{:db.cardinality :db.cardinality/many}`)
+- Entities can point to each other, forming a graph. Schema: `{:db/valueType :db.type/ref}`
+- Attributes can be indexed, for fast (simple) queries. Schema: `{:db/index true}`
+- Unique attributes can be used to identify entities. Schema: `{:db/unique :db.unique/identity}`
+- Attributes can have "sets" as values - each value is then indexed. Schema: `{:db.cardinality :db.cardinality/many}`
 - The data layer "cooperates" with a view layer so that views update (only) when dependent data changes.
 
 The schema format is consistent with DataScript.
 
 ## Usage
 
-It can be convenient to use just one re-db namespace, `re-db.api :as d`, for reads and writes throughout an app. This will use a database located at `re-db.api/*conn*`.
+For convenience we offer a `re-db.api` namespace which reads & writes to a default database (`re-db.api/*conn*`).
 
 ```clj
 (ns my-app.core
@@ -73,11 +73,24 @@ To write data, pass a collection of transactions to `d/transact!`. There are two
 
 ### Entity api
 
+Like Datomic and DataScript, re-db has an `Entity` type. Unlike the alternatives, our entity type wraps the db _connection_ rather than a snapshot; this is because we want to use entities within Reagent views and expect the entity to update/invalidate when the db changes.
 
+What you can do with an entity:
+
+- Dereference it to get the raw entity map - `@person`
+- Look up any attribute - (:person/name person)
+  - if it is a relationship attribute, the result will also be wrapped as an `Entity`
+- Look up reverse attributes to find other entities pointing to this one - `(:pet/_owner person)`
+
+Reads are tracked so that the containing Reagent view only updates when observed attributes change. If you dereference an entity, the view depends on the "whole" entity.
+
+When creating an entity from a lookup ref, eg. `(entity [:email "hello@example.com"])`, we use late binding so that the entity doesn't need to exist (yet). Can be hehlpful when waiting for the network.
 
 ### Reading data
 
-Read a single entity's map by passing its ID to `d/entity`.
+(alternatives to the entity api)
+
+Read a single entity's map by passing its ID to `d/get`.
 
 ```clj
 (d/get 1)
@@ -109,11 +122,11 @@ The `re-db.read` namespace (which sits behind `re-db.api`) integrates with Reage
 
 Behind the scenes, we track the "patterns" observed by the view, and match these on transaction-reports.
 
-    _Pattern_            _Key_                _Description_
-    id                   :e__                 the entity with `id`
-    [id attr]            :ea_                 an entity-attribute pair
-    [attr val]           :_av                 an attribute-value pair
-    attr                 :_a_                 an attribute
+    Pattern     Value        Description
+    :e__        id           the entity with `id`
+    :ea_        [id attr]    an entity-attribute pair
+    :_av        [attr val]   an attribute-value pair
+    :_a_        attr         an attribute
 
 To register a callback to be fired when a pattern invalidates (unnecessary for the reagent integration), call `d/listen` with a map of the form `{<pattern> [<...values...>]}` (see the above table for how values should be formatted for each pattern), along with a function. The provided function will called at most once per transaction and receives only the bound database `conn` as an argument. `d/listen` returns an "unlisten" function for stopping the subscription.
 
@@ -146,27 +159,25 @@ Use `d/merge-schema!` to update indexes.
 
 ### Finding entities
 
-Use `d/entity-ids` and `d/entities` to find entities which match a collection of predicates, each of which should be:
+Use `d/where` to find entities that match a list of clauses, each of which should be:
 
 1. An attribute-value **vector**, to match entities which contain the attribute-value pair. If the attribute is indexed, this will be very fast. Logs an attribute-value pattern read (:_av).
 
 ```clj
-(d/entity-ids [[:name "Matt"]])
-;; or
-(d/entities [[:name "Matt"]])
+(d/where [[:name "Matt"]])
 ```
 
 2. A **keyword**, to match entities that contain the keyword. Logged as an attribute pattern read (:_a_).
 
 ```clj
-(d/entity-ids [:name])
-;; or
-(d/entities [:name])
+(d/where [:name])
 ```
 
 3. A **predicate function**, to match entities for which the predicate returns true.
 
 ```clj
-(d/entity-ids [#(= (:name %) "Matt")])
-(d/entities [#(= (:name %) "Matt")])
+(d/where [#(= (:name %) "Matt")])
 ```
+
+Clauses are evaluated in order and joined using `clojure.set/intersection` (`AND`),
+with early termination when the result set is empty.
