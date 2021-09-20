@@ -4,7 +4,7 @@
             [re-db.read :as read]
             [re-db.macros :as m]))
 
-(def ^:dynamic *conn* (read/create-conn {}))
+(defonce ^:dynamic *conn* (read/create-conn {}))
 
 (m/defpartial entity {:f '(read/entity *conn* _)}
   [id])

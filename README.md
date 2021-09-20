@@ -1,6 +1,6 @@
 # Re-DB
 
-Currently ALPHA.
+Currently ALPHA (routine change/breakage)
 
 Re-DB is a fast, reactive client-side triple-store for handling global state in ClojureScript apps. It is inspired by [Datomic](https://www.datomic.com) and [DataScript](https://github.com/tonsky/datascript) and works in conjunction with [Reagent](https://reagent-project.github.io).
 
@@ -13,11 +13,13 @@ Re-DB is a fast, reactive client-side triple-store for handling global state in 
 Some of the motivating ideas behind this (style of) library are:
 
 - Data is modelled as a collection of entities (clojure maps)
-- Entities can point to each other, forming a graph. Schema: `{:db/valueType :db.type/ref}`
-- Attributes can be indexed, for fast (simple) queries. Schema: `{:db/index true}`
-- Unique attributes can be used to identify entities. Schema: `{:db/unique :db.unique/identity}`
-- Attributes can have "sets" as values - each value is then indexed. Schema: `{:db.cardinality :db.cardinality/many}`
-- The data layer "cooperates" with a view layer so that views update (only) when dependent data changes.
+- Entities can point to each other, forming a graph.
+- Attributes can be indexed, to speed up reads (at the cost of slower transactions).
+- Unique attributes can be used to identify entities.
+- Attributes can be plural (:db.cardinality/many), in which case we store a set of values, each of which is indexed.
+- A "reading" layer tracks fine-grained "patterns" that are accessed in the db, for efficient "invalidation" of views when new data is transacted.
+
+Data is "addressable" independent of the runtime, programming language or program structure (eg. `(d/entity [:email "xx"])` not `some-namespace/the-person`).
 
 The schema format is consistent with DataScript.
 
@@ -78,13 +80,13 @@ Like Datomic and DataScript, re-db has an `Entity` type. Unlike the alternatives
 What you can do with an entity:
 
 - Dereference it to get the raw entity map - `@person`
-- Look up any attribute - (:person/name person)
+- Look up any attribute - `(:person/name person)`
   - if it is a relationship attribute, the result will also be wrapped as an `Entity`
 - Look up reverse attributes to find other entities pointing to this one - `(:pet/_owner person)`
 
 Reads are tracked so that the containing Reagent view only updates when observed attributes change. If you dereference an entity, the view depends on the "whole" entity.
 
-When creating an entity from a lookup ref, eg. `(entity [:email "hello@example.com"])`, we use late binding so that the entity doesn't need to exist (yet). Can be hehlpful when waiting for the network.
+When creating an entity from a lookup ref, eg. `(entity [:email "hello@example.com"])`, we use late binding so that the entity doesn't need to exist (yet). Can be helpful when waiting for the network.
 
 ### Reading data
 
@@ -178,6 +180,18 @@ Use `d/where` to find entities that match a list of clauses, each of which shoul
 ```clj
 (d/where [#(= (:name %) "Matt")])
 ```
+_(question - should d/where accept varargs instead of a vector?)_
+
 
 Clauses are evaluated in order and joined using `clojure.set/intersection` (`AND`),
 with early termination when the result set is empty.
+
+## Todo
+
+- a way to log the "currently subscribed" patterns at any point in a reaction
+- add indexes on-the-fly based on usage - this means less up-front schema, + potential performance advantages (frontloading all index-building makes initial pageload slower - this can be spread out & done on-demand)
+- more attention paid to history / time-travel with datom logs
+- more tests
+- more attention to "query"/filtering api (d/where)
+- allow to specify a sort-order for an ave index?
+- perhaps more efficient update of multi-step queries during transact can be achieved by using cached intermediate values instead of valueless invalidations

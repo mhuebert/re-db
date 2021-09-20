@@ -1,8 +1,11 @@
 (ns re-db.reactivity-test
   (:require [cljs.test :refer-macros [deftest is testing]]
             [re-db.api :as d]
+            [re-db.read :refer [create-conn]]
             [reagent.core :as r])
   (:require-macros [re-db.test-helpers :refer [throws]]))
+
+(reset! d/*conn* @(create-conn {}))
 
 (defonce rx (atom nil))
 

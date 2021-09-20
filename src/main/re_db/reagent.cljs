@@ -26,18 +26,6 @@
 (j/defn trigger! [^Invalidator this]
   (reduce-kv (fn [_ k f] (f k this 0 1) nil) nil (.-watches this)))
 
-(defn pattern-invalidators
-  "Returns version-atoms associated with patterns.
-
-  value-map is of form {<pattern-key> {<pattern> #{...set of values...}}}.
-  pattern-map is of form {<pattern-key> #{...set of patterns...}}"
-  [patterns listeners]
-  (reduce-kv (fn [out pattern-k pattern-vs]
-               (reduce (fn [out pattern-v]
-                         (if-some [version (fast/get-in listeners [pattern-k pattern-v])]
-                           (conj out version)
-                           out)) out pattern-vs)) #{} patterns))
-
 (defn invalidate! [conn patterns]
   (when-some [invalidators (:invalidators @conn)]
     (doseq [[pattern-k pattern-vs] patterns
@@ -100,18 +88,19 @@
   ([datoms many?]
    (datom-patterns datoms many? [:e__ :ea_ :_av :_a_]))
   ([datoms many? pattern-keys]
-   (let [f (compr (for [[k f] {:e__ #(update %1 :e__ conj (%2 0))
-                               :ea_ #(update %1 :ea_ conj (subvec %2 0 2))
-                               :_av #(if (many? (%2 1))
-                                       (update %1 :_av
-                                               (fn [_av]
-                                                 (reduce
-                                                  (fn [patterns v] (conj patterns [(%2 1) v]))
-                                                  _av
-                                                  (into (%2 2) (%2 3)))))
-                                       (update %1 :_av conj [(subvec %2 1 3)
-                                                             [(%2 1) (%2 3)]]))
-                               :_a_ #(update %1 :_a_ conj (%2 1))}
+   (let [f (compr (for [[k f] {:e__ (fn [patterns [e]] (update patterns :e__ conj e))
+                               :ea_ (fn [patterns [e a]] (update patterns :ea_ conj [e a]))
+                               :_av (fn [patterns [_e a v pv]]
+                                      (if (many? a)
+                                        (update patterns :_av
+                                                (fn [_av]
+                                                  (reduce
+                                                   (fn [patterns v]
+                                                     (conj patterns [a v]))
+                                                   _av
+                                                   (into v pv))))
+                                        (update patterns :_av conj [a v] [a pv])))
+                               :_a_ (fn [patterns [_ a]] (update patterns :_a_ conj a))}
                         :when (contains? pattern-keys k)]
                     f))]
      (reduce f empty-patterns datoms))))

@@ -23,7 +23,7 @@
 (defn _a_? [attr-schema] (true? (j/get attr-schema :_a_?)))
 (defn many? [attr-schema] (true? (j/get attr-schema :many?)))
 (defn unique? [attr-schema] (true? (j/get attr-schema :unique?)))
-(defn ref? [attr-schema] (true? (j/get attr-schema :vae?)))
+(defn ref? [attr-schema] (true? (j/get attr-schema :ref?)))
 
 (defn resolve-e
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
@@ -183,14 +183,14 @@
    nil   => a unique attribute was found, but no matching entry in the db
    false => no unique attributes found in `m`"
   [db m]
-  (let [unique-attrs (-> db :schema ::unique-attrs)]
+  (let [uniques (-> db :schema :db/uniques)]
     (reduce (fn [ret a]
               (fast/if-found [v (m a)]
                 (if-some [e (resolve-e [a v] db)]
                   (reduced e)
                   nil)
                 ret)) false
-            unique-attrs)))
+            uniques)))
 
 ;; adds :db/id to entity based on unique attributes
 (defn- resolve-map-e [db m]
@@ -250,12 +250,12 @@
                                      ret))
                                  [db datoms m]
                                  m)]
-    [(assoc-in db [:eav (:db/id m)] m) datoms m]))
+    [(assoc-in db [:eav (:db/id m)] m) datoms]))
 
 (defn- add-map
   [[db datoms :as state] m]
   (let [{:as m e :db/id} (resolve-map-e db m)]
-    (-> [(assoc-in db [:eav e] m) datoms]
+    (-> [(update-in db [:eav e] merge m) datoms]
         (resolve-map-refs e)
         (add-map-indexes e (get-entity db e)))))
 
@@ -310,23 +310,44 @@
   []
   (str (uuid-utils/make-random-uuid)))
 
+(def sugars {:db/plurals {:db/cardinality :db.cardinality/many}
+             :db/refs {:db/valueType :db.type/ref}
+             :db/uniques {:db/unique :db.unique/identity}
+             :db/_a_ {:db.index/_a_ true}
+             :db/indexes {:db/index {}}})
+
+(defn- desugar [schema]
+  (->> sugars
+       (reduce-kv (fn [schema k m]
+                    (reduce #(update %1 %2 (fnil merge {}) m) schema (get schema k))) schema)))
+
 (defn normalize-schema [schema]
-  (let [schema (assoc schema :db/ident {:db/unique :db.unique/identity})]
+  (let [schema (-> (desugar schema)
+                   (assoc :db/ident {:db/unique :db.unique/identity}))]
     (reduce-kv (fn [db-schema attr {:as attr-schema
                                     :db/keys [index unique cardinality valueType]}]
-                 ;; copy schema values to javascript properties for fast access
-                 (let [unique? (= unique :db.unique/identity)
-                       attr-schema (j/assoc! attr-schema
-                                             :indexed? (boolean (or index unique?))
-                                             :many? (= cardinality :db.cardinality/many)
-                                             :unique? (boolean unique?)
-                                             :vae? (= valueType :db.type/ref)
-                                             :_a_? (:db.index/_a_ attr-schema))
-                       attr-schema (j/assoc! attr-schema :index-fn (make-index-fn attr-schema))]
-                   (-> db-schema
-                       (assoc attr attr-schema)
-                       (cond-> unique?
-                               (update ::unique-attrs (fnil conj #{}) attr)))))
+                 (if (sugars attr)
+                   db-schema
+                   ;; copy schema values to javascript properties for fast access
+                   (let [unique? (= unique :db.unique/identity)
+                         index? (boolean (or index unique?))
+                         plural? (= cardinality :db.cardinality/many)
+                         ref? (= valueType :db.type/ref)
+                         _a_? (:db.index/_a_ attr-schema)
+                         attr-schema (j/assoc! attr-schema
+                                               :indexed? index?
+                                               :many? plural?
+                                               :unique? unique?
+                                               :ref? ref?
+                                               :_a_? _a_?)
+                         attr-schema (j/assoc! attr-schema :index-fn (make-index-fn attr-schema))]
+                     (-> db-schema
+                         (assoc attr attr-schema)
+                         (cond-> unique? (update :db/uniques conj attr)
+                                 index? (update :db/indexes conj attr)
+                                 plural? (update :db/plurals conj attr)
+                                 ref? (update :db/refs conj attr)
+                                 _a_? (update :db/_a_ conj attr))))))
                schema schema)))
 
 (defn merge-schema!

@@ -40,7 +40,7 @@
     (is (= {:db/id "fred"
             :name "Fred"
             :_authors #{"1"}
-            :pet "fido"} (read/touch conn (read/get conn "fred") false))
+            :pet "fido"} (read/touch* conn (read/get conn "fred")))
         "refs with cardinality-many")))
 
 (deftest upserts
@@ -197,7 +197,8 @@
                             :owner "fred"}]))]
     (is (= {:db/id "fred"
             :name "Fred"
-            :_owner #{"ball"}} (read/touch db (read/get db "fred") false))
+            :_owner #{"ball"}}
+           (read/touch* db (read/get db "fred")))
         "touch adds refs to entity"))
 
   (let [db (doto (d/create-conn {:authors {:db/valueType :db.type/ref
@@ -215,68 +216,107 @@
     (is (= {:db/id "fred"
             :name "Fred"
             :_authors #{"1"}
-            :pet "fido"} (read/touch db (read/get db "fred") false))
+            :pet "fido"} (read/touch* db (read/get db "fred")))
         "refs with cardinality-many")
     (is (= {:db/id "fido"}
            (read/get db "fido")))))
 
-(deftest cardinality-many
-  (let [db (doto (d/create-conn {:children {:db/cardinality :db.cardinality/many
-                                            :db/index true}})
-             (d/transact! [{:db/id "fred"
-                            :children #{"pete"}}]))]
+(deftest touch-refs
+  (let [conn (doto  (d/create-conn {:db/refs [:children]
+                                    :db/many [:children]})
+               (d/transact! [{:db/id "A"
+                              :children #{"A.0"}}
+                             {:db/id "A.0"
+                              :children #{"A.1" "A"}}
+                             {:db/id "A.1"
+                              :children #{"A.2"}}
+                             {:db/id "A.2"
+                              :children #{"A.3"}}
+                             {:db/id "A.3"
+                              :children #{"A.4"}}]))]
+    (is (-> (read/entity conn "A")
+            (read/touch [{:children 3}])
+            :children :children :children :children :children
+            (= #{"A.4"})))
 
-    (is (true? (contains? (get-in @db [:ave :children]) "pete"))
+    (is (-> (read/entity conn "A")
+            (read/touch [{:children 2}])
+            :children :children :children :children
+            (= #{"A.3"})))
+
+    (is (-> (read/entity conn "A")
+            (read/touch [{:children :...}])
+            :children :children :children :children :children
+            (= #{"A.4"})))))
+
+#_(comment
+   ;; idea: schemaless "touch" - pass in pull syntax to crawl relationships
+
+   ;; crawl "children
+   (d/touch e [:children])
+   ;; crawl children-of-children up to 4 levels deep
+   (d/touch e [{:children 4}])
+   ;; crawl children-of-children infinitely deep
+   (d/touch e [{:children :...}])
+   )
+
+(deftest cardinality-many
+  (let [conn (doto (d/create-conn #:db{:plurals [:children]
+                                       :indexes [:children]})
+               (d/transact! [{:db/id "fred"
+                              :children #{"pete"}}]))]
+
+    (is (true? (contains? (get-in @conn [:ave :children]) "pete"))
         "cardinality/many attribute can be indexed")
 
     ;; second child
-    (d/transact! db [[:db/add "fred" :children #{"sally"}]])
+    (d/transact! conn [[:db/add "fred" :children #{"sally"}]])
 
 
-    (is (= #{"sally" "pete"} (read/get db "fred" :children))
+    (is (= #{"sally" "pete"} (read/get conn "fred" :children))
         "cardinality/many attribute returned as set")
 
     (is (= #{"fred"}
-           (read/ids-where db [[:children "sally"]])
-           (read/ids-where db [[:children "pete"]]))
+           (read/ids-where conn [[:children "sally"]])
+           (read/ids-where conn [[:children "pete"]]))
         "look up via cardinality/many index")
 
 
     (testing "remove value from cardinality/many attribute"
-      (d/transact! db [[:db/retract "fred" :children #{"sally"}]])
-      (is (= #{} (read/ids-where db [[:children "sally"]]))
+      (d/transact! conn [[:db/retract "fred" :children #{"sally"}]])
+      (is (= #{} (read/ids-where conn [[:children "sally"]]))
           "index is removed on retraction")
-      (is (= #{"fred"} (read/ids-where db [[:children "pete"]]))
+      (is (= #{"fred"} (read/ids-where conn [[:children "pete"]]))
           "index remains for other value")
-      (is (= #{"pete"} (read/get db "fred" :children))
+      (is (= #{"pete"} (read/get conn "fred" :children))
           "attribute has correct value"))
 
 
-    (d/transact! db [{:db/id "fred" :children #{"fido"}}])
-    (is (= #{"fido"} (read/get db "fred" :children))
+    (d/transact! conn [{:db/id "fred" :children #{"fido"}}])
+    (is (= #{"fido"} (read/get conn "fred" :children))
         "Map transaction replaces entire set")
 
 
     (testing "unique attrs, duplicates"
 
-      (d/merge-schema! db {:ssn {:db/unique :db.unique/identity}
-                           :pets {:db/cardinality :db.cardinality/many
-                                  :db/unique :db.unique/identity}})
+      (d/merge-schema! conn {:ssn {:db/unique :db.unique/identity}
+                             :pets {:db/cardinality :db.cardinality/many
+                                    :db/unique :db.unique/identity}})
 
 
       ;; cardinality single
-      (d/transact! db [[:db/add "fred" :ssn "123"]])
-      (is (= "fred" (:db/id (read/get db [:ssn "123"]))))
-      (throws (d/transact! db [[:db/add "herman" :ssn "123"]])
+      (d/transact! conn [[:db/add "fred" :ssn "123"]])
+      (is (= "fred" (:db/id (read/get conn [:ssn "123"]))))
+      (throws (d/transact! conn [[:db/add "herman" :ssn "123"]])
               "Cannot have two entities with the same unique attr")
 
       ;; cardinality many
-      (d/transact! db [[:db/add "fred" :pets #{"fido"}]])
-      (is (= "fred" (:db/id (read/get db [:pets "fido"]))))
-      (throws (d/transact! db [[:db/add "herman" :pets #{"fido"}]])
+      (d/transact! conn [[:db/add "fred" :pets #{"fido"}]])
+      (is (= "fred" (:db/id (read/get conn [:pets "fido"]))))
+      (throws (d/transact! conn [[:db/add "herman" :pets #{"fido"}]])
               "Two entities with same unique :db.cardinality/many attr")
-      (throws (d/transact! db [{:db/id "herman"
-                                :pets #{"fido"}}])
+      (throws (d/transact! conn [{:db/id "herman"
+                                  :pets #{"fido"}}])
               "Two entities with same unique :db.cardinality/many attr"))))
 
 (deftest pattern-listeners

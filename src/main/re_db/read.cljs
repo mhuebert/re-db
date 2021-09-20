@@ -79,10 +79,20 @@
               {}
               ks))))
 
+;; attribute reversal
+
+(defn reverse-attr? [a]
+  (= "_" (.charAt (name a) 0)))
+
 (defn reverse-attr* [attr]
   (keyword (namespace attr) (str "_" (name attr))))
 
 (fast/defmemo-1 reverse-attr reverse-attr*)
+
+(defn forward-attr* [attr]
+  (keyword (namespace attr) (subs (name attr) 1)))
+
+(fast/defmemo-1 forward-attr forward-attr*)
 
 (defn _av
   "Returns entity-ids for entities where attribute (a) equals value (v)"
@@ -138,16 +148,75 @@
 
 (declare entity Entity)
 
-(defn touch
-  "Add reverse references to entity"
-  ([conn m] (touch conn m true))
-  ([conn {v :db/id :as m} wrap-entity?]
+(defn touch*
+  "Add reverse references to entity map"
+  ([conn {v :db/id :as m}]
    (reduce-kv
-    (if wrap-entity?
-      (fn [m a e] (assoc m (reverse-attr a) (entity conn e)))
-      (fn [m a e] (assoc m (reverse-attr a) e)))
+    (fn [m a e] (assoc m (reverse-attr a) e))
     m
     (fast/get-in @conn [:vae v]))))
+
+(defn- pull* [{:as m e :db/id} pullv db found]
+  (when m
+    (->> pullv
+         (reduce-kv
+          (fn pull [m i pullexpr]
+            (let [[a recurse] (if (keyword? pullexpr)
+                                [pullexpr false]
+                                (first pullexpr))
+                  recursions (if (zero? recurse) false recurse)
+                  _ (assert (or (core/contains? #{false :...} recurse) (number? recurse))
+                            (str "Recursion parameter must be a number or :..., not " recurse))
+                  set-a a
+                  is-reverse? (reverse-attr? a)
+                  a (cond-> a is-reverse? forward-attr)
+                  attr-schema (db/get-schema db a)
+                  is-many (db/many? attr-schema)
+                  ;; ids of related entities
+                  ids (if is-reverse?
+                       (fast/get-in db [:vae e a])
+                       (m a))
+                  entities (when (seq ids)
+                             (if recursions
+                               (let [found (conj found e)
+                                     pullv (if (number? recursions)
+                                             ;; decrement recurse parameter
+                                             (update-in pullv [i a] dec)
+                                             pullv)]
+                                 (into #{}
+                                       (keep #(if (and (= :... recursions) (found %))
+                                                %
+                                                (some-> (db/get-entity db %)
+                                                        (pull* pullv db found))))
+                                       ids))
+                               (into #{} (keep #(db/get-entity db %)) ids)))]
+              (cond-> m
+                      (seq entities)
+                      (assoc set-a (cond-> entities (not is-many) first)))))
+          m))))
+
+(defn touch
+  "Returns entity as map, following relationships specified
+   in pull expression. (Entire entities are always returned,
+   pull only opts-in to following a relationship)"
+  ([^Entity entity]
+   (let [conn (.-conn entity)
+         m @entity
+         db @conn]
+     (let [with-reverse-refs
+           (reduce-kv
+            (fn [m a e] (assoc m (reverse-attr a) (entity conn e)))
+            m
+            (fast/get-in db [:vae (:db/id m)]))]
+       (reduce-kv (fn [m a v]
+                    (let [attr-schema (db/get-schema db a)]
+                      (if (db/ref? attr-schema)
+                        (if (db/many? attr-schema)
+                          (mapv #(entity conn %) v)
+                          (assoc m a (entity conn v)))
+                        m))) with-reverse-refs m))))
+  ([^Entity entity pull]
+   (pull* @entity pull @(.-conn entity) #{})))
 
 (defn- ids-where-1 [conn q]
   (cond (vector? q) (_av conn q)
@@ -187,26 +256,24 @@
       (re-db.reagent/log-read! conn :e__ id)
       (fast/get-in @conn [:eav id])))
   ILookup
-  (-lookup [this attr]
+  (-lookup [this a]
     (let [id (-resolve-id! this conn id)
-          reverse-attr? (= "_" (.charAt (name attr) 0))
-          attr (if reverse-attr?
-                 (keyword (namespace attr) (subs (name attr) 1))
-                 attr)
+          is-reverse (reverse-attr? a)
+          a (cond-> a is-reverse forward-attr)
           db @conn
-          schema (-> db (core/get :schema) (core/get attr))]
-      (if reverse-attr?
+          schema (-> db (core/get :schema) (core/get a))]
+      (if is-reverse
         (do
-          (re-db.reagent/log-read! conn :_av [attr id])
-          (mapv #(entity conn %) (fast/get-in db [:vae id attr])))
-        (let [val (fast/get-in @conn [:eav id attr])
+          (re-db.reagent/log-read! conn :_av [a id])
+          (mapv #(entity conn %) (fast/get-in db [:vae id a])))
+        (let [val (fast/get-in @conn [:eav id a])
               ref? (db/ref? schema)
               many? (db/many? schema)]
-          (re-db.reagent/log-read! conn :ea_ [id attr])
+          (re-db.reagent/log-read! conn :ea_ [id a])
           (if ref?
             (if many?
               (mapv #(entity conn %) val)
-              (entity conn val))
+              (some->> val (entity conn)))
             val)))))
   (-lookup [o attr not-found]
     (if-some [val (-lookup o attr)]
