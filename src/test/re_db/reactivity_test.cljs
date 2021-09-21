@@ -1,5 +1,5 @@
 (ns re-db.reactivity-test
-  (:require [cljs.test :refer-macros [deftest is testing]]
+  (:require [cljs.test :refer-macros [deftest is are testing]]
             [re-db.api :as d]
             [re-db.core :as db]
             [re-db.read :as read :refer [create-conn]]
@@ -57,18 +57,35 @@
   (testing
    (reset! d/*conn* @(create-conn {:a/id {:db/unique :db.unique/identity}
                                    :b/id {:db/unique :db.unique/identity}}))
-    (let [test-patterns (fn [f patterns]
-                          (let [rx (r/track! (fn [] (f) (is (= patterns (current-patterns)))))]
+    (let [get-patterns (fn [f]
+                          (let [res (atom nil)
+                                rx (r/track! (fn [] (f) (reset! res (current-patterns))))]
                             (r/flush)
-                            (r/dispose! rx)))]
+                            (r/dispose! rx)
+                            @res))]
 
-      (test-patterns #(d/get 1) {:e__ #{1}})
-      (test-patterns #(d/get [:a/id 1]) {:_av #{[:a/id 1]}})
-      (test-patterns #(d/get [:a/id nil]) nil)
-      (test-patterns #(d/get [:a/id [:b/id 1]]) {:_av #{[:b/id 1]}})
-      (d/transact! [{:db/id "b" :b/id 1}])
-      (test-patterns #(d/get [:a/id [:b/id 1]]) {:_av #{[:b/id 1]
-                                                          [:a/id "b"]}}))))
+      (are [f patterns]
+        (= (get-patterns f) patterns)
+
+        #(d/get 1)
+        {:e__ #{1}}
+
+        #(d/get [:a/id 1])
+        {:_av #{[:a/id 1]}}
+
+        #(d/get [:a/id nil])
+        nil
+
+        #(d/get [:a/id [:b/id 1]])
+        {:_av #{[:b/id 1]}}
+
+        #(d/transact! [{:db/id "b" :b/id 1}])
+        nil
+
+        #(d/get [:a/id [:b/id 1]])
+        {:_av #{[:b/id 1]
+                [:a/id "b"]}}
+        ))))
 
 (comment
  (deftest pattern-listeners

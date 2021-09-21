@@ -1,5 +1,5 @@
 (ns re-db.read
-  (:refer-clojure :exclude [get get-in select-keys contains? peek])
+  (:refer-clojure :exclude [get contains? peek])
   (:require [re-db.core :as db]
             [re-db.fast :as fast]
             [re-db.reagent :as re-db.reagent]
@@ -8,27 +8,31 @@
             [clojure.core :as core]
             [clojure.set :as set]))
 
-(defn resolve-id
+(defn resolve-lookup-ref [conn [a v :as e]]
+  (if (vector? v)                                           ;; nested lookup ref
+    (resolve-lookup-ref conn [a (resolve-lookup-ref conn v)])
+    (when v
+      (re-db.reagent/log-read! conn :_av e)
+      (first (fast/get-in @conn [:ave a v])))))
+
+(defn resolve-e
   "Returns id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
   Lookup refs are only supported for indexed attributes.
   The 3-arity version is for known lookup refs, and does not check for uniqueness."
   [conn e]
-  (if (vector? e)
-    (if (vector? (e 1))                                     ;; nested lookup ref
-      (resolve-id conn [(e 0) (resolve-id conn (e 1))])
-      (do (when (e 1) (re-db.reagent/log-read! conn :_av e))
-          (db/resolve-e e @conn)))
-    (db/resolve-e e @conn)))
+  (cond->> e
+           (vector? e)
+           (resolve-lookup-ref conn)))
 
 (defn contains?
   "Returns true if entity with given id exists in db."
   [conn e]
-  (let [e (resolve-id conn e)]
+  (let [e (resolve-e conn e)]
     (when (some? e) (re-db.reagent/log-read! conn :e__ e))
     (core/contains? (core/get @conn :eav) e)))
 
 (defn peek
-  "Get attribute in entity with given id."
+  "Read entity or attribute without reactivity"
   ([conn e]
    (let [db @conn]
      (when-some [e (db/resolve-e e db)]
@@ -39,48 +43,18 @@
    (core/get (peek conn e) attr not-found)))
 
 (defn get
-  "Get attribute in entity with given id."
+  "Read entity or attribute reactively"
   ([conn e]
-   (when-some [id (resolve-id conn e)]
+   (when-some [id (resolve-e conn e)]
      (re-db.reagent/log-read! conn :e__ id)
      (fast/get-in @conn [:eav id])))
   ([conn e attr]
    (get conn e attr nil))
   ([conn e attr not-found]
-   (if-some [id (resolve-id conn e)]
+   (if-some [id (resolve-e conn e)]
      (do (re-db.reagent/log-read! conn :ea_ [id attr])
          (core/get (fast/get-in @conn [:eav id]) attr not-found))
      not-found)))
-
-(defn get-in
-  "Get-in the entity with given id."
-  ([conn ks]
-   (let [[e attr & ks] ks]
-     (when-some [id (resolve-id conn e)]
-       (re-db.reagent/log-read! conn :ea_ [id attr])
-       (-> (fast/get-in @conn [:eav id attr])
-           (core/get-in ks)))))
-  ([conn e ks]
-   (get-in conn e ks nil))
-  ([conn e ks not-found]
-   (if-some [e (resolve-id conn e)]
-     (do (re-db.reagent/log-read! conn :ea_ [e (first ks)])
-         (-> (fast/get-in @conn [:eav e])
-             (core/get-in ks not-found)))
-     not-found)))
-
-(defn select-keys
-  "Select keys from entity of id"
-  [conn e ks]
-  (when-let [e (resolve-id conn e)]
-    (let [m (fast/get-in @conn [:eav e])]
-      (reduce (fn [out a]
-                (re-db.reagent/log-read! conn :ea_ [e a])
-                (if-some [v (m a)]
-                  (conj out v)
-                  out))
-              {}
-              ks))))
 
 ;; attribute reversal
 
@@ -102,7 +76,7 @@
   [conn [a v :as av]]
   (let [db @conn
         schema (db/get-schema db a)
-        v (cond->> v (db/ref? schema) (resolve-id conn))]
+        v (cond->> v (db/ref? schema) (resolve-e conn))]
     (re-db.reagent/log-read! conn :_av av)
     (if (db/indexed? schema)
       (or (fast/get-in db [:ave a v]) #{})
@@ -244,7 +218,7 @@
   ;; entity ids are late-binding, you can pass a lookup ref for an entity that isn't yet in the db.
   (if (.-id-resolved? entity)
     id
-    (if-some [id (resolve-id !db id)]
+    (if-some [id (resolve-e !db id)]
       (do (set! (.-id-resolved? entity) true)
           (set! (.-id entity) id)
           id)
@@ -284,7 +258,7 @@
       not-found)))
 
 (defn entity [conn id]
-  (Entity. conn (resolve-id conn id) false))
+  (Entity. conn (resolve-e conn id) false))
 
 (defn create-conn [schema]
   (doto (db/create-conn schema)

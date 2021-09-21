@@ -14,13 +14,6 @@
   ([id attr])
   ([id attr not-found]))
 
-(m/defpartial get-in {:f '(read/get-in *conn* _)}
-  ([id path])
-  ([id path not-found]))
-
-(m/defpartial select-keys {:f '(read/select-keys *conn* _)}
-  [id ks])
-
 (m/defpartial ids-where {:f '(read/ids-where *conn* _)}
   [qs])
 
@@ -42,5 +35,3 @@
   ([patterns callback]))
 
 (def merge-schema! (partial d/merge-schema! *conn*))
-
-(def unique-id d/unique-id)

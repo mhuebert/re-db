@@ -222,31 +222,32 @@
            (read/get db "fido")))))
 
 (deftest touch-refs
-  (let [conn (doto  (d/create-conn {:db/refs [:children]
-                                    :db/many [:children]})
+  (let [conn (doto  (d/create-conn {:children (merge d/ref
+                                                     d/plural)})
                (d/transact! [{:db/id "A"
                               :children #{"A.0"}}
                              {:db/id "A.0"
-                              :children #{"A.1" "A"}}
+                              :children #{"A.1" #_"A"}}
                              {:db/id "A.1"
                               :children #{"A.2"}}
                              {:db/id "A.2"
                               :children #{"A.3"}}
                              {:db/id "A.3"
                               :children #{"A.4"}}]))]
-    (is (-> (read/entity conn "A")
-            (read/touch [{:children 3}])
-            :children :children :children :children :children
-            (= #{"A.4"})))
 
     (is (-> (read/entity conn "A")
-            (read/touch [{:children 2}])
-            :children :children :children :children
-            (= #{"A.3"})))
+            (read/touch [:children])
+            :children first :children
+            (= #{"A.1"})))
+
+    (is (-> (read/entity conn "A")
+            (read/touch [{:children 1}])
+            :children first :children first :children
+            (= #{"A.2"})))
 
     (is (-> (read/entity conn "A")
             (read/touch [{:children :...}])
-            :children :children :children :children :children
+            :children first :children first :children first :children first :children
             (= #{"A.4"})))))
 
 #_(comment
@@ -261,8 +262,8 @@
    )
 
 (deftest cardinality-many
-  (let [conn (doto (d/create-conn #:db{:plurals [:children]
-                                       :indexes [:children]})
+  (let [conn (doto (d/create-conn {:children (merge d/plural
+                                                    d/indexed)})
                (d/transact! [{:db/id "fred"
                               :children #{"pete"}}]))]
 
