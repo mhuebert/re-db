@@ -73,11 +73,11 @@
 
 (defn _av
   "Returns entity-ids for entities where attribute (a) equals value (v)"
-  [conn [a v :as av]]
+  [conn [a v]]
   (let [db @conn
         schema (db/get-schema db a)
         v (cond->> v (db/ref? schema) (resolve-e conn))]
-    (re-db.reagent/log-read! conn :_av av)
+    (re-db.reagent/log-read! conn :_av [a v])
     (if (db/indexed? schema)
       (or (fast/get-in db [:ave a v]) #{})
       (do
@@ -214,11 +214,11 @@
   [conn qs]
   (map #(entity conn %) (ids-where conn qs)))
 
-(defn -resolve-id! [^Entity entity !db id]
+(defn -resolve-id! [^Entity entity conn id]
   ;; entity ids are late-binding, you can pass a lookup ref for an entity that isn't yet in the db.
   (if (.-id-resolved? entity)
     id
-    (if-some [id (resolve-e !db id)]
+    (if-some [id (resolve-e conn id)]
       (do (set! (.-id-resolved? entity) true)
           (set! (.-id entity) id)
           id)
