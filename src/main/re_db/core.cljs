@@ -319,7 +319,9 @@
 (defn- desugar [schema]
   (->> sugars
        (reduce-kv (fn [schema k m]
-                    (reduce #(update %1 %2 (fnil merge {}) m) schema (get schema k))) schema)))
+                    (reduce #(update %1 %2 (fnil merge {}) m)
+                            (assoc schema k #{})
+                            (get schema k))) schema)))
 
 (defn normalize-schema [schema]
   (let [schema (-> (desugar schema)
