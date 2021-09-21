@@ -20,9 +20,6 @@
 (m/defpartial where {:f '(read/where *conn* _)}
   [qs])
 
-(m/defpartial contains? {:f '(read/contains? *conn* _)}
-  [id])
-
 (m/defpartial touch {:f '(read/touch *conn* _)}
   [entity])
 

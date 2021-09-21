@@ -175,14 +175,6 @@ Use `d/where` to find entities that match a list of clauses, each of which shoul
 (d/where [:name])
 ```
 
-3. A **predicate function**, to match entities for which the predicate returns true.
-
-```clj
-(d/where [#(= (:name %) "Matt")])
-```
-_(question - should d/where accept varargs instead of a vector?)_
-
-
 Clauses are evaluated in order and joined using `clojure.set/intersection` (`AND`),
 with early termination when the result set is empty.
 

@@ -2,34 +2,65 @@
   (:refer-clojure :exclude [get contains? peek])
   (:require [re-db.core :as db]
             [re-db.fast :as fast]
-            [re-db.reagent :as re-db.reagent]
+            [re-db.reagent :as re-db.reagent :refer [log-read!]]
             [re-db.util :refer [guard]]
             [reagent.core :as reagent]
             [clojure.core :as core]
             [clojure.set :as set]))
 
+;; tracked index lookups
+
+(defn -av_ [conn [a v :as av]]
+  (log-read! conn :_av av)
+  (fast/get-in @conn [:ave a v]))
+
+(defn -va_ [conn [v a]]
+  (log-read! conn :_av [a v])
+  (fast/get-in @conn [:vae v a]))
+
+(defn -_a_ [conn a]
+  (log-read! conn :_a_ a)
+  (fast/get-in @conn [:_a_ a]))
+
+(defn -e__ [conn e]
+  (log-read! conn :e__ e)
+  (fast/get-in @conn [:eav e]))
+
+(defn -ea_ [conn [e a :as ea]]
+  (log-read! conn :ea_ ea)
+  (fast/get-in @conn [:eav e a]))
+
+;; lookup refs
+
 (defn resolve-lookup-ref [conn [a v :as e]]
   (if (vector? v)                                           ;; nested lookup ref
     (resolve-lookup-ref conn [a (resolve-lookup-ref conn v)])
     (when v
-      (re-db.reagent/log-read! conn :_av e)
-      (first (fast/get-in @conn [:ave a v])))))
+      (first (-av_ conn e)))))
 
 (defn resolve-e
   "Returns id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
-  Lookup refs are only supported for indexed attributes.
-  The 3-arity version is for known lookup refs, and does not check for uniqueness."
+  Lookup refs are only supported for indexed attributes."
   [conn e]
   (cond->> e
            (vector? e)
            (resolve-lookup-ref conn)))
 
-(defn contains?
-  "Returns true if entity with given id exists in db."
-  [conn e]
-  (let [e (resolve-e conn e)]
-    (when (some? e) (re-db.reagent/log-read! conn :e__ e))
-    (core/contains? (core/get @conn :eav) e)))
+;; functional lookup api
+
+(defn get
+  "Read entity or attribute reactively"
+  ([conn e]
+   (some->> (resolve-e conn e)
+            (-e__ conn)))
+  ([conn e attr]
+   (get conn e attr nil))
+  ([conn e attr not-found]
+   (if-some [id (resolve-e conn e)]
+     (or (-ea_ conn [id attr]) not-found)
+     not-found)))
+
+;; non-reactive alternative
 
 (defn peek
   "Read entity or attribute without reactivity"
@@ -41,20 +72,6 @@
    (core/get (peek conn e) attr))
   ([conn e attr not-found]
    (core/get (peek conn e) attr not-found)))
-
-(defn get
-  "Read entity or attribute reactively"
-  ([conn e]
-   (when-some [id (resolve-e conn e)]
-     (re-db.reagent/log-read! conn :e__ id)
-     (fast/get-in @conn [:eav id])))
-  ([conn e attr]
-   (get conn e attr nil))
-  ([conn e attr not-found]
-   (if-some [id (resolve-e conn e)]
-     (do (re-db.reagent/log-read! conn :ea_ [id attr])
-         (core/get (fast/get-in @conn [:eav id]) attr not-found))
-     not-found)))
 
 ;; attribute reversal
 
@@ -71,57 +88,43 @@
 
 (fast/defmemo-1 forward-attr forward-attr*)
 
-(defn _av
+;; higher-level index lookups that resolve based on schema
+;; and provide non-indexed backoffs
+
+(defn av_
   "Returns entity-ids for entities where attribute (a) equals value (v)"
   [conn [a v]]
   (let [db @conn
         schema (db/get-schema db a)
         v (cond->> v (db/ref? schema) (resolve-e conn))]
-    (re-db.reagent/log-read! conn :_av [a v])
-    (if (db/indexed? schema)
-      (or (fast/get-in db [:ave a v]) #{})
-      (do
-        (js/console.warn (str "Missing _av index on " a))
-        (->> (:eav @conn)
-             (reduce-kv
-              (fn [out e m]
-                (cond-> out
-                        (= (m a) v)
-                        (conj e)))
-              #{}))))))
+    (or (-av_ conn [a v])
+        (if (db/indexed? schema)
+          #{}
+          (do
+            (js/console.warn (str "Missing :ave index on " a))
+            (->> (:eav db)
+                 (reduce-kv
+                  (fn [out e m]
+                    (cond-> out
+                            (= (m a) v)
+                            (conj e)))
+                  #{})))))))
 
 (defn _a_
   "Returns [e v] pairs for entities containing attribute (a).
    Optional `return-values?` param for returning only the entity-id."
-  ([conn a] (_a_ conn a true))
-  ([conn a return-values?]
-   (re-db.reagent/log-read! conn :_a_ a)
-   (let [db @conn]
-     (if (db/_a_? (db/get-schema db a))
-       (fast/get-in db [:_a_ a])
-       (do
-         (js/console.warn (str "Missing _a_ index on " a))
-         (->> (:eav db)
-              (reduce-kv
-               (if return-values?
-                 (fn [out e m] (if-some [v (m a)]
-                                 (conj out [e v])
-                                 out))
-                 (fn [out e m] (if (some? (m a))
-                                 (conj out e)
-                                 out)))
-               #{})))))))
-
-(defn ___fn
-  "Return entities for which `f` returns truthy"
-  ([conn f] (___fn conn f true))
-  ([conn f ^boolean return-entity?]
-   (->> (:eav @conn)
-        (reduce-kv
-         (if return-entity?
-           (fn [s e m] (cond-> s (f m) (conj m)))
-           (fn [s e m] (cond-> s (f m) (conj e))))
-         #{}))))
+  [conn a]
+  (or (-_a_ conn a)
+      (let [db @conn]
+        (if (db/_a_? (db/get-schema db a))
+          #{}
+          (do
+            (js/console.warn (str "Missing _a_ index on " a))
+            (->> (:eav db)
+                 (reduce-kv
+                  (fn [out e m] (cond-> out
+                                        (some? (m a)) (conj e)))
+                  #{})))))))
 
 (declare entity Entity)
 
@@ -129,7 +132,9 @@
   "Add reverse references to entity map"
   ([conn {v :db/id :as m}]
    (reduce-kv
-    (fn [m a e] (assoc m (reverse-attr a) e))
+    (fn [m a e]
+      (log-read! conn :_av [a e])                           ;; TODO - test
+      (assoc m (reverse-attr a) e))
     m
     (fast/get-in @conn [:vae v]))))
 
@@ -196,9 +201,8 @@
    (pull* @entity pull @(.-conn entity) #{})))
 
 (defn- ids-where-1 [conn q]
-  (cond (vector? q) (_av conn q)
-        (fn? q) (___fn conn q false)
-        (keyword? q) (_a_ conn q false)
+  (cond (vector? q) (av_ conn q)
+        (keyword? q) (_a_ conn q)
         :else (throw (js/Error. (str "Invalid where-1 clause:" q)))))
 
 (defn ids-where
@@ -214,7 +218,7 @@
   [conn qs]
   (map #(entity conn %) (ids-where conn qs)))
 
-(defn -resolve-id! [^Entity entity conn id]
+(defn -resolve-e! [^Entity entity conn id]
   ;; entity ids are late-binding, you can pass a lookup ref for an entity that isn't yet in the db.
   (if (.-id-resolved? entity)
     id
@@ -224,34 +228,31 @@
           id)
       id)))
 
-(deftype Entity [conn ^:volatile-mutable id ^:volatile-mutable ^boolean id-resolved?]
+(deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable ^boolean id-resolved?]
   ISeqable
   (-seq [this] (seq @this))
   IDeref
   (-deref [this]
-    (let [id (-resolve-id! this conn id)]
-      (re-db.reagent/log-read! conn :e__ id)
-      (fast/get-in @conn [:eav id])))
+    (-e__ conn (-resolve-e! this conn e)))
   ILookup
   (-lookup [this a]
-    (let [id (-resolve-id! this conn id)
+    (let [e (-resolve-e! this conn e)
           is-reverse (reverse-attr? a)
           a (cond-> a is-reverse forward-attr)
           db @conn
-          schema (-> db (core/get :schema) (core/get a))]
+          attr-schema (db/get-schema db a)
+          is-ref? (db/ref? attr-schema)]
       (if is-reverse
         (do
-          (re-db.reagent/log-read! conn :_av [a id])
-          (mapv #(entity conn %) (fast/get-in db [:vae id a])))
-        (let [val (fast/get-in @conn [:eav id a])
-              ref? (db/ref? schema)
-              many? (db/many? schema)]
-          (re-db.reagent/log-read! conn :ea_ [id a])
-          (if ref?
-            (if many?
-              (mapv #(entity conn %) val)
-              (some->> val (entity conn)))
-            val)))))
+          (assert is-ref?)
+          (mapv #(entity conn %) (-va_ conn [e a])))
+        (let [v (-ea_ conn [e a])
+              is-many? (db/many? attr-schema)]
+          (if is-ref?
+            (if is-many?
+              (mapv #(entity conn %) v)
+              (some->> v (entity conn)))
+            v)))))
   (-lookup [o attr not-found]
     (if-some [val (-lookup o attr)]
       val
@@ -273,7 +274,7 @@
               (fn []
                 (reduce-kv (fn [_ pattern values]
                              (doseq [v values]
-                               (re-db.reagent/log-read! conn pattern v))) nil patterns)
+                               (log-read! conn pattern v))) nil patterns)
                 (when @initialized? (callback conn))
                 (vreset! initialized? true)
                 nil))]
