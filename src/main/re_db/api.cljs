@@ -10,6 +10,7 @@
   [id])
 
 (m/defpartial get {:f '(read/get *conn* _)}
+  ([id])
   ([id attr])
   ([id attr not-found]))
 

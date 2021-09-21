@@ -4,7 +4,7 @@
             [reagent.ratom :as ratom]))
 
 ;; modified from reagent.ratom/RAtom
-(deftype Invalidator [^:mutable watches on-unwatched]
+(deftype Invalidator [^:mutable watches on-unwatched pattern-key pattern]
   IWatchable
   (-notify-watches [this old new] (-reset! this nil))
   (-add-watch [this key f]
@@ -22,6 +22,14 @@
                  (array this))))
   nil)
 
+(defn current-patterns []
+  (some->> (j/get ratom/*ratom-context* .-captured)
+           (reduce (fn [m ^Invalidator i]
+                     (cond-> m
+                             (instance? Invalidator i)
+                             (update (.-pattern-key i)
+                                     (fnil conj #{})
+                                     (.-pattern i)))) {})))
 
 (j/defn trigger! [^Invalidator this]
   (reduce-kv (fn [_ k f] (f k this 0 1) nil) nil (.-watches this)))
@@ -35,7 +43,7 @@
         (some-> (invalidators pattern-v) trigger!)))))
 
 (defn make-invalidator [conn pattern-key pattern]
-  (let [this (Invalidator. {} nil)]
+  (let [this (Invalidator. {} nil pattern-key pattern)]
     (set! (.-on-unwatched this)
           (fn []
             (js/setTimeout

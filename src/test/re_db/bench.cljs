@@ -7,85 +7,117 @@
             [re-db.test-helpers :as th :refer [bench]]))
 
 (do
+  (let [datoms (mapv vec (partition 4 (take 1000 (repeatedly #(rand-int 999999)))))
+        comp4'd (d/comp4
+                 [(fn [m e a v pv]
+                    (assoc-in m [e a] v))
+                  (fn [m e a v pv]
+                    (assoc-in m [a v] e))
+                  (fn [m e a v pv]
+                    (assoc-in m [v a] e))])
+        comp1'd (d/comp1
+                 [(fn [m [e a v pv]]
+                    (assoc-in m [e a] v))
+                  (fn [m [e a v pv]]
+                    (assoc-in m [a v] e))
+                  (fn [m [e a v pv]]
+                    (assoc-in m [v a] e))])
+        fs [(fn [m [e a v pv]]
+              (assoc-in m [e a] v))
+            (fn [m [e a v pv]]
+              (assoc-in m [a v] e))
+            (fn [m [e a v pv]]
+              (assoc-in m [v a] e))]
+        run1 (fn [fs init vs]
+               (reduce (fn [acc v] (reduce #(%2 %1 v) acc fs)) init vs))
+        ]
 
-  (def schema {:user/id {:db/unique :db.unique/identity}
-               :user/pets {:db/valueType :db.type/ref
-                           :db/cardinality :db.cardinality/many}
-               :pet/owner {:db/valueType :db.type/ref}
-               :user/name {:db/index true}})
+    (bench "feeding datom through comp'd fns vs as vector"
+           :comp4 #(reduce (fn [m [e a v pv]] (comp4'd m e a v pv)) {} datoms)
+           :comp1 #(reduce (fn [m datom] (comp1'd m datom)) {} datoms)
+           :run1 #(run1 fs {} datoms))
 
-  (defn rand-map [map-size]
-    (merge (zipmap (take (Math/ceil (/ map-size 2))
-                         (repeatedly (comp keyword str random-uuid)))
-                   (range))
-           (zipmap (take (Math/ceil (/ map-size 2))
-                         (repeatedly #(keyword (rand-nth "abcdefghijklmnop"))))
-                   (range))))
+    ))
+(comment
 
-  (defn make-samples [n map-size]
-    (into []
-          (mapcat
-           (fn [i]
-             (let [pet-ids (set (for [j (range 1 (rand-int 5))]
-                                  (+ i (/ j 10))))]
-               (conj
-                (for [id pet-ids]
-                  (merge {:db/id id
-                          :pet/id id
-                          :pet/name (str "pet.name." i)
-                          :color (rand-nth ["black" "brown" "tan" "white" "spotted" "golden"])
-                          :pet/owner i}
-                         (rand-map (- map-size 5))))
-                (merge {:db/id i
-                        :user/id (str "user.id." i)
-                        :user/name (str "user.name." i)
-                        :user/pets pet-ids
-                        :user/height (+ 80 (rand-int 100))}
-                       (rand-map (- map-size 5)))))
-             ))
-          (range 1 (inc n))))
+ (def schema {:user/id {:db/unique :db.unique/identity}
+              :user/pets {:db/valueType :db.type/ref
+                          :db/cardinality :db.cardinality/many}
+              :pet/owner {:db/valueType :db.type/ref}
+              :user/name {:db/index true}})
+
+ (defn rand-map [map-size]
+   (merge (zipmap (take (Math/ceil (/ map-size 2))
+                        (repeatedly (comp keyword str random-uuid)))
+                  (range))
+          (zipmap (take (Math/ceil (/ map-size 2))
+                        (repeatedly #(keyword (rand-nth "abcdefghijklmnop"))))
+                  (range))))
+
+ (defn make-samples [n map-size]
+   (into []
+         (mapcat
+          (fn [i]
+            (let [pet-ids (set (for [j (range 1 (rand-int 5))]
+                                 (+ i (/ j 10))))]
+              (conj
+               (for [id pet-ids]
+                 (merge {:db/id id
+                         :pet/id id
+                         :pet/name (str "pet.name." i)
+                         :color (rand-nth ["black" "brown" "tan" "white" "spotted" "golden"])
+                         :pet/owner i}
+                        (rand-map (- map-size 5))))
+               (merge {:db/id i
+                       :user/id (str "user.id." i)
+                       :user/name (str "user.name." i)
+                       :user/pets pet-ids
+                       :user/height (+ 80 (rand-int 100))}
+                      (rand-map (- map-size 5)))))
+            ))
+         (range 1 (inc n))))
 
 
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;; TRANSACT
+ ;;;;;;;;;;;;;;;;;;;;;;;;;;
+ ;; TRANSACT
 
-  ;; with small entities (5 attrs)
-  ;; - re-db is ~5x faster
-  ;; with large entities (20 attrs)
-  ;; - re-db is 10x faster
+ ;; with small entities (5 attrs)
+ ;; - re-db is ~5x faster
+ ;; with large entities (20 attrs)
+ ;; - re-db is 10x faster
 
-  ;; Overall Chrome is ~4x faster than Safari
+ ;; Overall Chrome is ~4x faster than Safari
 
-  (let [ds-snap @(-> (ds/create-conn schema)
-                     #_(doto (ds/transact! samples)))
-        re-snap @(-> (d/create-conn schema)
-                     #_(d/transact! samples))]
-    (let [samples (make-samples 100 5)]
-      (bench "transactions - 5 keys per map"
-             :datascript/transact!
-             #(ds/transact! (atom ds-snap) samples)
-             :re-db/transact!
-             #(d/transact! (atom re-snap) samples)))
-    (let [samples (make-samples 100 20)]
-      (bench "transactions - 20 keys per map"
-             :datascript/transact!
-             #(ds/transact! (atom ds-snap) samples)
-             :re-db/transact!
-             #(d/transact! (atom re-snap) samples)))
+ (let [ds-snap @(-> (ds/create-conn schema)
+                    #_(doto (ds/transact! samples)))
+       re-snap @(-> (d/create-conn schema)
+                    #_(d/transact! samples))]
+   (let [samples (make-samples 100 5)]
+     (bench "transactions - 5 keys per map"
+            :datascript/transact!
+            #(ds/transact! (atom ds-snap) samples)
+            :re-db/transact!
+            #(d/transact! (atom re-snap) samples)))
+   (let [samples (make-samples 100 20)]
+     (bench "transactions - 20 keys per map"
+            :datascript/transact!
+            #(ds/transact! (atom ds-snap) samples)
+            :re-db/transact!
+            #(d/transact! (atom re-snap) samples)))
 
-    (comment
-     (let [ids (map :db/id (take 10 (shuffle samples)))
-           re-conn (-> (atom re-snap) (d/transact! samples))
-           ds-conn (doto (atom ds-snap) (ds/transact! samples))]
-       (bench "lookups"
-              "datascript entity lookup"
-              #(mapv (fn [id] (:user/id (ds/entity @ds-conn id))) ids)
-              "re-db tracked entity lookup"
-              #(mapv (fn [id] (:user/id (read/entity re-conn id))) ids)
-              "re-db tracked get lookup"
-              #(mapv (fn [id] (read/get re-conn id :user/id)) ids)
-              "re-db peek"
-              #(mapv (fn [id] (read/peek re-conn id :user/id)) ids))))))
+   (comment
+    (let [ids (map :db/id (take 10 (shuffle samples)))
+          re-conn (-> (atom re-snap) (d/transact! samples))
+          ds-conn (doto (atom ds-snap) (ds/transact! samples))]
+      (bench "lookups"
+             "datascript entity lookup"
+             #(mapv (fn [id] (:user/id (ds/entity @ds-conn id))) ids)
+             "re-db tracked entity lookup"
+             #(mapv (fn [id] (:user/id (read/entity re-conn id))) ids)
+             "re-db tracked get lookup"
+             #(mapv (fn [id] (read/get re-conn id :user/id)) ids)
+             "re-db peek"
+             #(mapv (fn [id] (read/peek re-conn id :user/id)) ids))))))
 
 (comment
  ;; `some` vs truthiness

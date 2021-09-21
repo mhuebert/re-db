@@ -13,9 +13,12 @@
   Lookup refs are only supported for indexed attributes.
   The 3-arity version is for known lookup refs, and does not check for uniqueness."
   [conn e]
-  (when ^boolean (vector? e)
-    (re-db.reagent/log-read! conn :_av e))
-  (db/resolve-e e @conn))
+  (if (vector? e)
+    (if (vector? (e 1))                                     ;; nested lookup ref
+      (resolve-id conn [(e 0) (resolve-id conn (e 1))])
+      (do (when (e 1) (re-db.reagent/log-read! conn :_av e))
+          (db/resolve-e e @conn)))
+    (db/resolve-e e @conn)))
 
 (defn contains?
   "Returns true if entity with given id exists in db."

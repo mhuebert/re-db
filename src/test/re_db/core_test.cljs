@@ -319,55 +319,6 @@
                                   :pets #{"fido"}}])
               "Two entities with same unique :db.cardinality/many attr"))))
 
-(deftest pattern-listeners
-  (let [conn (read/create-conn {:person/children {:db/cardinality :db.cardinality/many
-                                                  :db/unique :db.unique/identity}})
-        tx-log (atom [])
-        _ (d/listen! conn ::pattern-listeners #(swap! tx-log conj (:datoms %2)))]
-
-    (testing "entity pattern"
-      (d/transact! conn [{:db/id "mary"
-                          :name "Mary"}
-                         [:db/add "mary"
-                          :person/children #{"john"}]
-                         {:db/id "john"
-                          :name "John"}])
-
-      (r/flush)
-
-      (is (= "Mary" (read/get conn [:person/children "john"] :name))
-          "Get attribute via lookup ref")
-
-      (let [entity-call (atom 0)
-            attr-call (atom 0)]
-        (r/track! #(do (read/get conn "mary")
-                       (swap! entity-call inc)))
-        (r/track! #(do (read/get conn "mary" :name)
-                       (swap! attr-call inc)))
-        (is (= 1 @entity-call @attr-call))
-        (d/transact! conn [[:db/add "mary" :name "MMMary"]])
-        (r/flush)
-        (is (= 2 @entity-call @attr-call))
-        (d/transact! conn [[:db/add "mary" :age 38]])
-        (r/flush)
-        (is (= [3 2] [@entity-call @attr-call]))
-        "Entity listener called when attribute changes"))
-
-    (testing "lookup ref pattern"
-
-      (d/transact! conn [{:db/id "peter" :name "Peter"}])
-
-      (let [log (atom 0)]
-        (r/track!
-         (fn []
-           (read/get conn [:person/children "peter"])
-           (swap! log inc)))
-        (r/flush)
-        (is (= 1 @log))
-        (d/transact! conn [[:db/add "mary" :person/children #{"peter"}]])
-        (r/flush)
-        (is (= 2 @log))))))
-
 (deftest permissions
   (let [conn (doto (d/create-conn {:permission/person {:db/valueType :db.type/ref}
                                    :group/profile {:db/valueType :db.type/ref}

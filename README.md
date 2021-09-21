@@ -61,10 +61,10 @@ To write data, pass a collection of transactions to `d/transact!`. There are two
     [:db/add <id> <attribute> <value>]
 
     ;; retract an attribute
-    [:db/retract-attr <id> <attribute> <value (optional)>]
+    [:db/retract <id> <attribute> <value (optional)>]
 
     ;; retract an entity
-    [:db/retract-entity <id>]
+    [:db/retractEntity <id>]
 
     ;; usage
 

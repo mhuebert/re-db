@@ -1,16 +1,17 @@
 (ns re-db.reactivity-test
   (:require [cljs.test :refer-macros [deftest is testing]]
             [re-db.api :as d]
-            [re-db.read :refer [create-conn]]
+            [re-db.core :as db]
+            [re-db.read :as read :refer [create-conn]]
+            [re-db.reagent :refer [current-patterns]]
             [reagent.core :as r])
   (:require-macros [re-db.test-helpers :refer [throws]]))
-
-(reset! d/*conn* @(create-conn {}))
 
 (defonce rx (atom nil))
 
 (defn ^:dev/before-load start
   ([]
+   (reset! d/*conn* @(create-conn {}))
    (some-> @rx r/dispose!))
   ([f]
    (start)
@@ -51,6 +52,72 @@
     (is (= @log 2))
 
     ))
+
+(deftest lookup-patterns
+  (testing
+   (reset! d/*conn* @(create-conn {:a/id {:db/unique :db.unique/identity}
+                                   :b/id {:db/unique :db.unique/identity}}))
+    (let [test-patterns (fn [f patterns]
+                          (let [rx (r/track! (fn [] (f) (is (= patterns (current-patterns)))))]
+                            (r/flush)
+                            (r/dispose! rx)))]
+
+      (test-patterns #(d/get 1) {:e__ #{1}})
+      (test-patterns #(d/get [:a/id 1]) {:_av #{[:a/id 1]}})
+      (test-patterns #(d/get [:a/id nil]) nil)
+      (test-patterns #(d/get [:a/id [:b/id 1]]) {:_av #{[:b/id 1]}})
+      (d/transact! [{:db/id "b" :b/id 1}])
+      (test-patterns #(d/get [:a/id [:b/id 1]]) {:_av #{[:b/id 1]
+                                                          [:a/id "b"]}}))))
+
+(comment
+ (deftest pattern-listeners
+   (let [conn (read/create-conn {:person/children {:db/cardinality :db.cardinality/many
+                                                   :db/unique :db.unique/identity}})
+         tx-log (atom [])
+         _ (db/listen! conn ::pattern-listeners #(swap! tx-log conj (:datoms %2)))]
+     (testing "entity pattern"
+       (db/transact! conn [{:db/id "mary"
+                            :name "Mary"}
+                           [:db/add "mary"
+                            :person/children #{"john"}]
+                           {:db/id "john"
+                            :name "John"}])
+
+       (r/flush)
+
+       (is (= "Mary" (read/get conn [:person/children "john"] :name))
+           "Get attribute via lookup ref")
+
+       (let [entity-call (atom 0)
+             attr-call (atom 0)]
+         (r/track! #(do (read/get conn "mary")
+                        (swap! entity-call inc)))
+         (r/track! #(do (read/get conn "mary" :name)
+                        (swap! attr-call inc)))
+         (is (= 1 @entity-call @attr-call))
+         (db/transact! conn [[:db/add "mary" :name "MMMary"]])
+         (r/flush)
+         (is (= 2 @entity-call @attr-call))
+         (db/transact! conn [[:db/add "mary" :age 38]])
+         (r/flush)
+         (is (= [3 2] [@entity-call @attr-call]))
+         "Entity listener called when attribute changes"))
+
+     (testing "lookup ref pattern"
+
+       (db/transact! conn [{:db/id "peter" :name "Peter"}])
+
+       (let [log (atom 0)]
+         (r/track!
+          (fn []
+            (read/get conn [:person/children "peter"])
+            (swap! log inc)))
+         (r/flush)
+         (is (= 1 @log))
+         (db/transact! conn [[:db/add "mary" :person/children #{"peter"}]])
+         (r/flush)
+         (is (= 2 @log)))))))
 
 #_(deftest reactivity
   (let [reader (reify
