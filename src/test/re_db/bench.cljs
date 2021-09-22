@@ -6,9 +6,9 @@
             [clojure.walk :as walk]
             [re-db.test-helpers :as th :refer [bench]]))
 
-(do
+(comment
   (let [datoms (mapv vec (partition 4 (take 1000 (repeatedly #(rand-int 999999)))))
-        comp4'd (d/comp4
+        #_#_comp4'd (d/comp4
                  [(fn [m e a v pv]
                     (assoc-in m [e a] v))
                   (fn [m e a v pv]
@@ -33,12 +33,12 @@
         ]
 
     (bench "feeding datom through comp'd fns vs as vector"
-           :comp4 #(reduce (fn [m [e a v pv]] (comp4'd m e a v pv)) {} datoms)
+           #_#_:comp4 #(reduce (fn [m [e a v pv]] (comp4'd m e a v pv)) {} datoms)
            :comp1 #(reduce (fn [m datom] (comp1'd m datom)) {} datoms)
            :run1 #(run1 fs {} datoms))
 
     ))
-(comment
+(do
 
  (def schema {:user/id {:db/unique :db.unique/identity}
               :user/pets {:db/valueType :db.type/ref
