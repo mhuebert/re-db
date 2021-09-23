@@ -24,3 +24,16 @@
      (if (identical? ~sym ~'re-db.fast/nf-sentinel)
        ~else
        ~then)))
+
+(defmacro invoke->
+  "Like -> but calls each function using -invoke"
+  {:added "1.0"}
+  [x & forms]
+  (loop [x x, forms forms]
+    (if forms
+      (let [form (first forms)
+            threaded (if (seq? form)
+                       (with-meta `(~'cljs.core/-invoke ~(first form) ~x ~@(next form)) (meta form))
+                       (list form x))]
+        (recur threaded (next forms)))
+      x)))

@@ -90,7 +90,7 @@
      :f (fn [db e a v pv ^boolean some-v? _]
           (update-in db [:_a_ a] (if some-v? conj-set disj) e))}))
 
-(defn make-indexer [a schema]
+(defn make-indexer [schema]
   ;; one indexer per attribute
   (let [[per-values
          per-datoms] (->> [ave-indexer
@@ -236,66 +236,72 @@
       (assert (not (false? e-from-attr)) "must have a unique attribute")
       (assoc m :db/id (or e-from-attr (gen-e))))))
 
+(defn- add-attr-index [[db datoms :as state] e a pv a-schema]
+  (let [v (fast/get-in db [:eav e a])]
+    (if-some [datom (if (many? a-schema)
+                      (let [v (set/difference v pv)
+                            pv (set/difference pv v)]
+                        (when (or (seq v) (seq pv))
+                          [e a v pv]))
+                      (when (not= v pv)
+                        [e a v pv]))]
+      [(update-indexes db datom a-schema)
+       (conj-datom datoms datom)]
+      state)))
+
 ;; adds indexes for map entries without creating intermediate data structures
 (defn- add-map-indexes [state e prev-m]
   (reduce-kv
    (fn [state a v]
-     (let [attr-schema (get-schema (state 0) a)
+     (let [a-schema (get-schema (state 0) a)
            pv (get prev-m a)]
-       (if (= v pv)
-         state
-         (if (many? attr-schema)
-           (let [v (guard (set/difference v pv) seq)
-                 pv (guard (set/difference pv v) seq)
-                 datom [e a v pv]]
-             (if (or v pv)
-               [(update-indexes (state 0) datom attr-schema)
-                (conj-datom (state 1) datom)]
-               state))
-           (let [datom [e a v pv]]
-             [(update-indexes (state 0) datom attr-schema)
-              (conj-datom (state 1) datom)])))))
+       (add-attr-index state e a pv a-schema)))
    state
    (get-entity (state 0) e)))
 
 (declare add-map)
 
-;; handle upserts & entity-id resolution
-(defn- resolve-map-refs
-  [[{:as db db-schema :schema} datoms] e]
-  (let [m (get-entity db e)
-        [db datoms m] (reduce-kv (fn [[db datoms m :as ret] a v]
-                                   (if-some [attr-schema (guard (db-schema a) ref?)]
-                                     (if (many? attr-schema)
-                                       (reduce
-                                        (fn [[db datoms entity :as ret] val]
-                                          (cond (vector? val)
-                                                [db datoms (update entity a #(-> % (disj val) (conj (or (resolve-e val db) val))))]
-                                                (map? val)
-                                                (let [sub-entity (resolve-map-e db val)]
-                                                  (conj (add-map [db datoms] sub-entity)
-                                                        (update entity a #(-> % (disj val) (conj (:db/id sub-entity))))))
-                                                :else ret))
-                                        [db datoms m]
-                                        v)
-                                       (cond (vector? v)
-                                             [db datoms (assoc m a (or (resolve-e v db) v))]
-                                             (map? v)
-                                             (let [sub-entity (resolve-map-e db v)]
-                                               (conj (add-map [db datoms] sub-entity)
-                                                     (assoc m a (:db/id sub-entity))))
-                                             :else ret))
-                                     ret))
-                                 [db datoms m]
-                                 m)]
-    [(assoc-in db [:eav (:db/id m)] m) datoms]))
+(defn resolve-attr-refs [[db datoms :as state] e a v a-schema]
+  (if-not (ref? a-schema)
+    [(assoc-in db [:eav e a] v) datoms]
+    (let [[db datoms v] (if-not (ref? a-schema)
+                          [db datoms v]
+                          (if (many? a-schema)
+                            (reduce
+                             (fn [[db datoms vs :as state] v]
+                               (cond (vector? v)
+                                     [db datoms (-> vs
+                                                    (disj v)
+                                                    (conj (or (resolve-e v db) v)))]
+                                     (map? v)
+                                     (let [sub-entity (resolve-map-e db v)]
+                                       (conj
+                                        (add-map [db datoms] sub-entity)
+                                        (-> vs (disj v) (conj (:db/id sub-entity)))))
+                                     :else state))
+                             [db datoms v]
+                             v)
+                            (cond (vector? v)
+                                  [db datoms (or (resolve-e v db) v)]
+                                  (map? v)
+                                  (let [sub-entity (resolve-map-e db v)]
+                                    (conj (add-map [db datoms] sub-entity)
+                                          (:db/id sub-entity)))
+                                  :else [db datoms v])))]
+      [(assoc-in db [:eav e a] v) datoms])))
 
 (defn- add-map
-  [[db datoms :as state] m]
+  [[db datoms] m]
   (let [{:as m e :db/id} (resolve-map-e db m)]
-    (-> [(update-in db [:eav e] merge m) datoms]
-        (resolve-map-refs e)
-        (add-map-indexes e (get-entity db e)))))
+    (let [pm (get-entity db e)
+          db-schema (:schema db)]
+      (reduce-kv (fn [state a v]
+                   (let [a-schema (db-schema a)]
+                     (-> state
+                         (resolve-attr-refs e a v a-schema)
+                         (add-attr-index e a (get pm a) a-schema))))
+                 [db datoms]
+                 m))))
 
 (defn- commit-tx [state tx]
   (if (vector? tx)
@@ -343,42 +349,36 @@
            (f conn tx)))
        tx))))
 
-(def plural {:db/cardinality :db.cardinality/many})
+(def many {:db/cardinality :db.cardinality/many})
 (def ref {:db/valueType :db.type/ref})
 (def unique-id {:db/unique :db.unique/identity})
 (def unique-value {:db/unique :db.unique/value})
 (def indexed {:db/index true})
 
-(defn normalize-schema [schema]
-  (let [schema
-        (-> schema
-            (assoc :db/ident {:db/unique :db.unique/identity})
-            (dissoc :db/uniques))]
-    (reduce-kv (fn [db-schema a {:as a-schema
-                                 :db/keys [index unique cardinality valueType]}]
-                 ;; copy schema values to javascript properties for fast access
-                 (let [unique? (boolean unique)
-                       index? (boolean (or index unique?))
-                       plural? (= cardinality :db.cardinality/many)
-                       ref? (= valueType :db.type/ref)
-                       _a_? (:db.index/_a_ a-schema)
-                       a-schema (j/assoc! a-schema
-                                          :indexed? index?
-                                          :many? plural?
-                                          :unique? unique?
-                                          :ref? ref?
-                                          :_a_? _a_?)
-                       a-schema (j/assoc! a-schema
-                                          :index-fn (make-indexer a a-schema))]
-                   (-> db-schema
-                       (assoc a a-schema)
-                       (cond-> unique? (update :db/uniques (fnil conj #{}) a)))))
-               schema schema)))
+(defn compile-a-schema [db-schema a {:as a-schema
+                                     :db/keys [index unique cardinality valueType]}]
+  (if (= a :db/uniques)
+    db-schema
+    ;; copy schema values to javascript properties for fast access
+    (let [unique? (boolean unique)
+          a-schema (j/assoc! a-schema
+                             :indexed? (boolean (or index unique?))
+                             :many? (= cardinality :db.cardinality/many)
+                             :unique? unique?
+                             :ref? (= valueType :db.type/ref)
+                             :_a_? (:db.index/_a_ a-schema))
+          a-schema (j/assoc! a-schema :index-fn (make-indexer a-schema))]
+      (-> (assoc db-schema a a-schema)
+          (update :db/uniques (if unique? (fnil conj #{}) disj) a)))))
+
+(defn compile-db-schema [schema]
+  (->> (assoc schema :db/ident {:db/unique :db.unique/identity})
+       (reduce-kv compile-a-schema {})))
 
 (defn merge-schema!
   "Merge additional schema options into a db. Indexes are not created for existing data."
   [db schema]
-  (swap! db update :schema (comp normalize-schema (partial merge-with merge)) schema))
+  (swap! db update :schema (comp compile-db-schema (partial merge-with merge)) schema))
 
 (defn create-conn
   "Create a new db, with optional schema, which should be a mapping of attribute keys to
@@ -388,4 +388,4 @@
     :db/cardinality [:db.cardinality/many]"
   ([] (create-conn {}))
   ([schema]
-   (atom {:schema (normalize-schema schema)})))
+   (atom {:schema (compile-db-schema schema)})))

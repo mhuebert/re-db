@@ -223,7 +223,7 @@
 
 (deftest touch-refs
   (let [conn (doto  (d/create-conn {:children (merge d/ref
-                                                     d/plural)})
+                                                     d/many)})
                (d/transact! [{:db/id "A"
                               :children #{"A.0"}}
                              {:db/id "A.0"
@@ -262,7 +262,7 @@
    )
 
 (deftest cardinality-many
-  (let [conn (doto (d/create-conn {:children (merge d/plural
+  (let [conn (doto (d/create-conn {:children (merge d/many
                                                     d/indexed)})
                (d/transact! [{:db/id "fred"
                               :children #{"pete"}}]))]

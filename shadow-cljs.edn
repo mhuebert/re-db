@@ -9,6 +9,8 @@
               :http-root "public/test"}}
   :bench
   {:target :browser
+   :debug true
+   :compiler-options {:pseudo-names true}
    :output-dir "public/bench/js"
    :modules {:bench {:entries [re-db.bench]}}
    :devtools {:http-port 8010
