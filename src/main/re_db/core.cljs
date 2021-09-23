@@ -60,7 +60,7 @@
 ;; when the schema is normalized - we make lists of per-value and per-datom
 ;; indexers - which all datoms are looped through.
 (defn ave-indexer [schema]
-  (when (indexed? schema)
+  (when true #_(indexed? schema)
     {:name :ave
      :per :value
      :f (fn [db e a v pv ^boolean some-v? ^boolean some-pv?]
@@ -73,7 +73,7 @@
                   (disj-in [:ave a pv] e)))}))
 
 (defn vae-indexer [schema]
-  (when (ref? schema)
+  (when true #_(ref? schema)
     {:name :vae
      :per :value
      :f (fn [db e a v pv ^boolean some-v? ^boolean some-pv?]
@@ -210,7 +210,7 @@
 
 ;; generate internal db uuids
 (defonce last-e (volatile! 0))
-(defn gen-e [] (str "re-db.id/" (vswap! last-e inc)))
+(defn gen-e [] (vswap! last-e inc))
 
 (defn e-from-unique-attr
   "Finds an entity id by looking for a unique attribute in `m`.
@@ -253,33 +253,33 @@
 
 (declare add-map)
 
-(defn resolve-attr-refs [[db datoms m :as state] e a v a-schema]
-  (if-not (ref? a-schema)
-    [db datoms m]
-    (let [[db datoms v]
-          (if (many? a-schema)
-            (reduce
-             (fn [[db datoms vs :as state] v]
-               (cond (vector? v)
-                     [db datoms (-> vs
-                                    (disj v)
-                                    (conj (or (resolve-e v db) v)))]
-                     (map? v)
-                     (let [sub-entity (resolve-map-e db v)]
-                       (conj
-                        (add-map [db datoms] sub-entity)
-                        (-> vs (disj v) (conj (:db/id sub-entity)))))
-                     :else state))
-             [db datoms v]
-             v)
-            (cond (vector? v)
-                  [db datoms (or (resolve-e v db) v)]
-                  (map? v)
-                  (let [sub-entity (resolve-map-e db v)]
-                    (conj (add-map [db datoms] sub-entity)
-                          (:db/id sub-entity)))
-                  :else [db datoms v]))]
-      [db datoms (assoc m a v)])))
+(defn resolve-attr-refs [[db datoms m :as state] a v a-schema]
+  (let [[db datoms nv]
+        (if (many? a-schema)
+          (reduce
+           (fn [[db datoms vs :as state] v]
+             (cond (vector? v)
+                   [db datoms (-> vs
+                                  (disj v)
+                                  (conj (or (resolve-e v db) v)))]
+                   (map? v)
+                   (let [sub-entity (resolve-map-e db v)]
+                     (conj
+                      (add-map [db datoms] sub-entity)
+                      (-> vs (disj v) (conj (:db/id sub-entity)))))
+                   :else state))
+           [db datoms v]
+           v)
+          (cond (vector? v)
+                [db datoms (or (resolve-e v db) v)]
+                (map? v)
+                (let [sub-entity (resolve-map-e db v)]
+                  (conj (add-map [db datoms] sub-entity)
+                        (:db/id sub-entity)))
+                :else [db datoms v]))]
+    (if (identical? v nv)
+      state
+      [db datoms (assoc m a nv)])))
 
 (defn- add-map
   [[db datoms] m]
@@ -289,7 +289,8 @@
           [db datoms m] (reduce-kv (fn [state a v]
                                      (let [a-schema (db-schema a)]
                                        (-> state
-                                           (resolve-attr-refs e a v a-schema)
+                                           (cond-> (ref? a-schema)
+                                                   (resolve-attr-refs a v a-schema))
                                            (add-attr-index e a (get pm a) a-schema))))
                                    [db datoms m]
                                    m)]

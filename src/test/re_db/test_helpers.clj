@@ -10,9 +10,10 @@
 (defmacro bench [label & pairs]
   (let [suite (with-meta (symbol "suite") {:tag 'js})]
     `(let [~suite (new ~'re-db.test-helpers/Suite)]
-       (prn ~(str "---- benchmarking " label))
+       (~'js/console.group (str ~label))
        (-> ~suite
            ~@(for [[label f] (partition 2 pairs)]
                `(.add ~label ~f))
            (.on "cycle" (comp ~'js/console.log str (~'applied-science.js-interop/get :target)))
-           (.run)))))
+           (.run))
+       (~'js/console.groupEnd))))

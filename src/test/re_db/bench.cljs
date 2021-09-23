@@ -101,17 +101,13 @@
 
    (let [samples (make-samples 100 5)]
      (bench "transactions - 5 keys per map"
-            :datascript/transact!
-            #(ds/transact! (atom ds-snap) samples)
-            :re-db/transact!
-            #(d/transact! (atom re-snap) samples)))
+            "re-db     " #(d/transact! (atom re-snap) samples)
+            "datascript" #(ds/transact! (atom ds-snap) samples)))
 
    (let [samples (make-samples 100 20)]
      (bench "transactions - 20 keys per map"
-            :datascript/transact!
-            #(ds/transact! (atom ds-snap) samples)
-            :re-db/transact!
-            #(d/transact! (atom re-snap) samples)))
+            "re-db     " #(d/transact! (atom re-snap) samples)
+            "datascript" #(ds/transact! (atom ds-snap) samples)))
 
    (comment
     (let [ids (map :db/id (take 10 (shuffle samples)))
