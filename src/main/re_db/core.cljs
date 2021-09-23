@@ -236,72 +236,64 @@
       (assert (not (false? e-from-attr)) "must have a unique attribute")
       (assoc m :db/id (or e-from-attr (gen-e))))))
 
-(defn- add-attr-index [[db datoms :as state] e a pv a-schema]
-  (let [v (fast/get-in db [:eav e a])]
-    (if-some [datom (if (many? a-schema)
-                      (let [v (set/difference v pv)
-                            pv (set/difference pv v)]
-                        (when (or (seq v) (seq pv))
-                          [e a v pv]))
-                      (when (not= v pv)
-                        [e a v pv]))]
+(defn- add-attr-index [[db datoms m :as state] e a pv a-schema]
+  (let [is-many (many? a-schema)]
+    (if-some [datom (let [v (get m a)]
+                      (if is-many
+                        (let [v (set/difference v pv)
+                              pv (set/difference pv v)]
+                          (when (or (seq v) (seq pv))
+                            [e a v pv]))
+                        (when (not= v pv)
+                          [e a v pv])))]
       [(update-indexes db datom a-schema)
-       (conj-datom datoms datom)]
+       (conj-datom datoms datom)
+       m]
       state)))
-
-;; adds indexes for map entries without creating intermediate data structures
-(defn- add-map-indexes [state e prev-m]
-  (reduce-kv
-   (fn [state a v]
-     (let [a-schema (get-schema (state 0) a)
-           pv (get prev-m a)]
-       (add-attr-index state e a pv a-schema)))
-   state
-   (get-entity (state 0) e)))
 
 (declare add-map)
 
-(defn resolve-attr-refs [[db datoms :as state] e a v a-schema]
+(defn resolve-attr-refs [[db datoms m :as state] e a v a-schema]
   (if-not (ref? a-schema)
-    [(assoc-in db [:eav e a] v) datoms]
-    (let [[db datoms v] (if-not (ref? a-schema)
-                          [db datoms v]
-                          (if (many? a-schema)
-                            (reduce
-                             (fn [[db datoms vs :as state] v]
-                               (cond (vector? v)
-                                     [db datoms (-> vs
-                                                    (disj v)
-                                                    (conj (or (resolve-e v db) v)))]
-                                     (map? v)
-                                     (let [sub-entity (resolve-map-e db v)]
-                                       (conj
-                                        (add-map [db datoms] sub-entity)
-                                        (-> vs (disj v) (conj (:db/id sub-entity)))))
-                                     :else state))
-                             [db datoms v]
-                             v)
-                            (cond (vector? v)
-                                  [db datoms (or (resolve-e v db) v)]
-                                  (map? v)
-                                  (let [sub-entity (resolve-map-e db v)]
-                                    (conj (add-map [db datoms] sub-entity)
-                                          (:db/id sub-entity)))
-                                  :else [db datoms v])))]
-      [(assoc-in db [:eav e a] v) datoms])))
+    [db datoms m]
+    (let [[db datoms v]
+          (if (many? a-schema)
+            (reduce
+             (fn [[db datoms vs :as state] v]
+               (cond (vector? v)
+                     [db datoms (-> vs
+                                    (disj v)
+                                    (conj (or (resolve-e v db) v)))]
+                     (map? v)
+                     (let [sub-entity (resolve-map-e db v)]
+                       (conj
+                        (add-map [db datoms] sub-entity)
+                        (-> vs (disj v) (conj (:db/id sub-entity)))))
+                     :else state))
+             [db datoms v]
+             v)
+            (cond (vector? v)
+                  [db datoms (or (resolve-e v db) v)]
+                  (map? v)
+                  (let [sub-entity (resolve-map-e db v)]
+                    (conj (add-map [db datoms] sub-entity)
+                          (:db/id sub-entity)))
+                  :else [db datoms v]))]
+      [db datoms (assoc m a v)])))
 
 (defn- add-map
   [[db datoms] m]
   (let [{:as m e :db/id} (resolve-map-e db m)]
     (let [pm (get-entity db e)
-          db-schema (:schema db)]
-      (reduce-kv (fn [state a v]
-                   (let [a-schema (db-schema a)]
-                     (-> state
-                         (resolve-attr-refs e a v a-schema)
-                         (add-attr-index e a (get pm a) a-schema))))
-                 [db datoms]
-                 m))))
+          db-schema (:schema db)
+          [db datoms m] (reduce-kv (fn [state a v]
+                                     (let [a-schema (db-schema a)]
+                                       (-> state
+                                           (resolve-attr-refs e a v a-schema)
+                                           (add-attr-index e a (get pm a) a-schema))))
+                                   [db datoms m]
+                                   m)]
+      [(assoc-in db [:eav e] m) datoms])))
 
 (defn- commit-tx [state tx]
   (if (vector? tx)
