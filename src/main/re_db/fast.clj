@@ -48,10 +48,14 @@
         (recur threaded (next forms)))
       x)))
 
-(defmacro t2-update-in [m path f & args])
-
 (defmacro update! [m k f & args]
-  `(let [m# ~m
-         k# ~k
-         v# (m# k#)]
-     (assoc! m# k# (~f v# ~@args))))
+  `(let [m# ~m]
+     (assoc! m# ~k (~f (m# ~k) ~@args))))
+
+(defmacro update-in! [m [k0 k1] f & args]
+  `(let [m0# ~m
+         m1# (m0# ~k0)
+         v# (m1# ~k1)]
+     (->> (~f v# ~@args)
+          (assoc! m1# ~k1)
+          (assoc! m0# ~k0))))

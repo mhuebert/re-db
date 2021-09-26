@@ -1,10 +1,9 @@
 (ns re-db.core
   (:refer-clojure :exclude [indexed?])
   (:require [applied-science.js-interop :as j]
-            [cljs-uuid-utils.core :as uuid-utils]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.util :refer [difference-in disj-in dissoc-in guard update-set]]))
+            [re-db.util :as u :refer [disj-in dissoc-in guard update-set]]))
 
 (def ^:dynamic *datoms* nil)
 
@@ -101,11 +100,11 @@
      :f (fn [db e a v pv ^boolean some-v? ^boolean some-pv?]
           (cond-> db
                   some-v?
-                  (update-in [:ave a v] (if (unique? schema)
-                                          (set-unique a v)
-                                          conj-set) e)
+                  (u/update-index! :ave a v (if (unique? schema)
+                                              (set-unique a v)
+                                              conj-set) e)
                   some-pv?
-                  (disj-in [:ave a pv] e)))}))
+                  (u/update-index! :ave a pv disj e)))}))
 
 (defn vae-indexer [schema]
   (when (ref? schema)
@@ -114,22 +113,22 @@
      :f (fn [db e a v pv ^boolean some-v? ^boolean some-pv?]
           (cond-> db
                   some-v?
-                  (update-in [:vae v a] conj-set e)
+                  (u/update-index! :vae v a conj-set e)
                   some-pv?
-                  (disj-in [:vae pv a] e)))}))
+                  (u/update-index! :vae pv a disj e)))}))
 
 (defn a-indexer [schema]
   (when true #_(_a_? schema)
     {:name :_a_
      :per :datom
      :f (fn [db e a v pv ^boolean some-v? _]
-          (update db :_a_ (fn [index]
-                            (if some-v?
-                              (assoc! index a (conj (or (index a) #{}) e))
-                              (dissoc! index a))))
+          (fast/update! db :_a_  (fn [index]
+                                  (if some-v?
+                                    (assoc! index a (conj (or (index a) #{}) e))
+                                    (dissoc! index a))))
           #_(if some-v?
-            (update db :_a_ (fn [index] (assoc! index a (conj-set (index a e)))))
-            (disj-in db [:_a_ a] e)))}))
+              (update db :_a_ (fn [index] (assoc! index a (conj-set (index a e)))))
+              (disj-in db [:_a_ a] e)))}))
 
 (defn make-indexer [schema]
   ;; one indexer per attribute
@@ -190,7 +189,7 @@
 (defn- clear-empty-ent [db e]
   (cond-> db
           (empty? (fast/get-in db [:eav e]))
-          (update :eav dissoc e)))
+          (fast/update! :eav dissoc! e)))
 
 (defn- retract-attr
   [db [_ e a v]]
@@ -198,10 +197,10 @@
     (let [a-schema (get-schema db a)]
       (if (many? a-schema)
         (if-some [removals (guard (set/intersection v pv) seq)]
-          (-> (difference-in db [:eav e a] removals)
+          (-> (u/update-index! db :eav e a (fnil set/difference #{}) removals)
               (index [e a nil removals] a-schema))
           db)
-        (-> (update-in db [:eav e] dissoc a)
+        (-> (u/assoc-index! db :eav e a nil)
             (index [e a nil pv] a-schema)
             (clear-empty-ent e))))
     db))
@@ -216,29 +215,31 @@
 (defn- add
   [db [_ e a v]]
   (let [a-schema (get-schema db a)
-        db (if (contains? (:eav db) e) db (assoc-in db [:eav e] {:db/id e}))
-        pv (fast/get-in db [:eav e a])
+        db (if (contains? (:eav db) e)
+             db
+             (fast/update! db :eav assoc! e {:db/id e}))
+        m (get-entity db e)
+        pv (get m a)
         v (cond-> v (ref? a-schema) (resolve-e db))]
     (if (many? a-schema)
       (if-some [additions (guard (set/difference v pv) seq)]
-        (-> (assoc-in db [:eav e a] (into-set pv additions))
+        (-> (u/update-index! db :eav e a into-set additions)
             (index [e a additions nil] a-schema))
         db)
       (if (= pv v)
         db
-        (-> (assoc-in db [:eav e a] v)
+        (-> (u/assoc-index! db :eav e a v)
             (index [e a v pv] a-schema))))))
 
 (defn commit-datom [db [e a v pv :as datom]]
   (let [a-schema (get-schema db a)]
     (-> (if (many? a-schema)
           ;; for cardinality/many, `v` is a set of "additions" and `pv` is a set of "removals"
-          (update-set db [:eav e a] (fn [dbv]
-                                      (-> (into (or dbv #{}) v)
-                                          (set/difference pv))))
-          (if (some? v)
-            (assoc-in db [:eav e a] v)
-            (dissoc-in db [:eav e a])))
+          (u/update-index! db :eav e a
+                           (fn [dbv]
+                             (-> (into (or dbv #{}) v)
+                                 (set/difference pv))))
+          (u/assoc-index! db :eav e a v))
         (index datom a-schema))))
 
 (defn reverse-datom [datom]
@@ -328,7 +329,7 @@
                                     (add-attr-index e a (get pm a) a-schema))))
                             [db m]
                             m)]
-      (assoc-in db [:eav e] m))))
+      (fast/update! db :eav assoc! e m))))
 
 (defn- commit-tx [db tx]
   (if (vector? tx)
@@ -345,9 +346,19 @@
     (add-map db (update tx :db/id resolve-e db))))
 
 (defn- transaction [db-before new-txs]
-  (let [db-after (reduce commit-tx (update db-before :_a_ transient) new-txs)]
+  (let [db-after (-> (reduce commit-tx (-> db-before
+                                           (update :_a_ transient)
+                                           (update :eav transient)
+                                           (update :ave transient)
+                                           (update :vae transient)
+                                           transient) new-txs)
+                     (persistent!)
+                     (update :_a_ persistent!)
+                     (update :eav persistent!)
+                     (update :ave persistent!)
+                     (update :vae persistent!))]
     {:db-before db-before
-     :db-after (update db-after :_a_ persistent!)
+     :db-after db-after
      :datoms (or (some-> *datoms* deref persistent!) [])}))
 
 (def ^:dynamic *prevent-notify* false)
@@ -420,4 +431,7 @@
   ([] (create-conn {}))
   ([schema]
    (atom {:_a_ {}
+          :eav {}
+          :vae {}
+          :ave {}
           :schema (compile-db-schema schema)})))
