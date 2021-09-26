@@ -25,3 +25,5 @@
     (merge m1 m2)
     m2)
   (merge m1 m2))
+
+keyword-identical?

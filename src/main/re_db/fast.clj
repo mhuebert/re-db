@@ -10,6 +10,16 @@
          ~@(for [k ks]
              (list 'clojure.core/get k)))))
 
+(defmacro get-in-objs
+  "Lookups in javascript objects, keywords converted to strings"
+  [m ks]
+  (assert (vector? ks))
+  `(j/get-in ~m ~(mapv (fn [k] (if (keyword? k)
+                                 (subs (str k) 1)
+                                 `(j/!get ~k ~'.-fqn))) ks)))
+
+
+
 (defmacro defmemo-1 [name fsym]
   `(let [cache# (volatile! {})]
      (defn ~name [x#]
@@ -37,3 +47,11 @@
                        (list form x))]
         (recur threaded (next forms)))
       x)))
+
+(defmacro t2-update-in [m path f & args])
+
+(defmacro update! [m k f & args]
+  `(let [m# ~m
+         k# ~k
+         v# (m# k#)]
+     (assoc! m# k# (~f v# ~@args))))
