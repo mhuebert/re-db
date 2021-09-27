@@ -11,18 +11,7 @@
             [re-db.test-helpers :as th :refer [bench]]
             [re-db.fast :as fast]))
 
-(def schema {:user/id rd/unique-id
-             :fruit/id rd/unique-id
-             :vegetable/id rd/unique-id
-             :car/id rd/unique-id
-             :animal/id rd/unique-id
-             :cat/id rd/unique-id
-             :dog/id rd/unique-id
-             :country/id rd/unique-id
-             :language/id rd/unique-id
-             :marijuana/id rd/unique-id
-             :planet/id rd/unique-id
-             :user/pets {:db/valueType :db.type/ref
+(def schema {:user/pets {:db/valueType :db.type/ref
                          :db/cardinality :db.cardinality/many}
              :pet/owner {:db/valueType :db.type/ref}
              :user/name {:db/index true}
@@ -542,36 +531,44 @@
        :name (rand-nth ["Pluto" "Saturn" "Venus" "Mars" "Jupyter"])
        :price (rand-int 100)}))
 
-  (def people (repeatedly random-man))
-  (def fruit (repeatedly random-fruit))
-  (def vegetable (repeatedly random-vegetable))
-  (def car (repeatedly random-car))
-  (def animal (repeatedly random-animal))
-  (def cat (repeatedly random-cat))
-  (def dog (repeatedly random-dog))
-  (def country (repeatedly random-country))
-  (def language (repeatedly random-language))
-  (def marijuana-strain (repeatedly random-marijuana-strain))
+  (defn make-n [f n] (->> (repeatedly f)
+                          (take n)
+                          shuffle))
 
-  (def planet (repeatedly random-planet))
+  (def data100k (into []
+                      (mapcat #(make-n % 10000))
+                      [random-fruit
+                      random-vegetable
+                      random-car
+                      random-animal
+                      random-cat
+                      random-dog
+                      random-country
+                      random-language
+                      random-marijuana-strain
+                      random-planet]))
 
-  (def people50k (shuffle (take 50000 people)))
+  (def people50k (make-n random-man 50000))
 
-  (def fruit10k (shuffle (take 10000 fruit)))
-  (def vegetable10k (shuffle (take 10000 vegetable)))
-  (def car10k (shuffle (take 10000 car)))
+  (defn add-ids [data] (mapv
+                        (fn [m]
+                          (reduce-kv
+                           (fn [acc k v]
+                             (cond-> acc (= "id" (name k)) (assoc :db/id v))) m m))
+                        data))
 
-  (def animal10k (shuffle (take 10000 animal)))
-  (def cat10k (shuffle (take 10000 cat)))
-  (def dog10k (shuffle (take 10000 dog)))
-  (def country10k (shuffle (take 10000 country)))
-  (def language10k (shuffle (take 10000 language)))
-  (def marijuana-strain10k (shuffle (take 10000 marijuana-strain)))
-  (def planet10k (shuffle (take 10000 planet)))
+  (def data100k-ids (add-ids data100k))
+  (def people50k-ids (add-ids people50k))
 
-  (def data100k (enc/into-all []
-                              fruit10k vegetable10k car10k animal10k cat10k dog10k
-                              country10k language10k marijuana-strain10k planet10k))
+  (def ds-100k (d/db-with (d/empty-db) data100k-ids))
+  (def ds-50k (d/db-with (d/empty-db) people50k-ids))
+
+  (def dx-100k (dx/create-dx data100k))
+  (def dx-50k (dx/create-dx people50k))
+
+  (def rd-100k (doto (rd/create-conn schema) (rd/transact! data100k-ids)))
+  (def rd-50k (doto (rd/create-conn schema) (rd/transact! people50k-ids)))
+
   (count data100k))
 
 (do
@@ -628,42 +625,7 @@
                  :doxa (doxa-add-all)
                  :re-db (re-db-add-all)]))
 ;; clj => [1483.59 42.56]
-(def db100k
-  (d/db-with (d/empty-db)
-             (mapv
-              (fn [m]
-                (reduce-kv
-                 (fn [acc k v]
-                   (if (= :id (name k))
-                     (assoc acc :db/id v)
-                     (assoc acc k v)))
-                 {}
-                 m))
-              data100k)))
 
-(def db50k
-  (d/db-with (d/empty-db)
-             (mapv
-              (fn [m]
-                (reduce-kv
-                 (fn [acc k v]
-                   (if (= :id (name k))
-                     (assoc acc :db/id v)
-                     (assoc acc k v)))
-                 {}
-                 m))
-              people50k)))
-
-(def dx100k (dx/create-dx data100k))
-(def dx50k (dx/create-dx people50k))
-
-(def rd100k
-  (doto (rd/create-conn schema)
-    (rd/transact! data100k)))
-
-(def rd50k
-  (doto (rd/create-conn schema)
-    (rd/transact! people50k)))
 
 (do
 
@@ -671,17 +633,17 @@
     (enc/qb 1
             (d/q '[:find ?e
                    :where [?e :name "Ivan"]]
-                 db50k)))
+                 ds-50k)))
 
   (defn dx-q1 []
     (enc/qb 1
             (dx/q [:find ?e
                    :where [?e :name "Ivan"]]
-                  dx50k)))
+                  dx-50k)))
 
   (defn rd-q1 []
     (enc/qb 1
-            (read/where rd50k [[:name "Ivan"]])))
+            (read/where rd-50k [[:name "Ivan"]])))
 
 
   (prn :q1 [:ds (datascript-q1)
@@ -696,18 +658,18 @@
            (d/q '[:find ?e ?a
                   :where [?e :name "Ivan"]
                   [?e :age ?a]]
-                db50k)))
+                ds-50k)))
 
  (defn dx-q2 []
    (enc/qb 1e1
            (dx/q [:find [?e ?a]
                   :where [?e :name "Ivan"]
                   [?e :age ?a]]
-                 dx50k)))
+                 dx-50k)))
 
  (defn rd-q2 []
    (enc/qb 1e1
-           (->> (read/where rd50k [[:name "Ivan"]
+           (->> (read/where rd-50k [[:name "Ivan"]
                                     :age])
                 #_(mapv (juxt :db/id :age)))))
 
@@ -723,7 +685,7 @@
                   :where [?e :name "Ivan"]
                   [?e :age ?a]
                   [?e :sex :male]]
-                db50k)))
+                ds-50k)))
 
  (defn dx-q3 []
    (enc/qb 1e1
@@ -731,11 +693,11 @@
                   :where [?e :name "Ivan"]
                   [?e :age ?a]
                   [?e :sex :male]]
-                 dx50k)))
+                 dx-50k)))
 
  (defn rd-q3 []
    (enc/qb 1e1
-           (read/where rd50k [[:name "Ivan"]
+           (read/where rd-50k [[:name "Ivan"]
                               :age
                               [:sex :male]])))
 
@@ -751,7 +713,7 @@
                   [?e :last-name ?l]
                   [?e :age ?a]
                   [?e :sex :male]]
-                db50k)))
+                ds-50k)))
 
  (defn dx-q4 []
    (enc/qb 1e1
@@ -761,15 +723,22 @@
                    [?e :last-name ?l]
                    [?e :age ?a]
                    [?e :sex :male]]
-                  dx50k))))
+                  dx-50k))))
 
  (defn rd-q4 []
    (enc/qb 1e1
-           (->> (read/where rd50k [[:name "Ivan"]
-                                   :age
-                                   :last-name
-                                   [:sex :male]])
-                (mapv (juxt :db/id :last-name :age)))))
+           (read/where rd-50k [[:name "Ivan"]
+                              :age
+                              :last-name
+                              [:sex :male]])))
+
+ (defn rd-q4-2 []
+   ;; just return entities
+   (enc/qb 1e1
+           (read/where rd-50k [[:name "Ivan"]
+                              :age
+                              :last-name
+                              [:sex :male]])))
 
  (prn :q4 [:ds (datascript-q4)
        :doxa (dx-q4)
@@ -777,60 +746,92 @@
 ;; cljs => [  588    681]
 ;; clj  => [252.49 310.05]
 
-(comment
+(do
  (defn datascript-qpred1 []
    (enc/qb 1e1
            (d/q '[:find ?e ?s
                   :where [?e :salary ?s]
                   [(> ?s 50000)]]
-                db50k)))
+                ds-50k)))
 
  (defn dx-qpred1 []
    (enc/qb 1e1
            (dx/q [:find ?e ?s
                   :where [?e :salary ?s]
                   [(> ?s 50000)]]
-                 dx50k)))
+                 dx-50k)))
 
- [(datascript-qpred1) (dx-qpred1)])
+ (defn rd-qpred1 []
+   (enc/qb 1e1
+           (read/where rd-50k [(comp #(> % 50000) :salary)])))
+
+ (defn rd-qpred1-juxt []
+   (enc/qb 1e1
+           (mapv (juxt :db/id :salary) (read/where rd-50k [(comp #(> % 50000) :salary)]))))
+
+ (prn :qpred1
+      [:ds (datascript-qpred1)
+       :doxa (dx-qpred1)
+       :re-db (rd-qpred1)
+       :re-db-juxt (rd-qpred1-juxt)]))
 ;; cljs => [  321    959]
 ;; clj  => [259.34 384.9]
 
-(comment
+(do
  (defn datascript-pull1 []
    (enc/qb 1e3
-           (d/pull db100k [:name] (rand-int 20000))))
+           (d/pull ds-100k [:name] (rand-int 20000))))
 
  (defn dx-pull1 []
    (enc/qb 1e3
-           (dx/pull dx100k [:name] [:db/id (rand-int 20000)])))
+           (dx/pull dx-100k [:name] [:db/id (rand-int 20000)])))
+ (defn rd-pull1 []
+   (enc/qb 1e3
+           (select-keys (read/get rd-100k (rand-int 10000)) [:name])))
 
- [(datascript-pull1) (dx-pull1)])
+
+
+ (prn :pull1 [:ds (datascript-pull1)
+              :doxa (dx-pull1)
+              :re-db (rd-pull1)]))
 ;; cljs => [   15    8]
 ;; clj  => [14.43 1.36]
 
 (comment
  (defn datascript-pull2 []
    (enc/qb 1e3
-           (d/pull db100k ['*] (rand-int 20000))))
+           (d/pull ds-100k ['*] (rand-int 20000))))
 
  (defn dx-pull2 []
    (enc/qb 1e3
-           (dx/pull dx100k [:*] [:db/id (rand-int 20000)])))
+           (dx/pull dx-100k [:*] [:db/id (rand-int 20000)])))
+ (defn rd-pull2 []
+   (enc/qb 1e3
+           (read/get rd-100k (rand-int 10000))))
 
- [(datascript-pull2) (dx-pull2)])
+ (prn :pull2 [:doxa (dx-pull2)
+              :re-db (rd-pull2)
+              :ds (datascript-pull2)]))
 ;; cljs => [   43   11]
 ;; clj  => [38.52 3.81]
 
-(comment
+(do
  (defn datascript-pull3 []
    (enc/qb 1e3
-           (d/pull db100k [:name {:friend [:name]}] (rand-int 20000))))
+           (d/pull ds-100k [:name {:friend [:name]}] (rand-int 20000))))
 
  (defn dx-pull3 []
    (enc/qb 1e3
-           (dx/pull dx100k [:name {:friend [:name]}] [:db/id (rand-int 20000)])))
+           (dx/pull dx-100k [:name {:friend [:name]}] [:db/id (rand-int 20000)])))
+ (defn rd-pull3 []
+   (enc/qb 1e3
+           (read/touch
+            (read/entity rd-100k (rand-int 10000))
+            [:friend])))
 
- [(datascript-pull3) (dx-pull3)])
+
+ (prn :pull3 [:ds (datascript-pull3)
+              :doxa (dx-pull3)
+              :re-db (rd-pull3)]))
 ;; cljs => [   42   19]
 ;; clj  => [20.63 2.84]

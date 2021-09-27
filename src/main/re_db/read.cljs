@@ -91,6 +91,14 @@
 ;; higher-level index lookups that resolve based on schema
 ;; and provide non-indexed backoffs
 
+(def warned (volatile! #{}))
+(defn warn! [index a]
+  (when-not (@warned [index a])
+    (vswap! warned conj [index a])
+    (js/console.warn (str "Missing " index " on " a ". "
+                          (case index :ave db/indexed
+                                      :ae db/indexed-ae)))))
+
 (defn av_
   "Returns entity-ids for entities where attribute (a) equals value (v)"
   [conn [a v]]
@@ -101,7 +109,7 @@
         (if (db/indexed? schema)
           #{}
           (do
-            #_(js/console.warn (str "Missing :ave index on " a))
+            (warn! :ave a)
             (->> (:eav db)
                  (reduce-kv
                   (fn [out e m]
@@ -119,7 +127,7 @@
         (if (db/ae? (db/get-schema db a))
           #{}
           (do
-            #_(js/console.warn (str "Missing _a_ index on " a))
+            (warn! :ae a)
             (->> (:eav db)
                  (reduce-kv
                   (fn [out e m] (cond-> out
@@ -152,8 +160,8 @@
                   set-a a
                   is-reverse? (reverse-attr? a)
                   a (cond-> a is-reverse? forward-attr)
-                  attr-schema (db/get-schema db a)
-                  is-many (db/many? attr-schema)
+                  a-schema (db/get-schema db a)
+                  is-many (db/many? a-schema)
                   ;; ids of related entities
                   ids (if is-reverse?
                        (fast/get-in db [:vae e a])
@@ -191,9 +199,9 @@
             m
             (fast/get-in db [:vae (:db/id m)]))]
        (reduce-kv (fn [m a v]
-                    (let [attr-schema (db/get-schema db a)]
-                      (if (db/ref? attr-schema)
-                        (if (db/many? attr-schema)
+                    (let [a-schema (db/get-schema db a)]
+                      (if (db/ref? a-schema)
+                        (if (db/many? a-schema)
                           (mapv #(entity conn %) v)
                           (assoc m a (entity conn v)))
                         m))) with-reverse-refs m))))
@@ -203,6 +211,7 @@
 (defn- ids-where-1 [conn q]
   (cond (vector? q) (av_ conn q)
         (keyword? q) (_a_ conn q)
+        (fn? q) (into #{} (filter q) (vals (:eav @conn)))
         :else (throw (js/Error. (str "Invalid where-1 clause:" q)))))
 
 (defn ids-where
@@ -240,14 +249,14 @@
           is-reverse (reverse-attr? a)
           a (cond-> a is-reverse forward-attr)
           db @conn
-          attr-schema (db/get-schema db a)
-          is-ref? (db/ref? attr-schema)]
+          a-schema (db/get-schema db a)
+          is-ref? (db/ref? a-schema)]
       (if is-reverse
         (do
           (assert is-ref?)
           (mapv #(entity conn %) (-va_ conn [e a])))
         (let [v (-ea_ conn [e a])
-              is-many? (db/many? attr-schema)]
+              is-many? (db/many? a-schema)]
           (if is-ref?
             (if is-many?
               (mapv #(entity conn %) v)
