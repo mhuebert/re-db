@@ -26,4 +26,23 @@
     m2)
   (merge m1 m2))
 
-keyword-identical?
+(defn assoc-seq! [m a v]
+  (if (seq v)
+    (assoc! m a v)
+    (dissoc! m a)))
+
+(defn assoc-seq [m a v]
+  (if (seq v)
+    (assoc m a v)
+    (dissoc m a)))
+
+
+(defn assoc-some! [m a v]
+  (if (some? v)
+    (assoc! m a v)
+    (dissoc! m a)))
+
+(defn assoc-some [m a v]
+  (if (some? v)
+    (assoc m a v)
+    (dissoc m a)))

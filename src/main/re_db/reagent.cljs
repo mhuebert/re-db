@@ -80,7 +80,7 @@
 (def ^:private empty-patterns
   "Map for building sets of patterns."
   {:e__ #{}                                                 ;; <entity id>
-   :_a_ #{}                                                 ;; <attribute>
+   :ae #{}                                                 ;; <attribute>
    :_av #{}                                                 ;; [<attribute>, <value>]
    :ea_ #{}})
 
@@ -94,7 +94,7 @@
   "Returns a map of patterns matched by a list of datoms.
   Limits patterns to those listed in pattern-keys."
   ([datoms many?]
-   (datom-patterns datoms many? [:e__ :ea_ :_av :_a_]))
+   (datom-patterns datoms many? [:e__ :ea_ :_av :ae]))
   ([datoms many? pattern-keys]
    (let [f (compr (for [[k f] {:e__ (fn [patterns [e]] (update patterns :e__ conj e))
                                :ea_ (fn [patterns [e a]] (update patterns :ea_ conj [e a]))
@@ -108,7 +108,7 @@
                                                    _av
                                                    (into v pv))))
                                         (update patterns :_av conj [a v] [a pv])))
-                               :_a_ (fn [patterns [_ a]] (update patterns :_a_ conj a))}
+                               :ae (fn [patterns [_ a]] (update patterns :ae conj a))}
                         :when (contains? pattern-keys k)]
                     f))]
      (reduce f empty-patterns datoms))))
@@ -139,4 +139,4 @@
             {:e__ #{"e"}
              :ea_ #{["e" "a"]}
              :_av #{["e" "v"] ["e" "prev-v"]}
-             :_a_ #{"a"}})))
+             :ae #{"a"}})))

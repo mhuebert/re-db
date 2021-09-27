@@ -19,8 +19,8 @@
   (fast/get-in @conn [:vae v a]))
 
 (defn -_a_ [conn a]
-  (log-read! conn :_a_ a)
-  (fast/get-in @conn [:_a_ a]))
+  (log-read! conn :ae a)
+  (fast/get-in @conn [:ae a]))
 
 (defn -e__ [conn e]
   (log-read! conn :e__ e)
@@ -101,7 +101,7 @@
         (if (db/indexed? schema)
           #{}
           (do
-            (js/console.warn (str "Missing :ave index on " a))
+            #_(js/console.warn (str "Missing :ave index on " a))
             (->> (:eav db)
                  (reduce-kv
                   (fn [out e m]
@@ -116,10 +116,10 @@
   [conn a]
   (or (-_a_ conn a)
       (let [db @conn]
-        (if (db/_a_? (db/get-schema db a))
+        (if (db/ae? (db/get-schema db a))
           #{}
           (do
-            (js/console.warn (str "Missing _a_ index on " a))
+            #_(js/console.warn (str "Missing _a_ index on " a))
             (->> (:eav db)
                  (reduce-kv
                   (fn [out e m] (cond-> out
@@ -216,7 +216,7 @@
 
 (defn where
   [conn qs]
-  (map #(entity conn %) (ids-where conn qs)))
+  (mapv #(entity conn %) (ids-where conn qs)))
 
 (defn -resolve-e! [^Entity entity conn id]
   ;; entity ids are late-binding, you can pass a lookup ref for an entity that isn't yet in the db.

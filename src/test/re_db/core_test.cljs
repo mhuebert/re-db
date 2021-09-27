@@ -365,5 +365,5 @@
 
     (is (= #{1 2} (read/ids-where conn [:person/id])))
     (is (= #{1.1 2.1} (read/ids-where conn [:pet/id])))
-    (is (= #{1 2} (get-in @conn [:_a_ :person/id])))
+    (is (= #{1 2} (get-in @conn [:ae :person/id])))
     ))
