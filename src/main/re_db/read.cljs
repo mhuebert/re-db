@@ -8,6 +8,10 @@
             [clojure.core :as core]
             [clojure.set :as set]))
 
+(def auto-index? true)
+
+(js/console.info "re-db/auto-index:" auto-index?)
+
 ;; tracked index lookups
 
 (defn -av_ [conn [a v :as av]]
@@ -96,7 +100,7 @@
   (when-not (@warned [index a])
     (vswap! warned conj [index a])
     (js/console.warn (str "Missing " index " on " a ". "
-                          (case index :ave db/indexed
+                          (case index :ave db/indexed-ave
                                       :ae db/indexed-ae)))))
 
 (defn av_
@@ -110,13 +114,17 @@
           #{}
           (do
             (warn! :ave a)
-            (->> (:eav db)
-                 (reduce-kv
-                  (fn [out e m]
-                    (cond-> out
-                            (= (m a) v)
-                            (conj e)))
-                  #{})))))))
+            (if auto-index?
+              (do
+                (swap! conn db/add-missing-index a :ave)
+                (recur conn [a v]))
+              (->> (:eav db)
+                   (reduce-kv
+                    (fn [out e m]
+                      (cond-> out
+                              (= (m a) v)
+                              (conj e)))
+                    #{}))))))))
 
 (defn _a_
   "Returns [e v] pairs for entities containing attribute (a).
@@ -128,11 +136,15 @@
           #{}
           (do
             (warn! :ae a)
-            (->> (:eav db)
-                 (reduce-kv
-                  (fn [out e m] (cond-> out
-                                        (some? (m a)) (conj e)))
-                  #{})))))))
+            (if auto-index?
+              (do
+                (swap! conn db/add-missing-index a :ae)
+                (recur conn a))
+              (->> (:eav db)
+                   (reduce-kv
+                    (fn [out e m] (cond-> out
+                                          (some? (m a)) (conj e)))
+                    #{}))))))))
 
 (declare entity Entity)
 

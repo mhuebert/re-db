@@ -15,10 +15,10 @@
                          :db/cardinality :db.cardinality/many}
              :pet/owner {:db/valueType :db.type/ref}
              :user/name {:db/index true}
-             :db/ref-id rd/indexed
-             :friend {:db/valueType   :db.type/ref
+             :db/ref-id rd/indexed-ave
+             :friend {:db/valueType :db.type/ref
                       #_#_:db/cardinality :db.cardinality/many}
-             :alias   {:db/cardinality :db.cardinality/many}
+             :alias {:db/cardinality :db.cardinality/many}
 
              ;:name rd/indexed
              ;:age rd/indexed-ae
@@ -227,11 +227,24 @@
           id (-> (get-eav samples) ffirst)
           tx [[:db/add id :person/name "herbert"]
               [:db/add id :pet/name "priscilla"]]]
-      (bench "small transactions"
-             "re-db     " #(-> (atom re-snap)
-                               (rd/transact! tx))
-             "datascript" #(-> (atom ds-snap)
-                               (d/transact! tx))))
+      (comment
+       (bench "small transactions"
+              "re-db     " #(-> (atom re-snap)
+                                (rd/transact! tx))
+              "datascript" #(-> (atom ds-snap)
+                                (d/transact! tx)))))
+
+    (let [samples (take 1000 (map (fn [i] {:db/id i
+                                           :person/name (str (random-uuid))
+                                           :pet/name (str (random-uuid))}) (range)))]
+      (bench "pre/post indexing"
+             "pre-indexing" #(doto (rd/create-conn {:user/name rd/indexed-ave
+                                                    :pet/name rd/indexed-ave})
+                               (rd/transact! samples))
+             "post-indexing" #(doto (rd/create-conn)
+                                (rd/transact! samples)
+                                (swap! rd/add-missing-index :user/name :ave)
+                                (swap! rd/add-missing-index :pet/name :ave))))
 
     (let [samples (make-samples 100 5)
           eav (get-eav samples)
@@ -538,15 +551,15 @@
   (def data100k (into []
                       (mapcat #(make-n % 10000))
                       [random-fruit
-                      random-vegetable
-                      random-car
-                      random-animal
-                      random-cat
-                      random-dog
-                      random-country
-                      random-language
-                      random-marijuana-strain
-                      random-planet]))
+                       random-vegetable
+                       random-car
+                       random-animal
+                       random-cat
+                       random-dog
+                       random-country
+                       random-language
+                       random-marijuana-strain
+                       random-planet]))
 
   (def people50k (make-n random-man 50000))
 
@@ -606,24 +619,24 @@
                    :re-db (re-db-add-1 people50k)]))
 ;; clj => [264 261]
 (comment
-  (defn datascript-add-all []
-    (enc/qb 1
-            (d/db-with (d/empty-db schema) people50k)))
+ (defn datascript-add-all []
+   (enc/qb 1
+           (d/db-with (d/empty-db schema) people50k)))
 
-  (defn doxa-add-all []
-    (enc/qb 1
-            (->> (into []
-                       (map (fn [p] [:dx/put p]))
-                       people50k)
-                 (dx/commit {}))))
+ (defn doxa-add-all []
+   (enc/qb 1
+           (->> (into []
+                      (map (fn [p] [:dx/put p]))
+                      people50k)
+                (dx/commit {}))))
 
-  (defn re-db-add-all []
-    (enc/qb 1
-            (rd/transact! (rd/create-conn schema) people50k)))
+ (defn re-db-add-all []
+   (enc/qb 1
+           (rd/transact! (rd/create-conn schema) people50k)))
 
-  (prn :add-all [:ds (datascript-add-all)
-                 :doxa (doxa-add-all)
-                 :re-db (re-db-add-all)]))
+ (prn :add-all [:ds (datascript-add-all)
+                :doxa (doxa-add-all)
+                :re-db (re-db-add-all)]))
 ;; clj => [1483.59 42.56]
 
 
@@ -653,147 +666,147 @@
 ;; clj  => [5.45 32.09]
 
 (do
- (defn datascript-q2 []
-   (enc/qb 1e1
-           (d/q '[:find ?e ?a
-                  :where [?e :name "Ivan"]
-                  [?e :age ?a]]
-                ds-50k)))
+  (defn datascript-q2 []
+    (enc/qb 1e1
+            (d/q '[:find ?e ?a
+                   :where [?e :name "Ivan"]
+                   [?e :age ?a]]
+                 ds-50k)))
 
- (defn dx-q2 []
-   (enc/qb 1e1
-           (dx/q [:find [?e ?a]
-                  :where [?e :name "Ivan"]
-                  [?e :age ?a]]
-                 dx-50k)))
+  (defn dx-q2 []
+    (enc/qb 1e1
+            (dx/q [:find [?e ?a]
+                   :where [?e :name "Ivan"]
+                   [?e :age ?a]]
+                  dx-50k)))
 
- (defn rd-q2 []
-   (enc/qb 1e1
-           (->> (read/where rd-50k [[:name "Ivan"]
-                                    :age])
-                #_(mapv (juxt :db/id :age)))))
+  (defn rd-q2 []
+    (enc/qb 1e1
+            (->> (read/where rd-50k [[:name "Ivan"]
+                                     :age])
+                 #_(mapv (juxt :db/id :age)))))
 
- (prn :q2 [:ds (datascript-q2)
-           :doxa (dx-q2)
-           :re-db (rd-q2)]))
+  (prn :q2 [:ds (datascript-q2)
+            :doxa (dx-q2)
+            :re-db (rd-q2)]))
 ;; cljs => [329 779 18]
 ;; clj  => [152.96 317.74]
 (do
- (defn datascript-q3 []
-   (enc/qb 1e1
-           (d/q '[:find ?e ?a
-                  :where [?e :name "Ivan"]
-                  [?e :age ?a]
-                  [?e :sex :male]]
-                ds-50k)))
+  (defn datascript-q3 []
+    (enc/qb 1e1
+            (d/q '[:find ?e ?a
+                   :where [?e :name "Ivan"]
+                   [?e :age ?a]
+                   [?e :sex :male]]
+                 ds-50k)))
 
- (defn dx-q3 []
-   (enc/qb 1e1
-           (dx/q [:find [?e ?a]
-                  :where [?e :name "Ivan"]
-                  [?e :age ?a]
-                  [?e :sex :male]]
-                 dx-50k)))
+  (defn dx-q3 []
+    (enc/qb 1e1
+            (dx/q [:find [?e ?a]
+                   :where [?e :name "Ivan"]
+                   [?e :age ?a]
+                   [?e :sex :male]]
+                  dx-50k)))
 
- (defn rd-q3 []
-   (enc/qb 1e1
-           (read/where rd-50k [[:name "Ivan"]
-                              :age
-                              [:sex :male]])))
+  (defn rd-q3 []
+    (enc/qb 1e1
+            (read/where rd-50k [[:name "Ivan"]
+                                :age
+                                [:sex :male]])))
 
- (prn :q3 [:ds (datascript-q3)
-           :doxa (dx-q3)
-           :re-db (rd-q3)]))
+  (prn :q3 [:ds (datascript-q3)
+            :doxa (dx-q3)
+            :re-db (rd-q3)]))
 
 (do
- (defn datascript-q4 []
-   (enc/qb 1e1
-           (d/q '[:find ?e ?l ?a
-                  :where [?e :name "Ivan"]
-                  [?e :last-name ?l]
-                  [?e :age ?a]
-                  [?e :sex :male]]
-                ds-50k)))
-
- (defn dx-q4 []
-   (enc/qb 1e1
-           (doall
-            (dx/q [:find [?e ?l ?a]
+  (defn datascript-q4 []
+    (enc/qb 1e1
+            (d/q '[:find ?e ?l ?a
                    :where [?e :name "Ivan"]
                    [?e :last-name ?l]
                    [?e :age ?a]
                    [?e :sex :male]]
-                  dx-50k))))
+                 ds-50k)))
 
- (defn rd-q4 []
-   (enc/qb 1e1
-           (read/where rd-50k [[:name "Ivan"]
-                              :age
-                              :last-name
-                              [:sex :male]])))
+  (defn dx-q4 []
+    (enc/qb 1e1
+            (doall
+             (dx/q [:find [?e ?l ?a]
+                    :where [?e :name "Ivan"]
+                    [?e :last-name ?l]
+                    [?e :age ?a]
+                    [?e :sex :male]]
+                   dx-50k))))
 
- (defn rd-q4-2 []
-   ;; just return entities
-   (enc/qb 1e1
-           (read/where rd-50k [[:name "Ivan"]
-                              :age
-                              :last-name
-                              [:sex :male]])))
+  (defn rd-q4 []
+    (enc/qb 1e1
+            (read/where rd-50k [[:name "Ivan"]
+                                :age
+                                :last-name
+                                [:sex :male]])))
 
- (prn :q4 [:ds (datascript-q4)
-       :doxa (dx-q4)
-       :re-db (rd-q4)]))
+  (defn rd-q4-2 []
+    ;; just return entities
+    (enc/qb 1e1
+            (read/where rd-50k [[:name "Ivan"]
+                                :age
+                                :last-name
+                                [:sex :male]])))
+
+  (prn :q4 [:ds (datascript-q4)
+            :doxa (dx-q4)
+            :re-db (rd-q4)]))
 ;; cljs => [  588    681]
 ;; clj  => [252.49 310.05]
 
 (do
- (defn datascript-qpred1 []
-   (enc/qb 1e1
-           (d/q '[:find ?e ?s
-                  :where [?e :salary ?s]
-                  [(> ?s 50000)]]
-                ds-50k)))
+  (defn datascript-qpred1 []
+    (enc/qb 1e1
+            (d/q '[:find ?e ?s
+                   :where [?e :salary ?s]
+                   [(> ?s 50000)]]
+                 ds-50k)))
 
- (defn dx-qpred1 []
-   (enc/qb 1e1
-           (dx/q [:find ?e ?s
-                  :where [?e :salary ?s]
-                  [(> ?s 50000)]]
-                 dx-50k)))
+  (defn dx-qpred1 []
+    (enc/qb 1e1
+            (dx/q [:find ?e ?s
+                   :where [?e :salary ?s]
+                   [(> ?s 50000)]]
+                  dx-50k)))
 
- (defn rd-qpred1 []
-   (enc/qb 1e1
-           (read/where rd-50k [(comp #(> % 50000) :salary)])))
+  (defn rd-qpred1 []
+    (enc/qb 1e1
+            (read/where rd-50k [(comp #(> % 50000) :salary)])))
 
- (defn rd-qpred1-juxt []
-   (enc/qb 1e1
-           (mapv (juxt :db/id :salary) (read/where rd-50k [(comp #(> % 50000) :salary)]))))
+  (defn rd-qpred1-juxt []
+    (enc/qb 1e1
+            (mapv (juxt :db/id :salary) (read/where rd-50k [(comp #(> % 50000) :salary)]))))
 
- (prn :qpred1
-      [:ds (datascript-qpred1)
-       :doxa (dx-qpred1)
-       :re-db (rd-qpred1)
-       :re-db-juxt (rd-qpred1-juxt)]))
+  (prn :qpred1
+       [:ds (datascript-qpred1)
+        :doxa (dx-qpred1)
+        :re-db (rd-qpred1)
+        :re-db-juxt (rd-qpred1-juxt)]))
 ;; cljs => [  321    959]
 ;; clj  => [259.34 384.9]
 
 (do
- (defn datascript-pull1 []
-   (enc/qb 1e3
-           (d/pull ds-100k [:name] (rand-int 20000))))
+  (defn datascript-pull1 []
+    (enc/qb 1e3
+            (d/pull ds-100k [:name] (rand-int 20000))))
 
- (defn dx-pull1 []
-   (enc/qb 1e3
-           (dx/pull dx-100k [:name] [:db/id (rand-int 20000)])))
- (defn rd-pull1 []
-   (enc/qb 1e3
-           (select-keys (read/get rd-100k (rand-int 10000)) [:name])))
+  (defn dx-pull1 []
+    (enc/qb 1e3
+            (dx/pull dx-100k [:name] [:db/id (rand-int 20000)])))
+  (defn rd-pull1 []
+    (enc/qb 1e3
+            (select-keys (read/get rd-100k (rand-int 10000)) [:name])))
 
 
 
- (prn :pull1 [:ds (datascript-pull1)
-              :doxa (dx-pull1)
-              :re-db (rd-pull1)]))
+  (prn :pull1 [:ds (datascript-pull1)
+               :doxa (dx-pull1)
+               :re-db (rd-pull1)]))
 ;; cljs => [   15    8]
 ;; clj  => [14.43 1.36]
 
@@ -816,22 +829,22 @@
 ;; clj  => [38.52 3.81]
 
 (do
- (defn datascript-pull3 []
-   (enc/qb 1e3
-           (d/pull ds-100k [:name {:friend [:name]}] (rand-int 20000))))
+  (defn datascript-pull3 []
+    (enc/qb 1e3
+            (d/pull ds-100k [:name {:friend [:name]}] (rand-int 20000))))
 
- (defn dx-pull3 []
-   (enc/qb 1e3
-           (dx/pull dx-100k [:name {:friend [:name]}] [:db/id (rand-int 20000)])))
- (defn rd-pull3 []
-   (enc/qb 1e3
-           (read/touch
-            (read/entity rd-100k (rand-int 10000))
-            [:friend])))
+  (defn dx-pull3 []
+    (enc/qb 1e3
+            (dx/pull dx-100k [:name {:friend [:name]}] [:db/id (rand-int 20000)])))
+  (defn rd-pull3 []
+    (enc/qb 1e3
+            (read/touch
+             (read/entity rd-100k (rand-int 10000))
+             [:friend])))
 
 
- (prn :pull3 [:ds (datascript-pull3)
-              :doxa (dx-pull3)
-              :re-db (rd-pull3)]))
+  (prn :pull3 [:ds (datascript-pull3)
+               :doxa (dx-pull3)
+               :re-db (rd-pull3)]))
 ;; cljs => [   42   19]
 ;; clj  => [20.63 2.84]

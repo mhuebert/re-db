@@ -3,11 +3,15 @@
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.util :refer [guard]]))
+            [re-db.util :refer [guard set-replace]]))
 
-(def ^boolean index-all? true)
+(def ^boolean index-all-ave? false)
+(def ^boolean index-all-ae? true)
 
-(js/console.info "re-db: index-all " (if index-all? "enabled" "disabled"))
+(js/console.info "re-db/index-all:"
+                 (str (cond-> #{}
+                              index-all-ave? (conj :ave)
+                              index-all-ae? (conj :ae))))
 
 (def ^:dynamic *datoms* nil)
 
@@ -24,11 +28,11 @@
 (defn ref? [a-schema] (true? (j/!get a-schema :ref?)))
 
 ;; schema
-(def many {:db/cardinality :db.cardinality/many})
-(def ref {:db/valueType :db.type/ref})
-(def unique-id {:db/unique :db.unique/identity})
-(def unique-value {:db/unique :db.unique/value})
-(def indexed {:db/index true})
+(def indexed-many {:db/cardinality :db.cardinality/many})
+(def indexed-ref {:db/valueType :db.type/ref})
+(def indexed-unique {:db/unique :db.unique/identity})
+(def indexed-unique-value {:db/unique :db.unique/value})
+(def indexed-ave {:db/index true})
 (def indexed-ae {:db.index/_a_ true})
 
 (defn resolve-lookup-ref [[a v] db]
@@ -61,49 +65,49 @@
       (throw (js/Error. (unique-err-msg a v e coll)))
       #{e})))
 
-(defn set-replace [s old new] (-> s (disj old) (conj new)))
-
 ;; when the schema is normalized - we make lists of per-value and per-datom
 ;; indexers - which all datoms are looped through.
 (defn ave-indexer [schema]
-  (when (or index-all? (indexed? schema))
+  (when (or index-all-ave? (indexed? schema))
     {:name :ave
      :per :value
-     :f (fn [db e a v pv ^boolean some-v? ^boolean some-pv?]
-          (cond-> db
+     :f (fn [ave e a v pv ^boolean some-v? ^boolean some-pv?]
+          (cond-> ave
                   some-v?
-                  (fast/update-index! [:ave a v] (if (unique? schema)
-                                                   (set-unique a v)
-                                                   conj-set) e)
+                  (fast/update-index! [a v] (if (unique? schema)
+                                              (set-unique a v)
+                                              conj-set) e)
                   some-pv?
-                  (fast/update-index! [:ave a pv] disj e)))}))
+                  (fast/update-index! [a pv] disj e)))}))
 
 (defn vae-indexer [schema]
   (when (ref? schema)
     {:name :vae
      :per :value
-     :f (fn [db e a v pv ^boolean some-v? ^boolean some-pv?]
-          (cond-> db
+     :f (fn [vae e a v pv ^boolean some-v? ^boolean some-pv?]
+          (cond-> vae
                   some-v?
-                  (fast/update-index! [:vae v a] conj-set e)
+                  (fast/update-index! [v a] conj-set e)
                   some-pv?
-                  (fast/update-index! [:vae pv a] disj e)))}))
+                  (fast/update-index! [pv a] disj e)))}))
 
 (defn ae-indexer [schema]
-  (when (or index-all? (ae? schema))
+  (when (or index-all-ae? (ae? schema))
     {:name :ae
      :per :datom
-     :f (fn [db e a v pv ^boolean some-v? _]
-          (let [ae (db :ae)
-                i (or (ae a) #{})
+     :f (fn [ae e a v pv ^boolean some-v? _]
+          (let [i (or (ae a) #{})
                 found? (i e)]
             (if (identical? some-v? found?)
-              db
+              ae
               (let [i (if some-v? (conj i e) (disj i e))]
-                (assoc! db :ae
-                        (if (seq i)
-                          (assoc! ae a i)
-                          (dissoc! ae a)))))))}))
+                (if (seq i)
+                  (assoc! ae a i)
+                  (dissoc! ae a))))))}))
+
+(defn to-db [f k]
+  (fn [db e a v pv some-v? some-pv?]
+    (fast/update! db k f e a v pv some-v? some-pv?)))
 
 (defn make-indexer [schema]
   ;; one indexer per attribute
@@ -112,10 +116,10 @@
                            vae-indexer
                            ae-indexer]
                           (keep #(% schema))
-                          (reduce (fn [out {:as i :keys [per f]}]
+                          (reduce (fn [out {:as i :keys [per f name]}]
                                     (case per
-                                      :value (update out 0 conj f)
-                                      :datom (update out 1 conj f)))
+                                      :value (update out 0 conj (to-db f name))
+                                      :datom (update out 1 conj (to-db f name))))
                                   [[] []]))
         is-many? (many? schema)]
     (when (or (seq per-values) (seq per-datoms))
@@ -159,26 +163,26 @@
 
 ;; Lookup functions
 
-(def default-schema (compile-a-schema* (if index-all?
-                                         (merge indexed indexed-ae)
-                                         {})))
+(def default-schema
+  (compile-a-schema* (cond-> {}
+                             index-all-ave? (merge indexed-ave)
+                             index-all-ae? (merge indexed-ae))))
 
 (defn get-schema [db a] (or (fast/get-in db [:schema a]) default-schema))
 (defn get-entity [db e] (fast/get-in db [:eav e]))
 
-(def default-indexer (make-indexer default-schema))
-
+(defn fqn [^keyword k] (.-fqn k))
 (defn- update-indexes [db datom schema]
-  #_(indexer2 db datom schema)
-  (if (= "db/id" (.-fqn ^keyword (datom 1)))
+  (if (identical? "db/id" (fqn (aget datom 1)))
     db
     (if-some [index (j/!get schema :index-fn)]
       (index db datom)
       db)))
 
-(defn index [db datom schema]
-  (some-> *datoms* (vswap! conj! datom))
-  (update-indexes db datom schema))
+(defn index [db schema e a v pv]
+  (let [datom #js[e a v pv]]
+    (some-> *datoms* (j/push! datom))
+    (update-indexes db datom schema)))
 
 ;; transactions
 
@@ -193,11 +197,13 @@
     (let [a-schema (get-schema db a)]
       (if (many? a-schema)
         (if-some [removals (guard (set/intersection v pv) seq)]
-          (-> (fast/update-index! db [:eav e a] (fnil set/difference #{}) removals)
-              (index [e a nil removals] a-schema))
+          (-> db
+              (fast/update-db-index! [:eav e a] (fnil set/difference #{}) removals)
+              (index a-schema e a nil removals))
           db)
-        (-> (fast/dissoc-index! db [:eav e a])
-            (index [e a nil pv] a-schema)
+        (-> db
+            (fast/dissoc-db-index! [:eav e a])
+            (index a-schema e a nil pv)
             (clear-empty-ent e))))
     db))
 
@@ -219,32 +225,32 @@
         v (cond-> v (ref? a-schema) (resolve-e db))]
     (if (many? a-schema)
       (if-some [additions (guard (set/difference v pv) seq)]
-        (-> (fast/update-index! db [:eav e a] into-set additions)
-            (index [e a additions nil] a-schema))
+        (-> db
+            (fast/update-db-index! [:eav e a] into-set additions)
+            (index a-schema e a additions nil))
         db)
       (if (= pv v)
         db
-        (-> (fast/assoc-index! db [:eav e a] v)
-            (index [e a v pv] a-schema))))))
+        (-> db
+            (fast/assoc-db-index! [:eav e a] v)
+            (index a-schema e a v pv))))))
 
-(defn commit-datom [db [e a v pv :as datom]]
+(j/defn commit-datom [db ^js [e a v pv]]
   (let [a-schema (get-schema db a)]
     (-> (if (many? a-schema)
           ;; for cardinality/many, `v` is a set of "additions" and `pv` is a set of "removals"
-          (fast/update-index! db [:eav e a]
-                              (fn [dbv]
-                                (-> (into (or dbv #{}) v)
-                                    (set/difference pv))))
+          (fast/update-db-index! db
+                                 [:eav e a]
+                                 (fn [dbv]
+                                   (-> (into (or dbv #{}) v)
+                                       (set/difference pv))))
           (if (some? v)
-            (fast/assoc-index! db [:eav e a] v)
-            (fast/dissoc-index! db [:eav e a])))
-        (index datom a-schema))))
+            (fast/assoc-db-index! db [:eav e a] v)
+            (fast/dissoc-db-index! db [:eav e a])))
+        (index a-schema e a v pv))))
 
-(defn reverse-datom [datom]
-  (-> datom
-      ;; switch `v` and `pv`
-      (assoc 2 (datom 3)
-             3 (datom 2))))
+(j/defn reverse-datom [^js [e a v pv]]
+  #js[e a pv v])
 
 ;; generate internal db uuids
 (defonce last-e (volatile! 0.1))
@@ -276,15 +282,15 @@
 
 (defn- add-attr-index [[db m :as state] e a pv a-schema]
   (let [is-many (many? a-schema)]
-    (if-some [datom (let [v (get m a)]
-                      (if is-many
-                        (let [v (set/difference v pv)
-                              pv (set/difference pv v)]
-                          (when (or (seq v) (seq pv))
-                            [e a v pv]))
-                        (when (not= v pv)
-                          [e a v pv])))]
-      [(index db datom a-schema) m]
+    (if-some [[v pv] (let [v (get m a)]
+                       (if is-many
+                         (let [v (set/difference v pv)
+                               pv (set/difference pv v)]
+                           (when (or (seq v) (seq pv))
+                             [v pv]))
+                         (when (not= v pv)
+                           [v pv])))]
+      [(index db a-schema e a v pv) m]
       state)))
 
 (declare add-map)
@@ -343,21 +349,27 @@
       (throw (js/Error (str "No db op: " (tx 0)))))
     (add-map db (update tx :db/id resolve-e db))))
 
+(defn transient-db [db]
+  (-> (transient db)
+      (fast/update! :ae transient)
+      (fast/update! :eav transient)
+      (fast/update! :ave transient)
+      (fast/update! :vae transient)))
+
+(defn persistent-db! [db]
+  (-> db
+      (fast/update! :ae persistent!)
+      (fast/update! :eav persistent!)
+      (fast/update! :ave persistent!)
+      (fast/update! :vae persistent!)
+      persistent!))
+
 (defn- transaction [db-before new-txs]
-  (let [db-after (-> (reduce commit-tx (-> db-before
-                                           (update :ae transient)
-                                           (update :eav transient)
-                                           (update :ave transient)
-                                           (update :vae transient)
-                                           transient) new-txs)
-                     (persistent!)
-                     (update :ae persistent!)
-                     (update :eav persistent!)
-                     (update :ave persistent!)
-                     (update :vae persistent!))]
+  (let [db-after (-> (reduce commit-tx (transient-db db-before) new-txs)
+                     (persistent-db!))]
     {:db-before db-before
      :db-after db-after
-     :datoms (or (some-> *datoms* deref persistent!) [])}))
+     :datoms (or (some-> *datoms* vec) [])}))
 
 (def ^:dynamic *prevent-notify* false)
 
@@ -375,7 +387,7 @@
                      report-datoms?]
               :or {notify-listeners? true}}]
    (binding [*datoms* (when (boolean (or notify-listeners? report-datoms?))
-                        (volatile! (transient [])))]
+                        #js[])]
      (when-let [{:keys [db-after] :as tx} (cond (nil? txs) nil
                                                 (:datoms txs) txs
                                                 (sequential? txs) (transaction @conn txs)
@@ -397,6 +409,27 @@
 (defn compile-db-schema [schema]
   (->> (assoc schema :db/ident {:db/unique :db.unique/identity})
        (reduce-kv compile-a-schema {})))
+
+(defn add-missing-index [db a indexk]
+  (let [{:as db :keys [schema]} (update db :schema (fn [db-schema]
+                                                     (compile-a-schema db a (merge (db-schema a)
+                                                                                   (case indexk
+                                                                                     :ae indexed-ae
+                                                                                     :ave indexed-ave)))))
+        a-schema (schema a)
+        ids (fast/get-in db [:ae a])
+        eav (:eav db)
+        indexer (:f ((case indexk :ae ae-indexer :ave ave-indexer) a-schema))
+        index (db indexk)]
+    (assoc db indexk
+              (-> (reduce (fn [index e] (reduce-kv
+                                         (fn [index a v]
+                                           (indexer index e a v nil true false))
+                                         index
+                                         (eav e)))
+                          (transient index)
+                          ids)
+                  persistent!))))
 
 (defn merge-schema!
   "Merge additional schema options into a db. Indexes are not created for existing data."

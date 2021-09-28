@@ -131,7 +131,7 @@
 
     (d/transact! conn [{:db/id "herman" :occupation "teacher"}])
 
-    (is (= (last @tx-log)
+    (is (= (js->clj (last @tx-log))
            [["herman" :occupation "teacher" nil]])
         "Tx-log listener called with datoms")
 
@@ -158,7 +158,7 @@
         "Retract attribute")
 
     (is (= [["herman" :occupation nil "teacher"]]
-           (last @tx-log))
+           (js->clj (last @tx-log)))
         "retraction datom")
 
     (is (= 1 (count (read/where conn [[:occupation "teacher"]])))
@@ -222,8 +222,8 @@
            (read/get db "fido")))))
 
 (deftest touch-refs
-  (let [conn (doto  (d/create-conn {:children (merge d/ref
-                                                     d/many)})
+  (let [conn (doto  (d/create-conn {:children (merge d/indexed-ref
+                                                     d/indexed-many)})
                (d/transact! [{:db/id "A"
                               :children #{"A.0"}}
                              {:db/id "A.0"
@@ -262,8 +262,8 @@
    )
 
 (deftest cardinality-many
-  (let [conn (doto (d/create-conn {:children (merge d/many
-                                                    d/indexed)})
+  (let [conn (doto (d/create-conn {:children (merge d/indexed-many
+                                                    d/indexed-ave)})
                (d/transact! [{:db/id "fred"
                               :children #{"pete"}}]))]
 

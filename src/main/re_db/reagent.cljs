@@ -96,9 +96,9 @@
   ([datoms many?]
    (datom-patterns datoms many? [:e__ :ea_ :_av :ae]))
   ([datoms many? pattern-keys]
-   (let [f (compr (for [[k f] {:e__ (fn [patterns [e]] (update patterns :e__ conj e))
-                               :ea_ (fn [patterns [e a]] (update patterns :ea_ conj [e a]))
-                               :_av (fn [patterns [_e a v pv]]
+   (let [f (compr (for [[k f] {:e__ (j/fn [patterns ^js [e]] (update patterns :e__ conj e))
+                               :ea_ (j/fn [patterns ^js [e a]] (update patterns :ea_ conj [e a]))
+                               :_av (j/fn [patterns ^js [_e a v pv]]
                                       (if (many? a)
                                         (update patterns :_av
                                                 (fn [_av]

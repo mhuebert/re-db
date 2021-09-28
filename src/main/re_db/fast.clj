@@ -57,25 +57,32 @@
 (def assoc-some 're-db.fast/assoc-some)
 (def assoc-some! 're-db.fast/assoc-some!)
 
-(defmacro update-index! [m [k0 k1 k2] f & args]
-  `(let [db# ~m
-         index# (db# ~k0)
+(defmacro update-seq! [m k f & args]
+  `(let [m# ~m]
+     (~assoc-seq! m# ~k (~f (m# ~k) ~@args))))
+
+(defmacro update-some! [m k f & args]
+  `(let [m# ~m]
+     (~assoc-some! m# ~k (~f (m# ~k) ~@args))))
+
+(defmacro update-index! [index [k1 k2] f & args]
+  `(let [index# ~index
          index-a# (index# ~k1)
          index-v# (get index-a# ~k2)]
-     (assoc! db# ~k0
-      (~assoc-seq! index# ~k1
-       (~assoc-seq index-a# ~k2 (~f index-v# ~@args))))))
+     (~assoc-seq! index# ~k1
+      (~assoc-seq index-a# ~k2 (~f index-v# ~@args)))))
 
-(defmacro assoc-index! [m [k0 k1 k2] v]
-  `(let [m0# ~m
-         m1# (m0# ~k0)
-         m2# (m1# ~k1)]
-     (->> ~v
-          (assoc m2# ~k2)
-          (assoc! m1# ~k1)
-          (assoc! m0# ~k0))))
+(defmacro assoc-index! [index [k1 k2] v]
+  `(update! ~index ~k1 assoc ~k2 ~v))
 
-(defmacro dissoc-index! [m [k0 k1 k2]]
-  `(let [m0# ~m
-         m1# (m0# ~k0)]
-     (assoc! m0# ~k0 (~assoc-seq! m1# ~k1 (dissoc (m1# ~k1) ~k2)))))
+(defmacro dissoc-index! [index [k1 k2]]
+  `(update-seq! ~index ~k1 dissoc ~k2))
+
+(defmacro update-db-index! [db [i x y] f & args]
+  `(update! ~db ~i update-index! [~x ~y] ~f ~@args))
+
+(defmacro assoc-db-index! [db [i x y] v]
+  `(update! ~db ~i assoc-index! [~x ~y] ~v))
+
+(defmacro dissoc-db-index! [db [i x y]]
+  `(update! ~db ~i dissoc-index! [~x ~y]))
