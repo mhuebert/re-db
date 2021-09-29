@@ -222,8 +222,8 @@
            (read/get db "fido")))))
 
 (deftest touch-refs
-  (let [conn (doto  (d/create-conn {:children (merge d/indexed-ref
-                                                     d/indexed-many)})
+  (let [conn (doto  (d/create-conn {:children (merge d/index-ref
+                                                     d/index-many)})
                (d/transact! [{:db/id "A"
                               :children #{"A.0"}}
                              {:db/id "A.0"
@@ -262,8 +262,8 @@
    )
 
 (deftest cardinality-many
-  (let [conn (doto (d/create-conn {:children (merge d/indexed-many
-                                                    d/indexed-ave)})
+  (let [conn (doto (d/create-conn {:children (merge d/index-many
+                                                    d/index-ave)})
                (d/transact! [{:db/id "fred"
                               :children #{"pete"}}]))]
 
@@ -347,11 +347,12 @@
 
 (deftest where
 
-  (let [conn (read/create-conn {:person/id {:db/unique :db.unique/identity
-                                            :db.index/_a_ true}
-                                :pet/id {:db/unique :db.unique/identity}
-                                :person/pets {:db/cardinality :db.cardinality/many
-                                              :db/valueType :db.type/ref}})]
+  (let [conn (read/create-conn {:person/id (merge
+                                            d/index-unique
+                                            d/index-ae)
+                                :pet/id d/index-unique
+                                :person/pets (merge d/index-many
+                                                    d/index-ref)})]
     (d/transact! conn [{:db/id 1
                         :person/id 1
                         :name "1"

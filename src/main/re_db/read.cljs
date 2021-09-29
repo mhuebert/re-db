@@ -22,7 +22,7 @@
   (log-read! conn :_av [a v])
   (fast/get-in @conn [:vae v a]))
 
-(defn -_a_ [conn a]
+(defn -ae [conn a]
   (log-read! conn :ae a)
   (fast/get-in @conn [:ae a]))
 
@@ -100,17 +100,17 @@
   (when-not (@warned [index a])
     (vswap! warned conj [index a])
     (js/console.warn (str "Missing " index " on " a ". "
-                          (case index :ave db/indexed-ave
-                                      :ae db/indexed-ae)))))
+                          (case index :ave db/index-ave
+                                      :ae db/index-ae)))))
 
 (defn av_
   "Returns entity-ids for entities where attribute (a) equals value (v)"
   [conn [a v]]
   (let [db @conn
-        schema (db/get-schema db a)
-        v (cond->> v (db/ref? schema) (resolve-e conn))]
+        a-schema (db/get-schema db a)
+        v (cond->> v (db/ref? a-schema) (resolve-e conn))]
     (or (-av_ conn [a v])
-        (if (db/indexed? schema)
+        (if (db/ave? a-schema)
           #{}
           (do
             (warn! :ave a)
@@ -130,7 +130,7 @@
   "Returns [e v] pairs for entities containing attribute (a).
    Optional `return-values?` param for returning only the entity-id."
   [conn a]
-  (or (-_a_ conn a)
+  (or (-ae conn a)
       (let [db @conn]
         (if (db/ae? (db/get-schema db a))
           #{}
@@ -282,9 +282,11 @@
 (defn entity [conn id]
   (Entity. conn (resolve-e conn id) false))
 
+(defn listen-conn [conn]
+  (doto conn (db/listen! ::read re-db.reagent/invalidate-datoms!)))
+
 (defn create-conn [schema]
-  (doto (db/create-conn schema)
-    (db/listen! ::read re-db.reagent/invalidate-datoms!)))
+  (listen-conn (db/create-conn schema)))
 
 (defn listen
   ([conn callback]

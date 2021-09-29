@@ -15,7 +15,7 @@
                          :db/cardinality :db.cardinality/many}
              :pet/owner {:db/valueType :db.type/ref}
              :user/name {:db/index true}
-             :db/ref-id rd/indexed-ave
+             :db/ref-id rd/index-ave
              :friend {:db/valueType :db.type/ref
                       #_#_:db/cardinality :db.cardinality/many}
              :alias {:db/cardinality :db.cardinality/many}
@@ -209,6 +209,7 @@
                      #_(doto (d/transact! samples)))
         re-snap @(-> (rd/create-conn schema)
                      #_(rd/transact! samples))
+        re-snap! #(read/listen-conn (atom re-snap))
         get-eav #(-> (rd/create-conn schema)
                      (doto (rd/transact! %))
                      deref
@@ -216,7 +217,7 @@
     (let [samples (make-samples 100 5)]
       (js/performance.mark "db")
       (dotimes [_ 1000]
-        (rd/transact! (atom re-snap) samples))
+        (rd/transact! (re-snap!) samples))
       (js/performance.measure "db" "db"))
 
     (let [samples (make-samples 200 10)
@@ -229,7 +230,7 @@
               [:db/add id :pet/name "priscilla"]]]
       (comment
        (bench "small transactions"
-              "re-db     " #(-> (atom re-snap)
+              "re-db     " #(-> (read/listen-conn (atom re-snap))
                                 (rd/transact! tx))
               "datascript" #(-> (atom ds-snap)
                                 (d/transact! tx)))))
@@ -238,8 +239,8 @@
                                            :person/name (str (random-uuid))
                                            :pet/name (str (random-uuid))}) (range)))]
       (bench "pre/post indexing"
-             "pre-indexing" #(doto (rd/create-conn {:user/name rd/indexed-ave
-                                                    :pet/name rd/indexed-ave})
+             "pre-indexing" #(doto (rd/create-conn {:user/name rd/index-ave
+                                                    :pet/name rd/index-ave})
                                (rd/transact! samples))
              "post-indexing" #(doto (rd/create-conn)
                                 (rd/transact! samples)
@@ -252,6 +253,7 @@
           tx3 (additional-tx eav)]
       (bench "transactions - 5 keys per map"
              "re-db     " #(doto (atom re-snap)
+                             read/listen-conn
                              (rd/transact! samples)
                              (rd/transact! tx2)
                              (rd/transact! tx3))
@@ -266,6 +268,7 @@
           tx3 (additional-tx eav)]
       (bench "transactions - 20 keys per map"
              "re-db     " #(doto (atom re-snap)
+                             read/listen-conn
                              (rd/transact! samples)
                              (rd/transact! tx2)
                              (rd/transact! tx3))

@@ -6,7 +6,7 @@
             [re-db.util :refer [guard set-replace]]))
 
 (def ^boolean index-all-ave? false)
-(def ^boolean index-all-ae? true)
+(def ^boolean index-all-ae? false)
 
 (js/console.info "re-db/index-all:"
                  (str (cond-> #{}
@@ -21,19 +21,19 @@
 ;; Schema properties are mirrored in javascript properties for fast lookups
 
 ;; Attribute-schema lookups (fast path)
-(defn indexed? [a-schema] (true? (j/!get a-schema :ave?)))
+(defn ave? [a-schema] (true? (j/!get a-schema :ave?)))
 (defn ae? [a-schema] (true? (j/!get a-schema :ae?)))
 (defn many? [a-schema] (true? (j/!get a-schema :many?)))
 (defn unique? [a-schema] (true? (j/!get a-schema :unique?)))
 (defn ref? [a-schema] (true? (j/!get a-schema :ref?)))
 
 ;; schema
-(def indexed-many {:db/cardinality :db.cardinality/many})
-(def indexed-ref {:db/valueType :db.type/ref})
-(def indexed-unique {:db/unique :db.unique/identity})
-(def indexed-unique-value {:db/unique :db.unique/value})
-(def indexed-ave {:db/index true})
-(def indexed-ae {:db.index/_a_ true})
+(def index-many {:db/cardinality :db.cardinality/many})
+(def index-ref {:db/valueType :db.type/ref})
+(def index-unique {:db/unique :db.unique/identity})
+(def index-unique-value {:db/unique :db.unique/value})
+(def index-ave {:db/index true})
+(def index-ae {:db/index-ae true})
 
 (defn resolve-lookup-ref [[a v] db]
   (when v
@@ -56,7 +56,7 @@
        "; attempted to write duplicate value " v " on id " e
        " but already have " pe "."))
 
-(defn set-unique
+(defn conj-empty-set!
   "Returns a checked setter for unique attributes
   - throws a meaningful error if encounters a non-empty set"
   [a v]
@@ -71,66 +71,74 @@
   (let [is-unique (unique? schema)]
     {:index :ave
      :per :value
-     :f (fn [ave e a v pv ^boolean some-v? ^boolean some-pv?]
-          (cond-> ave
-                  some-v?
-                  (fast/update-index! [a v] (if is-unique
-                                              (set-unique a v)
-                                              conj-set) e)
-                  some-pv?
-                  (fast/update-index! [a pv] disj e)))}))
+     :f (fn [db e a v pv v? pv?]
+          (cond-> db
+                  v?
+                  (fast/update-db-index! [:ave a v]
+                                         (if is-unique
+                                           (conj-empty-set! a v)
+                                           conj-set)
+                                         e)
+                  pv?
+                  (fast/update-db-index! [:ave a pv] disj e)))
+     :add (fn [db e a v]
+            (fast/update-db-index! db [:ave a v]
+                                   (if is-unique
+                                     (conj-empty-set! a v)
+                                     conj-set)
+                                   e))
+     :remove (fn [db e a pv]
+               (fast/update-db-index! db [:ave a pv] disj e))}))
 
 (def vae-indexer
   (constantly
    {:index :vae
     :per :value
-    :f (fn [vae e a v pv ^boolean some-v? ^boolean some-pv?]
-         (cond-> vae
-                 some-v?
-                 (fast/update-index! [v a] conj-set e)
-                 some-pv?
-                 (fast/update-index! [pv a] disj e)))}))
+    :f (fn [db e a v pv v? pv?]
+         (cond-> db
+                 v? (fast/update-db-index! [:vae v a] conj-set e)
+                 pv? (fast/update-db-index! [:vae pv a] disj e)))}))
 
-(def ae-indexer
-  (constantly
-   {:index :ae
-    :per :datom
-    :f (fn [ae e a v pv ^boolean some-v? _]
-         (let [i (or (ae a) #{})
-               found? (i e)]
-           (if (identical? some-v? found?)
-             ae
-             (let [i (if some-v? (conj i e) (disj i e))]
-               (if (seq i)
-                 (assoc! ae a i)
-                 (dissoc! ae a))))))}))
+(declare get-entity get-schema)
+(defn ae-indexer* [db e a v pv v? pv? is-many]
+  (let [exists (or v?
+                   (and is-many (seq (get (get-entity db e) a))))]
+    (if exists
+      (fast/update! db :ae fast/update-seq! a conj-set e)
+      (fast/update! db :ae fast/update-seq! a disj e))))
 
-(defn to-db [f indexk]
-  (fn [db e a v pv some-v? some-pv?]
-    (fast/update! db indexk f e a v pv some-v? some-pv?)))
+(defn ae-indexer [a-schema]
+  {:index :ae
+   :per :datom
+   :f (if (::default? a-schema)
+        (fn [db e a v pv v? pv?]
+          (ae-indexer* db e a v pv v? pv? (many? (get-schema db a))))
+        (let [is-many (many? a-schema)]
+          (fn [db e a v pv v? pv?]
+            (ae-indexer* db e a v pv v? pv? is-many))))})
 
-(defn make-indexer [schema]
+(defn make-indexer [a-schema]
   ;; one indexer per attribute
-  (let [[per-values
-         per-datoms] (->> (cond-> []
-                                  (indexed? schema) (conj (ave-indexer schema))
-                                  (ref? schema) (conj (vae-indexer schema))
-                                  (ae? schema) (conj (ae-indexer schema)))
-                          (reduce (fn [out {:keys [per f index]}]
-                                    (case per
-                                      :value (update out 0 conj (to-db f index))
-                                      :datom (update out 1 conj (to-db f index))))
-                                  [[] []]))
-        is-many? (many? schema)]
-    (when (or (seq per-values) (seq per-datoms))
-      (let [per-values (fast/comp6 per-values)
-            per-datoms (fast/comp6 per-datoms)]
+  (let [[per-value per-datom] (->> (cond-> []
+                                              (ave? a-schema) (conj (ave-indexer a-schema))
+                                              (ref? a-schema) (conj (vae-indexer a-schema))
+                                              (ae? a-schema) (conj (ae-indexer a-schema)))
+                                      (reduce (fn [out {:keys [per f]}]
+                                                (case per
+                                                  :value (update out 0 conj f)
+                                                  :datom (update out 1 conj f)))
+                                              [[] []]))
+        is-many? (many? a-schema)]
+    (when (or (seq per-value) (seq per-datom))
+      (let [per-values (fast/comp6 per-value)
+            per-datoms (fast/comp6 per-datom)]
         (fn [db [e ^keyword a v pv]]
           (let [v? (boolean (if is-many? (seq v) (some? v)))
                 pv? (boolean (if is-many? (seq pv) (some? pv)))]
             (as-> db db
                   ;; per-datom
                   (per-datoms db e a v pv v? pv?)
+
                   ;; per-value
                   ;; loop per-value fns through cardinality/many sets
                   (if (not is-many?)
@@ -150,22 +158,22 @@
                             db))))))))))
 
 (defn compile-a-schema* [{:as a-schema
-                          :db/keys [index unique cardinality valueType index/_a_]}]
+                          :db/keys [index unique cardinality valueType db/index-ae]}]
   (let [unique? (boolean unique)
         index (or index-all-ave? index)
-        _a_ (or index-all-ae? _a_)
+        ae (or index-all-ae? index-ae)
         a-schema (j/assoc! a-schema
                            :ave? (boolean (or index unique?))
                            :many? (= cardinality :db.cardinality/many)
                            :unique? unique?
                            :ref? (= valueType :db.type/ref)
-                           :ae? _a_)]
+                           :ae? ae)]
     (j/assoc! a-schema :index-fn (make-indexer a-schema))))
 
 
 ;; Lookup functions
 
-(def default-schema (compile-a-schema* {}))
+(def default-schema (compile-a-schema* {::default? true}))
 
 (defn get-schema [db a] (or (fast/get-in db [:schema a]) default-schema))
 (defn get-entity [db e] (fast/get-in db [:eav e]))
@@ -397,8 +405,7 @@
            (f conn tx)))
        tx))))
 
-(defn compile-a-schema [db-schema a {:as a-schema
-                                     :db/keys [index unique cardinality valueType]}]
+(defn compile-a-schema [db-schema a a-schema]
   (if (= a :db/uniques)
     db-schema
     (let [a-schema (compile-a-schema* a-schema)]
@@ -410,25 +417,29 @@
        (reduce-kv compile-a-schema {})))
 
 (defn add-missing-index [db a indexk]
-  (let [{:as db :keys [schema]} (update db :schema (fn [db-schema]
-                                                     (compile-a-schema db a (merge (db-schema a)
-                                                                                   (case indexk
-                                                                                     :ae indexed-ae
-                                                                                     :ave indexed-ave)))))
+  (let [{:as db :keys [schema]}
+        (update db :schema (fn [db-schema]
+                             (compile-a-schema db-schema a
+                                               (merge (db-schema a)
+                                                      (case indexk
+                                                        :ae index-ae
+                                                        :ave index-ave)))))
         a-schema (schema a)
-        ids (fast/get-in db [:ae a])
-        eav (:eav db)
-        indexer (:f ((case indexk :ae ae-indexer :ave ave-indexer) a-schema))
-        index (db indexk)]
-    (assoc db indexk
-              (-> (reduce (fn [index e] (reduce-kv
-                                         (fn [index a v]
-                                           (indexer index e a v nil true false))
-                                         index
-                                         (eav e)))
-                          (transient index)
-                          ids)
-                  persistent!))))
+        many? (many? a-schema)
+        {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]
+    (-> (reduce-kv (if (and many? (= per :value))
+                     (fn [db e m]
+                       (reduce (fn [db v] (f db e a v nil true false)) db (m a)))
+                     (fn [db e m]
+                       (if-some [v (m a)]
+                         (f db e a v nil true false)
+                         db)))
+                   (-> db
+                       (update indexk transient)
+                       transient)
+                   (:eav db))
+        (-> persistent!
+            (update indexk persistent!)))))
 
 (defn merge-schema!
   "Merge additional schema options into a db. Indexes are not created for existing data."
