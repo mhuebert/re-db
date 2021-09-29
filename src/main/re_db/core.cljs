@@ -113,9 +113,9 @@
   ;; one indexer per attribute
   (let [[per-values
          per-datoms] (->> (cond-> []
-                                  (indexed? schema) (conj ave-indexer)
-                                  (ref? schema) (conj vae-indexer)
-                                  (ae? schema) (conj ae-indexer))
+                                  (indexed? schema) (conj (ave-indexer schema))
+                                  (ref? schema) (conj (vae-indexer schema))
+                                  (ae? schema) (conj (ae-indexer schema)))
                           (reduce (fn [out {:keys [per f index]}]
                                     (case per
                                       :value (update out 0 conj (to-db f index))
@@ -126,23 +126,23 @@
       (let [per-values (fast/comp6 per-values)
             per-datoms (fast/comp6 per-datoms)]
         (fn [db [e ^keyword a v pv]]
-        (let [v? (boolean (if is-many? (seq v) (some? v)))
-              pv? (boolean (if is-many? (seq pv) (some? pv)))]
+          (let [v? (boolean (if is-many? (seq v) (some? v)))
+                pv? (boolean (if is-many? (seq pv) (some? pv)))]
             (as-> db db
                   ;; per-datom
                   (per-datoms db e a v pv v? pv?)
-          ;; per-value
-          ;; loop per-value fns through cardinality/many sets
-          (if (not is-many?)
+                  ;; per-value
+                  ;; loop per-value fns through cardinality/many sets
+                  (if (not is-many?)
                     (per-values db e a v pv v? pv?)
                     (as-> db db
-              ;; additions
+                          ;; additions
                           (if v?
                             (reduce
                              (fn [db v1]
                                (per-values db e a v1 nil true false)) db v)
                             db)
-              ;; removals
+                          ;; removals
                           (if pv?
                             (reduce
                              (fn [db pv1]
