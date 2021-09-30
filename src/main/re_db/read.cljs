@@ -15,23 +15,23 @@
 ;; tracked index lookups
 
 (defn -av_ [conn [a v :as av]]
-  (log-read! conn :_av av)
+  (log-read! conn nil a v)
   (fast/get-in @conn [:ave a v]))
 
 (defn -va_ [conn [v a]]
-  (log-read! conn :_av [a v])
+  (log-read! conn nil a v)
   (fast/get-in @conn [:vae v a]))
 
 (defn -ae [conn a]
-  (log-read! conn :ae a)
+  (log-read! conn nil a nil)
   (fast/get-in @conn [:ae a]))
 
 (defn -e__ [conn e]
-  (log-read! conn :e__ e)
+  (log-read! conn e nil nil)
   (fast/get-in @conn [:eav e]))
 
 (defn -ea_ [conn [e a :as ea]]
-  (log-read! conn :ea_ ea)
+  (log-read! conn e a nil)
   (fast/get-in @conn [:eav e a]))
 
 ;; lookup refs
@@ -153,7 +153,7 @@
   ([conn {v :db/id :as m}]
    (reduce-kv
     (fn [m a e]
-      (log-read! conn :_av [a e])                           ;; TODO - test
+      (log-read! conn nil a e)                           ;; TODO - test
       (assoc m (reverse-attr a) e))
     m
     (fast/get-in @conn [:vae v]))))
@@ -297,7 +297,11 @@
               (fn []
                 (reduce-kv (fn [_ pattern values]
                              (doseq [v values]
-                               (log-read! conn pattern v))) nil patterns)
+                               (case pattern
+                                 :e__ (log-read! conn v nil nil)
+                                 :ea_ (log-read! conn (v 0) (v 1) nil)
+                                 :_av (log-read! conn nil (v 0) (v 1))
+                                 :_a_ (log-read! conn nil v nil)))) nil patterns)
                 (when @initialized? (callback conn))
                 (vreset! initialized? true)
                 nil))]

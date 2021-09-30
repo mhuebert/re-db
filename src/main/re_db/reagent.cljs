@@ -1,10 +1,11 @@
 (ns re-db.reagent
   (:require [applied-science.js-interop :as j]
             [re-db.fast :as fast]
-            [reagent.ratom :as ratom]))
+            [reagent.ratom :as ratom]
+            [re-db.core :as db]))
 
 ;; modified from reagent.ratom/RAtom
-(deftype Invalidator [^:mutable watches on-unwatched pattern-key pattern]
+(deftype Invalidator [^:mutable watches on-unwatched e a v]
   IWatchable
   (-notify-watches [this old new] (-reset! this nil))
   (-add-watch [this key f]
@@ -15,6 +16,7 @@
       (on-unwatched this))))
 
 (defn depend-on! [^Invalidator this ^clj context]
+  ;; Reagent internals
   (j/!update context .-captured
              (fn [^array c]
                (if c
@@ -22,121 +24,74 @@
                  (array this))))
   nil)
 
+;; just for debugging
 (defn current-patterns []
-  (some->> (j/get ratom/*ratom-context* .-captured)
-           (reduce (fn [m ^Invalidator i]
-                     (cond-> m
-                             (instance? Invalidator i)
-                             (update (.-pattern-key i)
-                                     (fnil conj #{})
-                                     (.-pattern i)))) {})))
+  ;; reagent internals
+  (->> (j/get ratom/*ratom-context* .-captured)
+       (reduce (fn [patterns ^Invalidator i]
+                 (cond-> patterns
+                         (instance? Invalidator i)
+                         (conj [(.-e i) (.-a i) (.-v i)])))
+               #{})))
 
-(j/defn trigger! [^Invalidator this]
-  (reduce-kv (fn [_ k f] (f k this 0 1) nil) nil (.-watches this)))
+(j/defn trigger! [tx ^Invalidator this]
+  (when
+   ;; only trigger! once per transaction
+   (not (== tx (j/!get this :tx)))
+    (j/!set this :tx tx)
+    (reduce-kv (fn [_ k f] (f k this 0 1) nil) nil (.-watches this))))
 
-(defn invalidate! [conn patterns]
-  (when-some [invalidators (:invalidators @conn)]
-    (doseq [[pattern-k pattern-vs] patterns
-            :let [invalidators (invalidators pattern-k)]
-            :when (some? invalidators)]
-      (doseq [pattern-v pattern-vs]
-        (some-> (invalidators pattern-v) trigger!)))))
-
-(defn make-invalidator [conn pattern-key pattern]
-  (let [this (Invalidator. {} nil pattern-key pattern)]
+(defn make-invalidator [conn e a v]
+  (let [this (Invalidator. {} nil e a v)]
     (set! (.-on-unwatched this)
           (fn []
             (js/setTimeout
              #(when (empty? (.-watches this))
-                (swap! conn update-in [:invalidators pattern-key] dissoc pattern))
+                (swap! conn update-in [:invalidators e a] dissoc v))
              100)))
     this))
 
-(defn log-read! [conn pattern-key pattern]
+(defn log-read! [conn e a v]
   (when-some [context ratom/*ratom-context*]
-    (if-let [inv (fast/get-in @conn [:invalidators pattern-key pattern])]
+    (if-let [inv (fast/get-in @conn [:invalidators e a v])]
       (depend-on! inv context)
-      (swap! conn assoc-in [:invalidators pattern-key pattern]
-             (doto (make-invalidator conn pattern-key pattern)
+      (swap! conn assoc-in [:invalidators e a v]
+             (doto (make-invalidator conn e a v)
                (depend-on! context)))))
   nil)
 
-(defn guard [x f] (when (f x) x))
+(defn- many-attrs [db-schema]
+  (->> db-schema
+       (reduce-kv (fn [attrs a a-schema]
+                    (cond-> attrs
+                            (db/many? a-schema)
+                            (conj a)))
+                  #{})))
 
-(defn- resolve-id
-  "Copied from re-db.core."
-  ([conn db-snap attr val]
-   (log-read! conn :_av [attr val])
-   (first (fast/get-in db-snap [:ave attr val]))))
-
-(defn- lookup-ref
-  "Returns lookup ref if one exists in id position"
-  [kind pattern]
-  (case kind
-    :e__ (guard pattern vector?)
-    :ea_ (guard (first pattern) vector?)
-    nil))
-
-(def ^:private empty-patterns
-  "Map for building sets of patterns."
-  {:e__ #{}                                                 ;; <entity id>
-   :ae #{}                                                 ;; <attribute>
-   :_av #{}                                                 ;; [<attribute>, <value>]
-   :ea_ #{}})
-
-(defn compr
-  "Composes a collection of 2-arity reducing functions"
-  [fs]
-  (fn [x y]
-    (reduce (fn [x f] (f x y)) x fs)))
-
-(defn- datom-patterns
-  "Returns a map of patterns matched by a list of datoms.
-  Limits patterns to those listed in pattern-keys."
-  ([datoms many?]
-   (datom-patterns datoms many? [:e__ :ea_ :_av :ae]))
-  ([datoms many? pattern-keys]
-   (let [f (compr (for [[k f] {:e__ (j/fn [patterns ^js [e]] (update patterns :e__ conj e))
-                               :ea_ (j/fn [patterns ^js [e a]] (update patterns :ea_ conj [e a]))
-                               :_av (j/fn [patterns ^js [_e a v pv]]
-                                      (if (many? a)
-                                        (update patterns :_av
-                                                (fn [_av]
-                                                  (reduce
-                                                   (fn [patterns v]
-                                                     (conj patterns [a v]))
-                                                   _av
-                                                   (into v pv))))
-                                        (update patterns :_av conj [a v] [a pv])))
-                               :ae (fn [patterns [_ a]] (update patterns :ae conj a))}
-                        :when (contains? pattern-keys k)]
-                    f))]
-     (reduce f empty-patterns datoms))))
-
-(defn- many-attrs
-  "Returns set of attribute keys with db.cardinality/schema"
-  [schema]
-  (reduce-kv (fn [s attr k-schema]
-               (cond-> s
-                       (j/get k-schema :many?) (conj attr))) #{} schema))
-
-(defn filter-keys
-  "Returns keys for which val passes valfn test"
-  [m valfn]
-  (->> m
-       (reduce-kv (fn [ks k v] (cond-> ks (valfn v) (conj k))) #{})))
-
-(defn invalidate-datoms! [conn {:keys [datoms]
-                                {:keys [invalidators schema]} :db-after}]
-  (invalidate!
-   conn
-   (datom-patterns datoms (many-attrs schema) (filter-keys invalidators seq))))
-
-(comment
- (assert (= (datom-patterns [["e" "a" "v" "prev-v"]]
-                            #{}
-                            (keys empty-patterns))
-            {:e__ #{"e"}
-             :ea_ #{["e" "a"]}
-             :_av #{["e" "v"] ["e" "prev-v"]}
-             :ae #{"a"}})))
+(defn invalidate-datoms! [_conn {:keys [datoms tx]
+                                 {:keys [invalidators schema]} :db-after}]
+  (when invalidators
+    (let [many? (many-attrs schema)
+          found! (fn [invalidator]
+                   (when (some? invalidator)
+                     (trigger! tx invalidator)))
+          trigger-patterns! (j/fn [^js [e a v pv :as datom]]
+                              ;; triggers patterns for datom, with "early termination"
+                              ;; for paths that don't lead to any invalidators.
+                              (when-some [e (invalidators e)]
+                                ;; e__
+                                (found! (fast/get-in e [nil nil]))
+                                ;; ea_
+                                (found! (fast/get-in e [a nil])))
+                              (when-some [_a (fast/get-in invalidators [nil a])]
+                                (if (many? a)
+                                  ;; _av
+                                  (do
+                                    (doseq [v v] (found! (_a v)))
+                                    (doseq [pv pv] (found! (_a pv))))
+                                  (do
+                                    (found! (_a v))
+                                    (found! (_a pv))))
+                                ;; _a_
+                                (found! (_a nil))))]
+      (doseq [datom datoms] (trigger-patterns! datom)))))

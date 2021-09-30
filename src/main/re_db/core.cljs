@@ -14,6 +14,9 @@
                               index-all-ae? (conj :ae))))
 
 (def ^:dynamic *datoms* nil)
+;(def ^:dynamic *patterns* nil)
+
+
 
 (def conj-set (fnil conj #{}))
 (def into-set (fnil into #{}))
@@ -356,24 +359,13 @@
       (throw (js/Error (str "No db op: " (tx 0)))))
     (add-map db (update tx :db/id resolve-e db))))
 
-(defn transient-db [db]
-  (-> (transient db)
-      (fast/update! :ae transient)
-      (fast/update! :eav transient)
-      (fast/update! :ave transient)
-      (fast/update! :vae transient)))
-
-(defn persistent-db! [db]
-  (-> db
-      (fast/update! :ae persistent!)
-      (fast/update! :eav persistent!)
-      (fast/update! :ave persistent!)
-      (fast/update! :vae persistent!)
-      persistent!))
+(defn transient-map [m] (reduce-kv #(fast/update! %1 %2 transient) (transient m) m))
+(defn persistent-map! [m] (let [m (persistent! m)]
+                            (reduce-kv #(update %1 %2 persistent!) m m)))
 
 (defn- transaction [db-before new-txs]
-  (let [db-after (-> (reduce commit-tx (transient-db db-before) new-txs)
-                     (persistent-db!))]
+  (let [db-after (-> (reduce commit-tx (transient-map db-before) new-txs)
+                     (persistent-map!))]
     {:db-before db-before
      :db-after db-after
      :datoms (or (some-> *datoms* vec) [])}))
@@ -388,6 +380,7 @@
   (swap! conn assoc-in [:listeners key] f)
   #(unlisten! conn key))
 
+(defonce tx-num (volatile! 0))
 (defn transact!
   ([conn txs] (transact! conn txs {}))
   ([conn txs {:keys [notify-listeners?
@@ -395,10 +388,11 @@
               :or {notify-listeners? true}}]
    (binding [*datoms* (when (boolean (or notify-listeners? report-datoms?))
                         #js[])]
-     (when-let [{:keys [db-after] :as tx} (cond (nil? txs) nil
-                                                (:datoms txs) txs
-                                                (sequential? txs) (transaction @conn txs)
-                                                :else (throw (js/Error "Transact! was not passed a valid transaction")))]
+     (when-let [{:keys [db-after] :as tx} (some-> (cond (nil? txs) nil
+                                                        (:datoms txs) txs
+                                                        (sequential? txs) (transaction @conn txs)
+                                                        :else (throw (js/Error "Transact! was not passed a valid transaction")))
+                                                  (assoc :tx (vswap! tx-num inc)))]
        (reset! conn db-after)
        (when (and notify-listeners? (not *prevent-notify*))
          (doseq [f (vals (:listeners db-after))]

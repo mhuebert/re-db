@@ -10,6 +10,15 @@
          ~@(for [k ks]
              (list 'clojure.core/get k)))))
 
+(defmacro get-some-in
+  "Get-in, stops at nil values"
+  [m ks]
+  (if-not (vector? ks)
+    `(clojure.core/get-in ~m ~ks)
+    `(some-> (get ~m ~(first ks))
+             ~@(for [k (rest ks)]
+                 (list 'clojure.core/get k)))))
+
 (defmacro get-in-objs
   "Lookups in javascript objects, keywords converted to strings"
   [m ks]
@@ -26,8 +35,8 @@
        (if-some [res# (@cache# x#)]
          res#
          (let [res# (~fsym x#)]
-             (vswap! cache# assoc x# res#)
-             res#)))))
+           (vswap! cache# assoc x# res#)
+           res#)))))
 
 (defmacro if-found [[sym lookup-expr] then else]
   `(let [~sym ~(concat lookup-expr (list 're-db.fast/nf-sentinel))]

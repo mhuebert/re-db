@@ -68,24 +68,23 @@
         (= (get-patterns f) patterns)
 
         #(d/get 1)
-        {:e__ #{1}}
+        #{[1 nil nil]}
 
         #(d/get [:a/id 1])
-        {:_av #{[:a/id 1]}}
+        #{[nil :a/id 1]}
 
         #(d/get [:a/id nil])
-        nil
+        #{}
 
         #(d/get [:a/id [:b/id 1]])
-        {:_av #{[:b/id 1]}}
+        #{[nil :b/id 1]}
 
         #(d/transact! [{:db/id "b" :b/id 1}])
-        nil
+        #{}
 
         #(d/get [:a/id [:b/id 1]])
-        {:_av #{[:b/id 1]
-                [:a/id "b"]}}
-        ))))
+        #{[nil :a/id "b"]
+          [nil :b/id 1]}))))
 
 (comment
  (deftest pattern-listeners
