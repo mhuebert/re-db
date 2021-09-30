@@ -2,7 +2,7 @@
   (:refer-clojure :exclude [get contains? peek])
   (:require [re-db.core :as db]
             [re-db.fast :as fast]
-            [re-db.reagent :as re-db.reagent :refer [log-read!]]
+            [re-db.reagent :as re-db.reagent :refer [logged-read* logged-read!]]
             [re-db.util :refer [guard]]
             [reagent.core :as reagent]
             [clojure.core :as core]
@@ -14,33 +14,37 @@
 
 ;; tracked index lookups
 
-(defn -av_ [conn [a v :as av]]
-  (log-read! conn nil a v)
-  (fast/get-in @conn [:ave a v]))
+(defn -av_ [conn a v]
+  (logged-read! conn nil a v
+    (fast/get-in @conn [:ave a v])))
 
-(defn -va_ [conn [v a]]
-  (log-read! conn nil a v)
-  (fast/get-in @conn [:vae v a]))
+(defn -va_ [conn v a]
+  (logged-read! conn nil a v
+    (fast/get-in @conn [:vae v a])))
 
 (defn -ae [conn a]
-  (log-read! conn nil a nil)
-  (fast/get-in @conn [:ae a]))
+  (logged-read! conn nil a nil
+    (fast/get-in @conn [:ae a])))
 
 (defn -e__ [conn e]
-  (log-read! conn e nil nil)
-  (fast/get-in @conn [:eav e]))
+  (logged-read! conn e nil nil
+    (fast/get-in @conn [:eav e])))
 
-(defn -ea_ [conn [e a :as ea]]
-  (log-read! conn e a nil)
-  (fast/get-in @conn [:eav e a]))
+(defn -ea_ [conn e a]
+  (logged-read! conn e a nil
+    (fast/get-in @conn [:eav e a])))
+
+(defn -v__ [conn v]
+  (logged-read! conn nil nil v
+    (fast/get-in @conn [:vae v])))
 
 ;; lookup refs
 
-(defn resolve-lookup-ref [conn [a v :as e]]
+(defn resolve-lookup-ref [conn [a v]]
   (if (vector? v)                                           ;; nested lookup ref
     (resolve-lookup-ref conn [a (resolve-lookup-ref conn v)])
     (when v
-      (first (-av_ conn e)))))
+      (first (-av_ conn a v)))))
 
 (defn resolve-e
   "Returns id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
@@ -61,7 +65,7 @@
    (get conn e attr nil))
   ([conn e attr not-found]
    (if-some [id (resolve-e conn e)]
-     (or (-ea_ conn [id attr]) not-found)
+     (or (-ea_ conn id attr) not-found)
      not-found)))
 
 ;; non-reactive alternative
@@ -109,7 +113,7 @@
   (let [db @conn
         a-schema (db/get-schema db a)
         v (cond->> v (db/ref? a-schema) (resolve-e conn))]
-    (or (-av_ conn [a v])
+    (or (-av_ conn a v)
         (if (db/ave? a-schema)
           #{}
           (do
@@ -153,10 +157,10 @@
   ([conn {v :db/id :as m}]
    (reduce-kv
     (fn [m a e]
-      (log-read! conn nil a e)                           ;; TODO - test
       (assoc m (reverse-attr a) e))
     m
-    (fast/get-in @conn [:vae v]))))
+    ;; TODO - support this pattern
+    (-v__ conn v))))
 
 (defn- pull* [{:as m e :db/id} pullv db found]
   (when m
@@ -266,8 +270,8 @@
       (if is-reverse
         (do
           (assert is-ref?)
-          (mapv #(entity conn %) (-va_ conn [e a])))
-        (let [v (-ea_ conn [e a])
+          (mapv #(entity conn %) (-va_ conn e a)))
+        (let [v (-ea_ conn e a)
               is-many? (db/many? a-schema)]
           (if is-ref?
             (if is-many?
@@ -283,7 +287,7 @@
   (Entity. conn (resolve-e conn id) false))
 
 (defn listen-conn [conn]
-  (doto conn (db/listen! ::read re-db.reagent/invalidate-datoms!)))
+  (doto conn (db/listen! ::read re-db.reagent/invalidate-readers!)))
 
 (defn create-conn [schema]
   (listen-conn (db/create-conn schema)))
@@ -295,13 +299,8 @@
    (let [initialized? (volatile! false)
          rxn (reagent/track!
               (fn []
-                (reduce-kv (fn [_ pattern values]
-                             (doseq [v values]
-                               (case pattern
-                                 :e__ (log-read! conn v nil nil)
-                                 :ea_ (log-read! conn (v 0) (v 1) nil)
-                                 :_av (log-read! conn nil (v 0) (v 1))
-                                 :_a_ (log-read! conn nil v nil)))) nil patterns)
+                (doseq [[e a v] patterns]
+                  (logged-read* conn e a v (constantly nil)))
                 (when @initialized? (callback conn))
                 (vreset! initialized? true)
                 nil))]

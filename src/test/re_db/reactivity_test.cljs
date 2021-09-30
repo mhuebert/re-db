@@ -37,8 +37,8 @@
 
 (deftest listen
   (let [log (atom nil)]
-    (d/listen {:e__ [1]} #(reset! log 1))
-    (d/listen {:ea_ [[2 :a]]} #(reset! log 2))
+    (d/listen [[1 nil nil]] #(reset! log 1))
+    (d/listen [[2 :a nil]]  #(reset! log 2))
     (d/transact! [[:db/add 1 :name "a"]])
     (r/flush)
     (is (= @log 1))

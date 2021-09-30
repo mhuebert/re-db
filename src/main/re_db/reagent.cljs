@@ -2,10 +2,11 @@
   (:require [applied-science.js-interop :as j]
             [re-db.fast :as fast]
             [reagent.ratom :as ratom]
-            [re-db.core :as db]))
+            [re-db.core :as db])
+  (:require-macros re-db.reagent))
 
 ;; modified from reagent.ratom/RAtom
-(deftype Invalidator [^:mutable watches on-unwatched e a v]
+(deftype Reader [^:mutable watches on-unwatched e a v f value]
   IWatchable
   (-notify-watches [this old new] (-reset! this nil))
   (-add-watch [this key f]
@@ -15,83 +16,113 @@
     (when (empty? watches)
       (on-unwatched this))))
 
-(defn depend-on! [^Invalidator this ^clj context]
+(defn depend-on! [^Reader this ^clj context]
   ;; Reagent internals
   (j/!update context .-captured
              (fn [^array c]
                (if c
                  (j/push! c this)
                  (array this))))
-  nil)
+  (.-value this))
 
 ;; just for debugging
 (defn current-patterns []
   ;; reagent internals
   (->> (j/get ratom/*ratom-context* .-captured)
-       (reduce (fn [patterns ^Invalidator i]
+       (reduce (fn [patterns ^Reader i]
                  (cond-> patterns
-                         (instance? Invalidator i)
+                         (instance? Reader i)
                          (conj [(.-e i) (.-a i) (.-v i)])))
                #{})))
 
-(j/defn trigger! [tx ^Invalidator this]
+(defn recompute! [^Reader this]
+  (let [newval (j/call this .-f)]
+    (j/!set this .-value newval)
+    newval))
+
+(j/defn invalidate! [^Reader this tx]
   (when
    ;; only trigger! once per transaction
-   (not (== tx (j/!get this :tx)))
-    (j/!set this :tx tx)
-    (reduce-kv (fn [_ k f] (f k this 0 1) nil) nil (.-watches this))))
+   (not (== tx (j/!get this .-tx)))
+    (j/!set this .-tx tx)
+    (let [newval (recompute! this)]
+      (reduce-kv (fn [_ k f] (f k this js/undefined newval) nil) nil (.-watches this)))))
 
-(defn make-invalidator [conn e a v]
-  (let [this (Invalidator. {} nil e a v)]
+(defn make-reader [conn e a v read-fn value]
+  (let [this (Reader. {} nil e a v read-fn value)]
     (set! (.-on-unwatched this)
           (fn []
             (js/setTimeout
              #(when (empty? (.-watches this))
-                (swap! conn update-in [:invalidators e a] dissoc v))
+                (swap! conn update-in [:cached-readers e a] dissoc v))
              100)))
     this))
 
-(defn log-read! [conn e a v]
-  (when-some [context ratom/*ratom-context*]
-    (if-let [inv (fast/get-in @conn [:invalidators e a v])]
+(defn logged-read* [conn e a v read-fn]
+  ;; evaluates & returns read-fn, caching the value,
+  ;; recomputing when the given e-a-v pattern
+  ;; is invalidated by a transaction on `conn`.
+
+  ;; there can only be one reader per e-a-v pattern,
+  ;; it is reused among consumers and cleaned up when
+  ;; no longer observed.
+  (if-some [context ratom/*ratom-context*]
+    (if-let [inv (fast/get-in @conn [:cached-readers e a v])]
       (depend-on! inv context)
-      (swap! conn assoc-in [:invalidators e a v]
-             (doto (make-invalidator conn e a v)
-               (depend-on! context)))))
-  nil)
+      (let [inv (make-reader conn e a v read-fn (read-fn))]
+        (swap! conn assoc-in [:cached-readers e a v] inv)
+        (depend-on! inv context)))
+    (read-fn)))
 
-(defn- many-attrs [db-schema]
-  (->> db-schema
-       (reduce-kv (fn [attrs a a-schema]
-                    (cond-> attrs
-                            (db/many? a-schema)
-                            (conj a)))
-                  #{})))
+(defn keys-when [m vpred]
+  (reduce-kv (fn [m a v]
+               (cond-> m (vpred v) (conj a)))
+             #{}
+             m))
 
-(defn invalidate-datoms! [_conn {:keys [datoms tx]
-                                 {:keys [invalidators schema]} :db-after}]
-  (when invalidators
-    (let [many? (many-attrs schema)
-          found! (fn [invalidator]
+(defn- many-a? [db-schema] (keys-when db-schema db/many?))
+(defn- ref-a? [db-schema] (keys-when db-schema db/ref?))
+
+(defn invalidate-readers!
+  ;; given a re-db transaction, invalidates readers based on
+  ;; patterns found in transacted datoms.
+  [_conn {:keys [datoms tx]
+          {:keys [cached-readers schema]} :db-after}]
+  (when cached-readers
+    (let [many? (many-a? schema)
+          ref? (ref-a? schema)
+          found! (fn [^Reader invalidator]
                    (when (some? invalidator)
-                     (trigger! tx invalidator)))
+                     (invalidate! invalidator tx)))
           trigger-patterns! (j/fn [^js [e a v pv :as datom]]
+
                               ;; triggers patterns for datom, with "early termination"
                               ;; for paths that don't lead to any invalidators.
-                              (when-some [e (invalidators e)]
+
+                              (when-some [e (cached-readers e)]
                                 ;; e__
                                 (found! (fast/get-in e [nil nil]))
                                 ;; ea_
                                 (found! (fast/get-in e [a nil])))
-                              (when-some [_a (fast/get-in invalidators [nil a])]
-                                (if (many? a)
-                                  ;; _av
-                                  (do
-                                    (doseq [v v] (found! (_a v)))
-                                    (doseq [pv pv] (found! (_a pv))))
-                                  (do
-                                    (found! (_a v))
-                                    (found! (_a pv))))
-                                ;; _a_
-                                (found! (_a nil))))]
+                              (when-some [_ (cached-readers nil)]
+                                (let [is-many (many? a)
+                                      is-ref (ref? a)]
+                                  (when-some [__ (_ nil)]
+                                    (when is-ref
+                                      (if is-many
+                                        (do (doseq [v v] (found! (__ v)))
+                                            (doseq [pv pv] (found! (__ pv))))
+                                        (do (found! (__ v))
+                                            (found! (__ pv))))))
+                                  (when-some [_a (_ a)]
+                                    (if is-many
+                                      ;; _av
+                                      (do
+                                        (doseq [v v] (found! (_a v)))
+                                        (doseq [pv pv] (found! (_a pv))))
+                                      (do
+                                        (found! (_a v))
+                                        (found! (_a pv))))
+                                    ;; _a_
+                                    (found! (_a nil))))))]
       (doseq [datom datoms] (trigger-patterns! datom)))))
