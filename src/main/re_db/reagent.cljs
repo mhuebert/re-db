@@ -6,7 +6,7 @@
   (:require-macros re-db.reagent))
 
 ;; modified from reagent.ratom/RAtom
-(deftype Reader [^:mutable watches on-unwatched e a v f value]
+(deftype Reader [^:mutable watches on-unwatched e a v f ^:mutable value]
   IWatchable
   (-notify-watches [this old new] (-reset! this nil))
   (-add-watch [this key f]
@@ -14,19 +14,26 @@
   (-remove-watch [this key]
     (set! watches (dissoc watches key))
     (when (empty? watches)
-      (on-unwatched this))))
+      (on-unwatched this)))
+  IReset
+  (-reset! [this newval] (set! value newval))
+  IDeref
+  (-deref [this] value))
 
-(defn depend-on! [^Reader this ^clj context]
-  ;; Reagent internals
-  (j/!update context .-captured
+;; Reagent internals
+(defn capture-watchable! [context watchable]
+  (j/!update ^clj context .-captured
              (fn [^array c]
                (if c
-                 (j/push! c this)
-                 (array this))))
-  (.-value this))
+                 (j/push! c watchable)
+                 (array watchable)))))
+
+(defn depend-on! [^Reader this ^clj context]
+  (capture-watchable! context this)
+  @this)
 
 ;; just for debugging
-(defn current-patterns []
+(defn captured-patterns []
   ;; reagent internals
   (->> (j/get ratom/*ratom-context* .-captured)
        (reduce (fn [patterns ^Reader i]
@@ -37,7 +44,7 @@
 
 (defn recompute! [^Reader this]
   (let [newval (j/call this .-f)]
-    (j/!set this .-value newval)
+    (reset! this newval)
     newval))
 
 (j/defn invalidate! [^Reader this tx]
@@ -67,7 +74,7 @@
   ;; it is reused among consumers and cleaned up when
   ;; no longer observed.
   (if-some [context ratom/*ratom-context*]
-    (if-let [inv (fast/get-in @conn [:cached-readers e a v])]
+    (if-let [inv (fast/get-some-in @conn [:cached-readers e a v])]
       (depend-on! inv context)
       (let [inv (make-reader conn e a v read-fn (read-fn))]
         (swap! conn assoc-in [:cached-readers e a v] inv)
@@ -89,11 +96,12 @@
   [_conn {:keys [datoms tx]
           {:keys [cached-readers schema]} :db-after}]
   (when cached-readers
-    (let [many? (many-a? schema)
-          ref? (ref-a? schema)
-          found! (fn [^Reader invalidator]
-                   (when (some? invalidator)
-                     (invalidate! invalidator tx)))
+    (let [many? (keys-when schema db/many?)
+          ref? (keys-when schema db/ref?)
+          found! (fn [^Reader reader]
+                   (some-> reader (invalidate! tx)))
+          _ (cached-readers nil)
+          __ (when _ (_ nil))
           trigger-patterns! (j/fn [^js [e a v pv :as datom]]
 
                               ;; triggers patterns for datom, with "early termination"
@@ -101,13 +109,13 @@
 
                               (when-some [e (cached-readers e)]
                                 ;; e__
-                                (found! (fast/get-in e [nil nil]))
+                                (found! (fast/get-some-in e [nil nil]))
                                 ;; ea_
-                                (found! (fast/get-in e [a nil])))
-                              (when-some [_ (cached-readers nil)]
+                                (found! (fast/get-some-in e [a nil])))
+                              (when _
                                 (let [is-many (many? a)
                                       is-ref (ref? a)]
-                                  (when-some [__ (_ nil)]
+                                  (when __
                                     (when is-ref
                                       (if is-many
                                         (do (doseq [v v] (found! (__ v)))

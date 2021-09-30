@@ -3,7 +3,7 @@
             [re-db.api :as d]
             [re-db.core :as db]
             [re-db.read :as read :refer [create-conn]]
-            [re-db.reagent :refer [current-patterns]]
+            [re-db.reagent :refer [captured-patterns]]
             [reagent.core :as r])
   (:require-macros [re-db.test-helpers :refer [throws]]))
 
@@ -59,7 +59,7 @@
                                    :b/id {:db/unique :db.unique/identity}}))
     (let [get-patterns (fn [f]
                           (let [res (atom nil)
-                                rx (r/track! (fn [] (f) (reset! res (current-patterns))))]
+                                rx (r/track! (fn [] (f) (reset! res (captured-patterns))))]
                             (r/flush)
                             (r/dispose! rx)
                             @res))]
