@@ -4,6 +4,7 @@
             [re-db.fast :as fast]
             [re-db.reagent :as re-db.reagent :refer [logged-read* logged-read!]]
             [re-db.util :refer [guard]]
+            [re-db.schema :as schema]
             [reagent.core :as reagent]
             [clojure.core :as core]
             [clojure.set :as set]))
@@ -104,8 +105,8 @@
   (when-not (@warned [index a])
     (vswap! warned conj [index a])
     (js/console.warn (str "Missing " index " on " a ". "
-                          (case index :ave db/index-ave
-                                      :ae db/index-ae)))))
+                          (case index :ave schema/ave
+                                      :ae schema/ae)))))
 
 (defn av_
   "Returns entity-ids for entities where attribute (a) equals value (v)"
@@ -205,9 +206,9 @@
   "Returns entity as map, following relationships specified
    in pull expression. (Entire entities are always returned,
    pull only opts-in to following a relationship)"
-  ([^Entity entity]
-   (let [conn (.-conn entity)
-         m @entity
+  ([^Entity this]
+   (let [conn (.-conn this)
+         m @this
          db @conn]
      (let [with-reverse-refs
            (reduce-kv
@@ -221,8 +222,8 @@
                           (mapv #(entity conn %) v)
                           (assoc m a (entity conn v)))
                         m))) with-reverse-refs m))))
-  ([^Entity entity pull]
-   (pull* @entity pull @(.-conn entity) #{})))
+  ([^Entity this pull]
+   (pull* @this pull @(.-conn this) #{})))
 
 (defn- ids-where-1 [conn q]
   (cond (vector? q) (av_ conn q)
@@ -278,8 +279,8 @@
               (mapv #(entity conn %) v)
               (some->> v (entity conn)))
             v)))))
-  (-lookup [o attr not-found]
-    (if-some [val (-lookup o attr)]
+  (-lookup [this a not-found]
+    (if-some [val (-lookup this a)]
       val
       not-found)))
 

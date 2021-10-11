@@ -2,6 +2,8 @@
   (:require [cljs.test :refer-macros [deftest is testing]]
             [re-db.core :as d :include-macros true]
             [re-db.read :as read]
+            [re-db.api :as api]
+            [re-db.schema :as schema]
             [reagent.core :as r])
   (:require-macros [re-db.test-helpers :refer [throws]]))
 
@@ -222,8 +224,8 @@
            (read/get db "fido")))))
 
 (deftest touch-refs
-  (let [conn (doto  (d/create-conn {:children (merge d/index-ref
-                                                     d/index-many)})
+  (let [conn (doto  (d/create-conn {:children (merge schema/ref
+                                                     schema/many)})
                (d/transact! [{:db/id "A"
                               :children #{"A.0"}}
                              {:db/id "A.0"
@@ -248,7 +250,31 @@
     (is (-> (read/entity conn "A")
             (read/touch [{:children :...}])
             :children first :children first :children first :children first :children
-            (= #{"A.4"})))))
+            (= #{"A.4"}))))
+
+  (api/merge-schema! {:child schema/ref})
+  (api/transact! [{:db/id "A"
+                   :name "A"
+                   :child {:db/id "B"
+                           :name "B"}}])
+  (is (-> (api/entity "A")
+          (api/touch [:child])
+          (= {:db/id "A"
+              :name "A"
+              :child {:db/id "B"
+                      :name "B"}})))
+
+  (is (-> (api/entity "A")
+          (api/touch)
+          :child
+          type
+          (= read/Entity)))
+
+  (is (-> (api/entity "A")
+          (api/touch)
+          :child
+          :db/id
+          (= "B"))))
 
 #_(comment
    ;; idea: schemaless "touch" - pass in pull syntax to crawl relationships
@@ -262,8 +288,8 @@
    )
 
 (deftest cardinality-many
-  (let [conn (doto (d/create-conn {:children (merge d/index-many
-                                                    d/index-ave)})
+  (let [conn (doto (d/create-conn {:children (merge schema/many
+                                                    schema/ave)})
                (d/transact! [{:db/id "fred"
                               :children #{"pete"}}]))]
 
@@ -348,11 +374,11 @@
 (deftest where
 
   (let [conn (read/create-conn {:person/id (merge
-                                            d/index-unique
-                                            d/index-ae)
-                                :pet/id d/index-unique
-                                :person/pets (merge d/index-many
-                                                    d/index-ref)})]
+                                            schema/unique-id
+                                            schema/ae)
+                                :pet/id schema/unique-id
+                                :person/pets (merge schema/many
+                                                    schema/ref)})]
     (d/transact! conn [{:db/id 1
                         :person/id 1
                         :name "1"

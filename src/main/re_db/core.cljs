@@ -3,7 +3,8 @@
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.util :refer [guard set-replace]]))
+            [re-db.util :refer [guard set-replace]]
+            [re-db.schema :as schema]))
 
 (def ^boolean index-all-ave? false)
 (def ^boolean index-all-ae? false)
@@ -29,14 +30,6 @@
 (defn many? [a-schema] (true? (j/!get a-schema :many?)))
 (defn unique? [a-schema] (true? (j/!get a-schema :unique?)))
 (defn ref? [a-schema] (true? (j/!get a-schema :ref?)))
-
-;; schema
-(def index-many {:db/cardinality :db.cardinality/many})
-(def index-ref {:db/valueType :db.type/ref})
-(def index-unique {:db/unique :db.unique/identity})
-(def index-unique-value {:db/unique :db.unique/value})
-(def index-ave {:db/index true})
-(def index-ae {:db/index-ae true})
 
 (defn resolve-lookup-ref [[a v] db]
   (when v
@@ -416,8 +409,8 @@
                              (compile-a-schema db-schema a
                                                (merge (db-schema a)
                                                       (case indexk
-                                                        :ae index-ae
-                                                        :ave index-ave)))))
+                                                        :ae schema/ae
+                                                        :ave schema/ave)))))
         a-schema (schema a)
         many? (many? a-schema)
         {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]
