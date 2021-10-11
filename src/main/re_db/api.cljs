@@ -21,7 +21,8 @@
   [qs])
 
 (m/defpartial touch {:f '(read/touch *conn* _)}
-  [entity])
+  ([entity])
+  ([entity pull]))
 
 (m/defpartial transact! {:f '(d/transact! *conn* _)}
   ([txs])
