@@ -418,3 +418,14 @@
       (is (= @e1 @e2))
       (is (= e1 e2))
       (is (= (hash e1) (hash e2))))))
+
+(deftest meta-impl
+  (let [entity (api/entity 0)
+        m {:a 1}]
+
+    (is (= m (meta (with-meta entity m))))
+
+    (is (= {} (-> entity
+                  (with-meta m)
+                  (vary-meta dissoc :a)
+                  meta)))))
