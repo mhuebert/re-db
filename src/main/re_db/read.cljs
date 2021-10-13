@@ -214,7 +214,7 @@
            (reduce-kv
             (fn [m a e] (assoc m (reverse-attr a) (entity conn e)))
             m
-            (fast/get-in db [:vae (:db/id m)]))]
+            (-v__ conn (:db/id m)))]
        (reduce-kv (fn [m a v]
                     (let [a-schema (db/get-schema db a)]
                       (if (db/ref? a-schema)
