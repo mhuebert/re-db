@@ -254,7 +254,14 @@
           id)
       id)))
 
-(deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable ^boolean id-resolved?]
+(deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable ^boolean id-resolved? meta]
+  IMeta
+  (-meta [this] meta)
+  IWithMeta
+  (-with-meta [this new-meta]
+    (if (identical? new-meta meta)
+      this
+      (Entity. conn e id-resolved? meta)))
   IHash
   (-hash [this]
     (-hash (let [e (-resolve-e! this conn e)]
@@ -295,7 +302,7 @@
       not-found)))
 
 (defn entity [conn id]
-  (Entity. conn (resolve-e conn id) false))
+  (Entity. conn (resolve-e conn id) false nil))
 
 (defn listen-conn [conn]
   (doto conn (db/listen! ::read re-db.reagent/invalidate-readers!)))
