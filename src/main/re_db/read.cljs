@@ -255,6 +255,16 @@
       id)))
 
 (deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable ^boolean id-resolved?]
+  IHash
+  (-hash [this]
+    (-hash (let [e (-resolve-e! this conn e)]
+             [e (fast/get-in @conn [:eav e])])))
+  IEquiv
+  (-equiv [this other]
+    (and (instance? Entity other)
+         (identical? conn (.-conn ^Entity other))
+         (= (-resolve-e! this conn e)
+            (-resolve-e! other conn e))))
   ISeqable
   (-seq [this] (seq @this))
   IDeref
