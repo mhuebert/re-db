@@ -26,7 +26,7 @@
     (is (= @conn
            @(doto (d/create-conn schema)
               (d/transact! [[:db/datoms (:datoms tx-report)]])))
-        ":db/datoms")
+        :db/datoms)
 
     (is (= @(d/create-conn schema)
            (let [conn (d/create-conn schema)
@@ -36,7 +36,7 @@
            @(doto (d/create-conn schema)
               (d/transact! [[:db/datoms (:datoms tx-report)]
                             [:db/datoms-reverse (:datoms tx-report)]])))
-        ":db/datoms-reverse (round trip)")
+        :db/datoms-reverse)
 
     ;(read/touch db (read/get db "fred"))
     (is (= {:db/id "fred"
@@ -185,7 +185,16 @@
     #_(is (= :error (try (d/transact! conn [[:db/add "fred" :db/id "some-other-id"]])
                          nil
                          (catch js/Error e :error)))
-          "Cannot change :db/id of entity")))
+          "Cannot change :db/id of entity")
+
+    (testing "map txs are merged"
+
+      (api/transact! [{:db/id "a"
+                       :name/first "b"
+                       :name/last "c"}])
+      (api/transact! [{:db/id "a"
+                       :name/first "b1"}])
+      (is (= (api/get "a" :name/last) "c")))))
 
 
 
@@ -224,8 +233,8 @@
            (read/get db "fido")))))
 
 (deftest touch-refs
-  (let [conn (doto  (d/create-conn {:children (merge schema/ref
-                                                     schema/many)})
+  (let [conn (doto (d/create-conn {:children (merge schema/ref
+                                                    schema/many)})
                (d/transact! [{:db/id "A"
                               :children #{"A.0"}}
                              {:db/id "A.0"
@@ -318,18 +327,16 @@
       (is (= #{"pete"} (read/get conn "fred" :children))
           "attribute has correct value"))
 
-
     (d/transact! conn [{:db/id "fred" :children #{"fido"}}])
     (is (= #{"fido"} (read/get conn "fred" :children))
         "Map transaction replaces entire set")
 
-
     (testing "unique attrs, duplicates"
 
-      (d/merge-schema! conn {:ssn {:db/unique :db.unique/identity}
-                             :pets {:db/cardinality :db.cardinality/many
-                                    :db/unique :db.unique/identity}})
-
+      (d/merge-schema! conn {:ssn schema/unique-id
+                             :email schema/unique-id
+                             :pets (merge schema/many
+                                          schema/unique-value)})
 
       ;; cardinality single
       (d/transact! conn [[:db/add "fred" :ssn "123"]])

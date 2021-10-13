@@ -52,12 +52,12 @@
        "; attempted to write duplicate value " v " on id " e
        " but already have " pe "."))
 
-(defn conj-empty-set!
+(defn set-unique!
   "Returns a checked setter for unique attributes
   - throws a meaningful error if encounters a non-empty set"
   [a v]
   (fn [coll e]
-    (if (seq coll)
+    (if (seq coll) #_(some-> coll (disj e) seq)
       (throw (js/Error. (unique-err-msg a v e coll)))
       #{e})))
 
@@ -72,7 +72,7 @@
                   v?
                   (fast/update-db-index! [:ave a v]
                                          (if is-unique
-                                           (conj-empty-set! a v)
+                                           (set-unique! a v)
                                            conj-set)
                                          e)
                   pv?
@@ -80,7 +80,7 @@
      :add (fn [db e a v]
             (fast/update-db-index! db [:ave a v]
                                    (if is-unique
-                                     (conj-empty-set! a v)
+                                     (set-unique! a v)
                                      conj-set)
                                    e))
      :remove (fn [db e a pv]
@@ -284,22 +284,22 @@
       (assoc m :db/id (or e-from-attr (gen-e))))))
 
 (defn- add-attr-index [[db m :as state] e a pv a-schema]
-  (let [is-many (many? a-schema)]
-    (if-some [[v pv] (let [v (get m a)]
-                       (if is-many
-                         (let [v (set/difference v pv)
-                               pv (set/difference pv v)]
-                           (when (or (seq v) (seq pv))
-                             [v pv]))
-                         (when (not= v pv)
-                           [v pv])))]
+  (let [v (m a)
+        is-many (many? a-schema)]
+    (if-some [[v pv] (if is-many
+                       (let [v (set/difference v pv)
+                             pv (set/difference pv v)]
+                         (when (or (seq v) (seq pv))
+                           [v pv]))
+                       (when (not= v pv)
+                         [v pv]))]
       [(index db a-schema e a v pv) m]
       state)))
 
 (declare add-map)
 
 (defn resolve-attr-refs [[db m :as state] a v a-schema]
-  (let [[db nv]
+  (let [[db newv]
         (if (many? a-schema)
           (reduce
            (fn [[db vs :as state] v]
@@ -319,9 +319,9 @@
                   [(add-map db sub-entity)
                    (:db/id sub-entity)])
                 :else [db v]))]
-    (if (identical? v nv)
+    (if (identical? v newv)
       state
-      [db (assoc m a nv)])))
+      [db (assoc m a newv)])))
 
 (defn- add-map
   [db m]
@@ -336,7 +336,7 @@
                                     (add-attr-index e a (get pm a) a-schema))))
                             [db m]
                             m)]
-      (fast/update! db :eav assoc! e m))))
+      (fast/update! db :eav assoc! e (cond->> m pm (merge pm))))))
 
 (defn- commit-tx [db tx]
   (if (vector? tx)
