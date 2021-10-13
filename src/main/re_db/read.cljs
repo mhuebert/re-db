@@ -261,7 +261,7 @@
   (-with-meta [this new-meta]
     (if (identical? new-meta meta)
       this
-      (Entity. conn e id-resolved? meta)))
+      (Entity. conn e id-resolved? new-meta)))
   IHash
   (-hash [this]
     (-hash (let [e (-resolve-e! this conn e)]
