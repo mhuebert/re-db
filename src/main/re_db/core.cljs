@@ -14,8 +14,10 @@
                               index-all-ave? (conj :ave)
                               index-all-ae? (conj :ae))))
 
+;; used to log datoms while building up a tx-report
 (def ^:dynamic *datoms* nil)
-;(def ^:dynamic *patterns* nil)
+;; used to concatenate transactions while working on a branch
+(def ^:dynamic *branch-tx-log* nil)
 
 
 
@@ -373,24 +375,37 @@
   (swap! conn assoc-in [:listeners key] f)
   #(unlisten! conn key))
 
+(defn commit!
+  ;; separating out the "commit" step because we may extend `transaction` to support
+  ;; transaction functions and arbitrary effects
+  "Commits a tx-report to conn"
+  [conn {:as tx-report :keys [db-after]} {:keys [notify-listeners?]
+                                          :or {notify-listeners? true}}]
+
+  (reset! conn db-after)
+
+  (when *branch-tx-log*
+    (swap! *branch-tx-log* conj tx-report))
+
+  (when (and notify-listeners? (not *prevent-notify*))
+    (doseq [f (vals (:listeners db-after))]
+      (f conn tx-report))))
+
 (defonce tx-num (volatile! 0))
 (defn transact!
   ([conn txs] (transact! conn txs {}))
-  ([conn txs {:keys [notify-listeners?
+  ([conn txs {:as opts
+              :keys [notify-listeners?
                      report-datoms?]
               :or {notify-listeners? true}}]
-   (binding [*datoms* (when (boolean (or notify-listeners? report-datoms?))
-                        #js[])]
-     (when-let [{:keys [db-after] :as tx} (some-> (cond (nil? txs) nil
-                                                        (:datoms txs) txs
-                                                        (sequential? txs) (transaction @conn txs)
-                                                        :else (throw (js/Error "Transact! was not passed a valid transaction")))
-                                                  (assoc :tx (vswap! tx-num inc)))]
-       (reset! conn db-after)
-       (when (and notify-listeners? (not *prevent-notify*))
-         (doseq [f (vals (:listeners db-after))]
-           (f conn tx)))
-       tx))))
+   (when-let [tx-report (binding [*datoms* (when (boolean (or notify-listeners? report-datoms?)) #js[])]
+                          (some-> (cond (nil? txs) nil
+                                        (:datoms txs) txs
+                                        (sequential? txs) (transaction @conn txs)
+                                        :else (throw (js/Error "Transact! was not passed a valid transaction")))
+                                  (assoc :tx (vswap! tx-num inc))))]
+     (commit! conn tx-report opts)
+     tx-report)))
 
 (defn compile-a-schema [db-schema a a-schema]
   (if (= a :db/uniques)

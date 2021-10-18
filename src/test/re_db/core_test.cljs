@@ -188,13 +188,13 @@
           "Cannot change :db/id of entity")
 
     (testing "map txs are merged"
-
-      (api/transact! [{:db/id "a"
-                       :name/first "b"
-                       :name/last "c"}])
-      (api/transact! [{:db/id "a"
-                       :name/first "b1"}])
-      (is (= (api/get "a" :name/last) "c")))))
+      (api/with-conn {}
+        (api/transact! [{:db/id "a"
+                         :name/first "b"
+                         :name/last "c"}])
+        (api/transact! [{:db/id "a"
+                         :name/first "b1"}])
+        (is (= (api/get "a" :name/last) "c"))))))
 
 
 
@@ -233,57 +233,58 @@
            (read/get db "fido")))))
 
 (deftest touch-refs
-  (let [conn (doto (d/create-conn {:children (merge schema/ref
-                                                    schema/many)})
-               (d/transact! [{:db/id "A"
-                              :children #{"A.0"}}
-                             {:db/id "A.0"
-                              :children #{"A.1" #_"A"}}
-                             {:db/id "A.1"
-                              :children #{"A.2"}}
-                             {:db/id "A.2"
-                              :children #{"A.3"}}
-                             {:db/id "A.3"
-                              :children #{"A.4"}}]))]
 
-    (is (-> (read/entity conn "A")
-            (read/touch [:children])
+  (api/with-conn {:children (merge schema/ref
+                                   schema/many)}
+    (api/transact! [{:db/id "A"
+                     :children #{"A.0"}}
+                    {:db/id "A.0"
+                     :children #{"A.1" #_"A"}}
+                    {:db/id "A.1"
+                     :children #{"A.2"}}
+                    {:db/id "A.2"
+                     :children #{"A.3"}}
+                    {:db/id "A.3"
+                     :children #{"A.4"}}])
+
+    (is (-> (api/entity "A")
+            (api/touch [:children])
             :children first :children
             (= #{"A.1"})))
 
-    (is (-> (read/entity conn "A")
-            (read/touch [{:children 1}])
+    (is (-> (api/entity "A")
+            (api/touch [{:children 1}])
             :children first :children first :children
             (= #{"A.2"})))
 
-    (is (-> (read/entity conn "A")
-            (read/touch [{:children :...}])
+    (is (-> (api/entity "A")
+            (api/touch [{:children :...}])
             :children first :children first :children first :children first :children
             (= #{"A.4"}))))
 
-  (api/merge-schema! {:child schema/ref})
-  (api/transact! [{:db/id "A"
-                   :name "A"
-                   :child {:db/id "B"
-                           :name "B"}}])
-  (is (-> (api/entity "A")
-          (api/touch [:child])
-          (= {:db/id "A"
-              :name "A"
-              :child {:db/id "B"
-                      :name "B"}})))
+  (api/with-conn {:child schema/ref}
+    (api/transact! [{:db/id "A"
+                     :name "A"
+                     :child {:db/id "B"
+                             :name "B"}}])
+    (is (-> (api/entity "A")
+            (api/touch [:child])
+            (= {:db/id "A"
+                :name "A"
+                :child {:db/id "B"
+                        :name "B"}})))
 
-  (is (-> (api/entity "A")
-          (api/touch)
-          :child
-          type
-          (= read/Entity)))
+    (is (-> (api/entity "A")
+            (api/touch)
+            :child
+            type
+            (= read/Entity)))
 
-  (is (-> (api/entity "A")
-          (api/touch)
-          :child
-          :db/id
-          (= "B"))))
+    (is (-> (api/entity "A")
+            (api/touch)
+            :child
+            :db/id
+            (= "B")))))
 
 #_(comment
    ;; idea: schemaless "touch" - pass in pull syntax to crawl relationships
@@ -333,25 +334,25 @@
 
     (testing "unique attrs, duplicates"
 
-      (d/merge-schema! conn {:ssn schema/unique-id
-                             :email schema/unique-id
-                             :pets (merge schema/many
-                                          schema/unique-value)})
+      (api/with-conn {:ssn schema/unique-id
+                      :email schema/unique-id
+                      :pets (merge schema/many
+                                   schema/unique-value)}
 
-      ;; cardinality single
-      (d/transact! conn [[:db/add "fred" :ssn "123"]])
-      (is (= "fred" (:db/id (read/get conn [:ssn "123"]))))
-      (throws (d/transact! conn [[:db/add "herman" :ssn "123"]])
-              "Cannot have two entities with the same unique attr")
+        ;; cardinality single
+        (api/transact! [[:db/add "fred" :ssn "123"]])
+        (is (= "fred" (:db/id (api/get [:ssn "123"]))))
+        (throws (api/transact! [[:db/add "herman" :ssn "123"]])
+                "Cannot have two entities with the same unique attr")
 
-      ;; cardinality many
-      (d/transact! conn [[:db/add "fred" :pets #{"fido"}]])
-      (is (= "fred" (:db/id (read/get conn [:pets "fido"]))))
-      (throws (d/transact! conn [[:db/add "herman" :pets #{"fido"}]])
-              "Two entities with same unique :db.cardinality/many attr")
-      (throws (d/transact! conn [{:db/id "herman"
-                                  :pets #{"fido"}}])
-              "Two entities with same unique :db.cardinality/many attr"))))
+        ;; cardinality many
+        (api/transact! [[:db/add "fred" :pets #{"fido"}]])
+        (is (= "fred" (:db/id (api/get [:pets "fido"]))))
+        (throws (api/transact! [[:db/add "herman" :pets #{"fido"}]])
+                "Two entities with same unique :db.cardinality/many attr")
+        (throws (api/transact! [{:db/id "herman"
+                                 :pets #{"fido"}}])
+                "Two entities with same unique :db.cardinality/many attr")))))
 
 (deftest permissions
   (let [conn (doto (d/create-conn {:permission/person {:db/valueType :db.type/ref}
@@ -420,12 +421,13 @@
       (is (= (hash e1) (hash e2))))))
 
 (deftest meta-impl
-  (let [entity (api/entity 0)
-        m {:a 1}]
+  (api/with-conn {}
+    (let [entity (api/entity 0)
+          m {:a 1}]
 
-    (is (= m (meta (with-meta entity m))))
+      (is (= m (meta (with-meta entity m))))
 
-    (is (= {} (-> entity
-                  (with-meta m)
-                  (vary-meta dissoc :a)
-                  meta)))))
+      (is (= {} (-> entity
+                    (with-meta m)
+                    (vary-meta dissoc :a)
+                    meta))))))

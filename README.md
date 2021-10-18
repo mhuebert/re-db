@@ -1,12 +1,20 @@
 # Re-DB
 
-Currently ALPHA (routine change/breakage)
+Currently ALPHA (routine change/breakage). Thanks to [NextJournal](https://nextjournal.com) for supporting development.
 
-Re-DB is a fast, reactive client-side triple-store for handling global state in ClojureScript apps. It is inspired by [Datomic](https://www.datomic.com) and [DataScript](https://github.com/tonsky/datascript) and works in conjunction with [Reagent](https://reagent-project.github.io).
+Re-DB is (attempts to be) a fast, reactive client-side triple-store for handling global state in ClojureScript apps. It is inspired by [Datomic](https://www.datomic.com) and [DataScript](https://github.com/tonsky/datascript) and works in conjunction with [Reagent](https://reagent-project.github.io). We're focusing on performance to allow for exploration of using a triple-store for more client-side state.
 
-**re: "fast"** - compared to DataScript, re-db makes different tradeoffs for performance - we're aiming for 5-10x faster, depending on your schema and entity size. Much of this gain is due to our data layout - entities are stored as maps, with indexes off to the side. When we transact a list of maps, not much work has to be done for keys that aren't indexed. This is especially helpful during page load, when many apps face slow down due to ingesting an initial data set from the server. (TODO: benchmark reads / query alternatives)
+There are a number of similar projects targeting ClojureScript (Asami, DataScript, DataHike) which also deserve your attention. Out-of-the-box I couldn't found anything that is simultaneously fast enough for my use-cases and also reactive in a fine-grained way, so that small changes to data result in small updates to the view layer.
 
-**re: "reactive"** - re-db's built-in [Reagent](https://reagent-project.github.io) support means that views update automatically when underlying data changes. Behind the scenes we track what "patterns" you're reading at a fine-grained level. Unlike prior art in this space (see [posh](https://github.com/mpdairy/posh)) we don't attempt to support datalog, only lookups and an entity api. This may not be your cup of tea; personally I often find Datalog to be overkill, and more difficult to read/write than lookups + core functions like filter/sort.
+Performance is a big topic - re-db focuses on three aspects:
+
+1. How fast can we load the database with ~large initial data? (this is a common pain point in real-world use of eg. DataScript)
+2. How fast can we update views after transacting new data? (leverage the inherent structure of triples to efficiently bind views to data.)
+3. How fast can we read from the database? (Existing client-side datalog is quite slow; & moreover, many common use-cases don't require or benefit from the expressivity of datalog... we can get quite far via simple lookup functions.)
+
+How are we doing?
+
+Roughly speaking we're seeing 5-10x faster transactions than DataScript (so, bringing a 800-1000ms tx down to 100-200ms), and "queries" that are 5-30x faster (but this is _not_ apples-to-apples, because we only support/encourage lookups vs the complex queries of datalog). As we don't yet support ordered indexes, some queries are still slow.
 
 ## Background
 
@@ -19,11 +27,9 @@ Some of the motivating ideas behind this (style of) library are:
 - Attributes can be plural (:db.cardinality/many), in which case we store a set of values, each of which is indexed.
 - A "reading" layer tracks fine-grained "patterns" that are accessed in the db, for efficient "invalidation" of views when new data is transacted.
 
-Data is "addressable" independent of the runtime, programming language or program structure (eg. `(d/entity [:email "xx"])` not `some-namespace/the-person`).
+## Usage
 
 The schema format is consistent with DataScript.
-
-## Usage
 
 For convenience we offer a `re-db.api` namespace which reads & writes to a default database (`re-db.api/*conn*`).
 
@@ -99,7 +105,7 @@ Read a single entity's map by passing its ID to `d/get`.
 ;; => {:db/id 1, :name "Matt"}
 ```
 
-An entity pattern read (:e__) is logged.
+An entity pattern read `[e _ _]` is logged.
 
 Read an attribute by passing an ID and attribute to `d/get`.
 
@@ -108,15 +114,7 @@ Read an attribute by passing an ID and attribute to `d/get`.
 ;; => "Matt"
 ```
 
-An entity-attribute pattern read (`:ea_`) is logged.
-
-Read nested attributes via `d/get-in`.
-
-```clj
-(d/get-in 1 [:address :zip])
-```
-
-An entity-attribute pattern read (`:ea_`) is logged.
+An entity-attribute pattern read `[e a _]` is logged.
 
 ### Reactivity with Reagent
 
@@ -124,28 +122,29 @@ The `re-db.read` namespace (which sits behind `re-db.api`) integrates with Reage
 
 Behind the scenes, we track the "patterns" observed by the view, and match these on transaction-reports.
 
-    Pattern     Value        Description
-    :e__        id           the entity with `id`
-    :ea_        [id attr]    an entity-attribute pair
-    :_av        [attr val]   an attribute-value pair
-    :_a_        attr         an attribute
+    Pattern         Description
+    `[e _ _]`       the entity with id `e`
+    `[e a _]`       an entity-attribute pair
+    `[_ a v]`       an attribute-value pair
+    `[_ a _]`       an attribute
+    `[_ _ v]`       a value - (this pattern is only used for ref attributes)
 
-To register a callback to be fired when a pattern invalidates (unnecessary for the reagent integration), call `d/listen` with a map of the form `{<pattern> [<...values...>]}` (see the above table for how values should be formatted for each pattern), along with a function. The provided function will called at most once per transaction and receives only the bound database `conn` as an argument. `d/listen` returns an "unlisten" function for stopping the subscription.
+To register a callback to be fired when a pattern invalidates (unnecessary for the reagent integration), call `d/listen` with a list of patterns (see the above table for supported patterns - supply `nil` for `_`), along with a function. The provided function will called at most once per transaction and receives only the bound database `conn` as an argument. `d/listen` returns an "unlisten" function for stopping the subscription.
 
 Examples:
 
 ```clj
 ;; entity
-(d/listen {:e__ [1]} #(println "The entity with id 1 was changed"))
+(d/listen [[1 nil nil]] #(println "The entity with id 1 was changed"))
 
 ;; entity-attribute
-(d/listen {:ea_ [[1 :name]]} #(println "The :name attribute of entity 1 was changed"))
+(d/listen [[1 :name nil]] #(println "The :name attribute of entity 1 was changed"))
 
 ;; attribute-value
-(d/listen {:_av [[:name "Matt"]]} #(println "The value 'Matt' has been removed or added to the :name attribute of an entity"))
+(d/listen [[nil :name "Matt"]] #(println "The value 'Matt' has been removed or added to the :name attribute of an entity"))
 
 ;; attribute
-(d/listen {:_a_ [:name]} #(println "A :name attribute has been changed"))
+(d/listen [[nil :name nil]] #(println "A :name attribute has been changed"))
 
 ;; call d/listen! with a single argument (listener function) to be notified on all changes
 (d/listen #(println "The db has changed"))
@@ -180,10 +179,17 @@ with early termination when the result set is empty.
 
 ## Todo
 
-- a way to log the "currently subscribed" patterns at any point in a reaction
-- add indexes on-the-fly based on usage - this means less up-front schema, + potential performance advantages (frontloading all index-building makes initial pageload slower - this can be spread out & done on-demand)
-- more attention paid to history / time-travel with datom logs
-- more tests
-- more attention to "query"/filtering api (d/where)
-- allow to specify a sort-order for an ave index?
-- perhaps more efficient update of multi-step queries during transact can be achieved by using cached intermediate values instead of valueless invalidations
+[X] a way to log the "currently subscribed" patterns at any point in a reaction
+[X] add indexes on-the-fly based on usage - this means less up-front schema, + potential performance advantages (frontloading all index-building makes initial pageload slower - this can be spread out & done on-demand)
+[X] ability to move forward/backward in time via the `datoms` returned in a transaction
+[x] fn to clone a db without copying listeners
+- allow to specify a sort-order for an ave index(?)
+- convention for using re-db for local component state
+
+-
+
+## Possible directions
+
+- Tab<>Worker sync - Re-DB runs in a worker, and also in each browser tab. Worker-DB persists state in IndexedDB. Purpose is to (A) maintain consistent state across tabs, and (B) support some degree of offline use. Not all attributes should be persisted to the worker/server.
+- Client<>Server sync - Re-DB runs in the client, and an adapter runs in the server to support integration with eg. Datomic or XTDB(Crux).
+- An effect system

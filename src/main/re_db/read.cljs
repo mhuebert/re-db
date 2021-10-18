@@ -42,6 +42,7 @@
 ;; lookup refs
 
 (defn resolve-lookup-ref [conn [a v]]
+  (assert (db/unique? (db/get-schema @conn a)))
   (if (vector? v)                                           ;; nested lookup ref
     (resolve-lookup-ref conn [a (resolve-lookup-ref conn v)])
     (when v
@@ -51,9 +52,9 @@
   "Returns id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
   Lookup refs are only supported for indexed attributes."
   [conn e]
-  (cond->> e
-           (vector? e)
-           (resolve-lookup-ref conn)))
+  (if (vector? e)
+    (resolve-lookup-ref conn e)
+    e))
 
 ;; functional lookup api
 
