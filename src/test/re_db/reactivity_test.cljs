@@ -1,12 +1,42 @@
 (ns re-db.reactivity-test
-  (:require [cljs.test :refer-macros [deftest is are testing]]
+  (:require [applied-science.js-interop :as j]
+            [cljs.test :refer-macros [deftest is are testing]]
             [re-db.api :as api]
             [re-db.core :as db]
             [re-db.read :as read :refer [create-conn]]
             [re-db.reagent :refer [captured-patterns]]
+            [re-db.reagent.local :refer [local-state]]
             [re-db.schema :as schema]
-            [reagent.core :as r])
+            [reagent.core :as r]
+            [reagent.dom :as rdom]
+            [clojure.string :as str])
   (:require-macros [re-db.test-helpers :refer [throws]]))
+
+(def root-element (or (js/document.getElementById "rtest")
+                      (let [el (-> (js/document.createElement "div")
+                                   (j/!set :id "rtest"))]
+                        (js/document.body.appendChild el)
+                        el)))
+
+(deftest reagent-state
+  (api/with-conn {}
+    (let [log (atom [])
+          counter (atom 0)
+          conn (api/conn)
+          component (fn [{:keys [app/id]}]
+                      (let [state (local-state conn
+                                               :defaults {:i (swap! counter inc)}
+                                               :key id)]
+                        (swap! state assoc :id-cap (str/capitalize id))
+                        (swap! log conj [(get state :i) id (:id-cap state)])
+                        [:div "Hello"]))]
+      (rdom/render [:div
+                    [component {:app/id "a"}]
+                    [component {:app/id "b"}]] root-element)
+      (r/flush)
+      (is (= @log [[1 "a" "A"]
+                   [2 "b" "B"]])
+          "Local state has unique defaults and mutation results"))))
 
 (defonce rx (atom nil))
 

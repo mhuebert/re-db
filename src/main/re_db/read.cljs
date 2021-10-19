@@ -1,5 +1,5 @@
 (ns re-db.read
-  (:refer-clojure :exclude [get contains? peek])
+  (:refer-clojure :exclude [get peek])
   (:require [re-db.core :as db]
             [re-db.fast :as fast]
             [re-db.reagent :as re-db.reagent :refer [logged-read* logged-read!]]
@@ -173,7 +173,7 @@
                                 [pullexpr false]
                                 (first pullexpr))
                   recursions (if (zero? recurse) false recurse)
-                  _ (assert (or (core/contains? #{false :...} recurse) (number? recurse))
+                  _ (assert (or (contains? #{false :...} recurse) (number? recurse))
                             (str "Recursion parameter must be a number or :..., not " recurse))
                   set-a a
                   is-reverse? (reverse-attr? a)

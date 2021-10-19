@@ -7,7 +7,7 @@
 
 (defonce ^:dynamic *current-conn* nil #_(read/create-conn {}))
 
-(defn current-conn [] *current-conn*)
+(defn conn [] *current-conn*)
 
 (defn conn*
   "Accepts a conn or a schema, returns conn"
