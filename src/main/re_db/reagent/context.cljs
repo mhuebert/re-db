@@ -3,7 +3,8 @@
             [applied-science.js-interop :as j]
             [re-db.api :as api]
             [reagent.core :as reagent]
-            [reagent.impl.component :as rcomponent]))
+            [reagent.impl.component :as rcomponent])
+  (:require-macros re-db.reagent.context))
 
 ;; dynamic binding in a javascript world...
 ;; objective: bind & then find a "global-ish" re-db database

@@ -62,12 +62,15 @@
                      {:context-type context/react-context-type
                       :reagent-render
                       (fn []
-                        (js/console.log reagent.impl.component/*current-component*)
-                        (is (identical? (context/component-conn) conn)
+                        (is (= (context/component-conn) conn)
                             "Conn is bound via react context")
                         (done)
                         [:div])})]
-      (rdom/render [context/bind-conn conn [component]] dom-root))))
+      (rdom/render (context/bind-conn conn
+                     (do
+                       (is (= conn (re-db.api/conn))
+                           "Conn is bound via dynamic var")
+                       [component])) dom-root))))
 
 (defonce rx (atom nil))
 
