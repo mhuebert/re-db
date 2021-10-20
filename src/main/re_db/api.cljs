@@ -3,7 +3,7 @@
   (:require [re-db.core :as d]
             [re-db.read :as read]
             [re-db.macros :as m])
-  (:require-macros re-db.api))
+  (:require-macros [re-db.api :as api]))
 
 (defonce ^:dynamic *current-conn* (read/create-conn {}))
 
@@ -48,3 +48,12 @@
   ([patterns callback]))
 
 (def merge-schema! (partial d/merge-schema! *current-conn*))
+
+(defn bind
+  "Binds a conn for evaluation of function `f`"
+  ([f]
+   (bind (conn) f))
+  ([conn f]
+   (fn [& args]
+     (binding [*current-conn* conn]
+       (apply f args)))))

@@ -25,7 +25,9 @@
                      :datoms (into [] (mapcat :datoms) txs#)}
                     {:value val#})))))
 
-(defmacro bound-fn [& body]
+(defmacro bound-fn
+  "Define an anonymous function where *conn* is bound at definition-time"
+  [& body]
   `(let [f# (~'fn ~@body)
          conn# ~current-conn]
      (fn [& args#]
