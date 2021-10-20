@@ -46,3 +46,5 @@
 (m/defpartial listen {:f '(read/listen *current-conn* _)}
   ([callback])
   ([patterns callback]))
+
+(def merge-schema! (partial d/merge-schema! *current-conn*))
