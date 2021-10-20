@@ -3,7 +3,6 @@
             [re-db.read :as read]
             [re-db.core :as db]
             [reagent.ratom :as ratom]
-            [datascript.core :as d]
             [reagent.core :as reagent]
             [reagent.impl.component :refer [*current-component*]]))
 
@@ -54,7 +53,7 @@
   (let [e {(type *current-component*) key}]
     (j/get component local-state-key
            (let [cur (Cursor. conn e defaults)]
-             (ratom/add-on-dispose! ratom/*ratom-context* #(d/transact! conn [[:db/retractEntity e]]
+             (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retractEntity e]]
 
                                                                         ;; NOTE - not implemented - just a
                                                                         ;; reminder that these on-dispose retractions

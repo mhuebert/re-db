@@ -1,19 +1,20 @@
 (ns re-db.reactivity-test
   (:require [applied-science.js-interop :as j]
-            [cljs.test :refer-macros [deftest is are testing]]
+            [cljs.test :refer-macros [deftest is are testing async]]
             [re-db.api :as api]
             [re-db.core :as db]
             [re-db.read :as read :refer [create-conn]]
             [re-db.reagent :refer [captured-patterns]]
             [re-db.reagent.local :refer [local-state]]
+            [re-db.reagent.context :as context]
             [re-db.schema :as schema]
-            [reagent.core :as r]
+            [reagent.core :as reagent]
             [reagent.dom :as rdom]
             [clojure.string :as str])
   (:require-macros [re-db.test-helpers :refer [throws]]))
 
-(def root-element (or (js/document.getElementById "rtest")
-                      (let [el (-> (js/document.createElement "div")
+(def dom-root (or (js/document.getElementById "rtest")
+                  (let [el (-> (js/document.createElement "div")
                                    (j/!set :id "rtest"))]
                         (js/document.body.appendChild el)
                         el)))
@@ -32,19 +33,49 @@
                         [:div "Hello"]))]
       (rdom/render [:div
                     [component {:app/id "a"}]
-                    [component {:app/id "b"}]] root-element)
-      (r/flush)
+                    [component {:app/id "b"}]] dom-root)
+      (reagent/flush)
       (is (= @log [[1 "a" "A"]
                    [2 "b" "B"]])
           "Local state has unique defaults and mutation results"))))
 
+(deftest reagent-bind-dom
+  (async done
+    (let [conn (api/create-conn {})
+          component (fn []
+                             (context/bind-conn conn
+                               [:div {:ref (fn [el]
+                                             (when el
+                                               (js/setTimeout
+                                                (fn []
+                                                  (is (identical? (context/element-conn el) conn)
+                                                      "Conn is bound via dom node ancestry")
+                                                  (prn 1)
+                                                  (done))
+                                                100)))}]))]
+      (rdom/render [component] dom-root))))
+
+(deftest reagent-bind-context
+  (async done
+    (let [conn (api/create-conn {})
+          component (reagent/create-class
+                     {:context-type context/react-context-type
+                      :reagent-render
+                      (fn []
+                        (js/console.log reagent.impl.component/*current-component*)
+                        (is (identical? (context/component-conn) conn)
+                            "Conn is bound via react context")
+                        (done)
+                        [:div])})]
+      (rdom/render [context/bind-conn conn [component]] dom-root))))
+
 (defonce rx (atom nil))
 
 (defn ^:dev/before-load start
-  ([] (some-> @rx r/dispose!))
+  ([] (some-> @rx reagent/dispose!))
   ([f]
    (start)
-   (reset! rx (r/track! f))))
+   (reset! rx (reagent/track! f))))
 
 (api/with-conn {}
 
@@ -69,15 +100,15 @@
       (api/listen [[2 :a nil]] #(reset! log 2))
 
       (api/transact! [[:db/add 1 :name "a"]])
-      (r/flush)
+      (reagent/flush)
       (is (= @log 1))
 
       (api/transact! [[:db/add 2 :b "b"]])
-      (r/flush)
+      (reagent/flush)
       (is (= @log 1))
 
       (api/transact! [[:db/add 2 :a "a"]])
-      (r/flush)
+      (reagent/flush)
       (is (= @log 2))
 
       )))
@@ -88,9 +119,9 @@
     (testing
      (let [get-patterns (fn [f]
                           (let [res (atom nil)
-                                rx (r/track! (fn [] (f) (reset! res (captured-patterns))))]
-                            (r/flush)
-                            (r/dispose! rx)
+                                rx (reagent/track! (fn [] (f) (reset! res (captured-patterns))))]
+                            (reagent/flush)
+                            (reagent/dispose! rx)
                             @res))]
 
        (are [f patterns]
@@ -136,14 +167,14 @@
       (api/transact! [{:db/id "peter" :name "Peter"}])
 
       (let [log (atom 0)]
-        (r/track!
+        (reagent/track!
          (api/bound-fn []
                        (api/get [:person/children "peter"])
                        (swap! log inc)))
-        (r/flush)
+        (reagent/flush)
         (is (= 1 @log))
         (api/transact! [[:db/add "mary" :person/children #{"peter"}]])
-        (r/flush)
+        (reagent/flush)
         (is (= 2 @log))))))
 
 (comment
@@ -160,23 +191,23 @@
                            {:db/id "john"
                             :name "John"}])
 
-       (r/flush)
+       (reagent/flush)
 
        (is (= "Mary" (read/get conn [:person/children "john"] :name))
            "Get attribute via lookup ref")
 
        (let [entity-call (atom 0)
              attr-call (atom 0)]
-         (r/track! #(do (read/get conn "mary")
-                        (swap! entity-call inc)))
-         (r/track! #(do (read/get conn "mary" :name)
-                        (swap! attr-call inc)))
+         (reagent/track! #(do (read/get conn "mary")
+                              (swap! entity-call inc)))
+         (reagent/track! #(do (read/get conn "mary" :name)
+                              (swap! attr-call inc)))
          (is (= 1 @entity-call @attr-call))
          (db/transact! conn [[:db/add "mary" :name "MMMary"]])
-         (r/flush)
+         (reagent/flush)
          (is (= 2 @entity-call @attr-call))
          (db/transact! conn [[:db/add "mary" :age 38]])
-         (r/flush)
+         (reagent/flush)
          (is (= [3 2] [@entity-call @attr-call]))
          "Entity listener called when attribute changes")))))
 
