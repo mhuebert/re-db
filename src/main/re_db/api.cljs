@@ -5,7 +5,7 @@
             [re-db.macros :as m])
   (:require-macros re-db.api))
 
-(defonce ^:dynamic *current-conn* nil #_(read/create-conn {}))
+(defonce ^:dynamic *current-conn* (read/create-conn {}))
 
 (defn conn [] *current-conn*)
 
