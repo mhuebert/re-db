@@ -23,16 +23,13 @@
 
 (deftype Cursor [conn e defaults]
   IDeref
-  (-deref [this] (or (read/-e__ conn e) defaults))
+  (-deref [this]
+    (merge defaults (read/-e__ conn e)))
   ILookup
   (-lookup [this a]
-    (if-some [entity (read/-e__ conn e)]
-      (entity a)
-      (get defaults a)))
+    (get (read/-e__ conn e) a (get defaults a)))
   (-lookup [this a not-found]
-    (if-some [entity (read/-e__ conn e)]
-      (entity a not-found)
-      (get defaults a not-found)))
+    (get (read/-e__ conn e) a (get defaults a not-found)))
   IReset
   (-reset! [this new-value]
     (db/transact! conn [(assoc new-value :db/id e)]))
