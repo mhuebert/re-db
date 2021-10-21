@@ -31,7 +31,7 @@
       (j/get dom-context-key)))
 
 ;; React interop
-(defonce react-context-type (react/createContext dom-context-key))
+(defonce conn-context (react/createContext dom-context-key))
 
 ;; find conn associated with the given/current component
 (defn component-conn
@@ -51,7 +51,7 @@
   [conn body]
   (reagent/with-let [conn (api/->conn conn)
                      ref-fn #(some-> % (j/!set dom-context-key conn))]
-    (react/createElement (.-Provider react-context-type)
+    (react/createElement (.-Provider conn-context)
                          #js{:value conn}
                          (reagent/as-element
                           [:div {:ref ref-fn} body]))))

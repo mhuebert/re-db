@@ -118,14 +118,14 @@
 (defn make-indexer [a-schema]
   ;; one indexer per attribute
   (let [[per-value per-datom] (->> (cond-> []
-                                              (ave? a-schema) (conj (ave-indexer a-schema))
-                                              (ref? a-schema) (conj (vae-indexer a-schema))
-                                              (ae? a-schema) (conj (ae-indexer a-schema)))
-                                      (reduce (fn [out {:keys [per f]}]
-                                                (case per
-                                                  :value (update out 0 conj f)
-                                                  :datom (update out 1 conj f)))
-                                              [[] []]))
+                                           (ave? a-schema) (conj (ave-indexer a-schema))
+                                           (ref? a-schema) (conj (vae-indexer a-schema))
+                                           (ae? a-schema) (conj (ae-indexer a-schema)))
+                                   (reduce (fn [out {:keys [per f]}]
+                                             (case per
+                                               :value (update out 0 conj f)
+                                               :datom (update out 1 conj f)))
+                                           [[] []]))
         is-many? (many? a-schema)]
     (when (or (seq per-value) (seq per-datom))
       (let [per-values (fast/comp6 per-value)
@@ -305,13 +305,16 @@
         (if (many? a-schema)
           (reduce
            (fn [[db vs :as state] v]
-             (cond (vector? v)
-                   [db (set-replace vs v (or (resolve-e v db) v))]
-                   (map? v)
-                   (let [sub-entity (resolve-map-e db v)]
-                     [(add-map db sub-entity)
-                      (set-replace vs v (:db/id sub-entity))])
-                   :else state))
+             (cond
+               ;; don't rewrite lookup refs - late-bind
+               #_#_(vector? v)
+               [db (set-replace vs v (or (resolve-e v db) v))]
+
+               (map? v)
+               (let [sub-entity (resolve-map-e db v)]
+                 [(add-map db sub-entity)
+                  (set-replace vs v (:db/id sub-entity))])
+               :else state))
            [db v]
            v)
           (cond (vector? v)

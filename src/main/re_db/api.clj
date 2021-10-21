@@ -1,4 +1,5 @@
-(ns re-db.api)
+(ns re-db.api
+  (:refer-clojure :exclude [bound-fn]))
 
 (def get-conn '(re-db.api/conn))
 (def conn-var 're-db.api/*current-conn*)

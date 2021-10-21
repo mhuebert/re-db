@@ -59,7 +59,7 @@
   (async done
     (let [conn (api/create-conn {})
           component (reagent/create-class
-                     {:context-type context/react-context-type
+                     {:context-type context/conn-context
                       :reagent-render
                       (fn []
                         (is (= (context/component-conn) conn)
