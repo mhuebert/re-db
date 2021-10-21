@@ -8,7 +8,7 @@
             [re-db.reagent.local :refer [local-state]]
             [re-db.reagent.context :as context]
             [re-db.schema :as schema]
-            [reagent.core :as reagent]
+            [reagent.core :as reagent :refer [track!]]
             [reagent.dom :as rdom]
             [clojure.string :as str])
   (:require-macros [re-db.test-helpers :refer [throws]]))
@@ -180,6 +180,20 @@
         (reagent/flush)
         (is (= 2 @log))))))
 
+
+(deftest read-from-reaction
+  (async done
+    (api/with-conn {
+                    ;:name schema/ae
+                    }
+      (api/transact! [{:db/id 1 :name \a}
+                      {:db/id 2 :name \b}])
+      (is (= #{\a \b}
+             (into #{} (map :name) (api/where [:name]))))
+      (track! #(do (is (= #{\a \b}
+                          (into #{} (map :name) (api/where [:name]))))
+                   (done))))))
+
 (comment
  (deftest pattern-listeners
    (let [conn (read/create-conn {:person/children {:db/cardinality :db.cardinality/many
@@ -213,6 +227,8 @@
          (reagent/flush)
          (is (= [3 2] [@entity-call @attr-call]))
          "Entity listener called when attribute changes")))))
+
+
 
 #_(deftest reactivity
     (let [reader (reify

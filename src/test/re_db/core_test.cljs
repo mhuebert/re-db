@@ -321,7 +321,7 @@
 
     (testing "remove value from cardinality/many attribute"
       (d/transact! conn [[:db/retract "fred" :children #{"sally"}]])
-      (is (= #{} (read/ids-where conn [[:children "sally"]]))
+      (is (= nil (read/ids-where conn [[:children "sally"]]))
           "index is removed on retraction")
       (is (= #{"fred"} (read/ids-where conn [[:children "pete"]]))
           "index remains for other value")

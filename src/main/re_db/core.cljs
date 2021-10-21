@@ -421,14 +421,18 @@
   (->> (assoc schema :db/ident {:db/unique :db.unique/identity})
        (reduce-kv compile-a-schema {})))
 
+(defn transient-1 [m k] (transient (update m k transient)))
+(defn persistent-1 [m k] (update (persistent! m) k persistent!))
+
 (defn add-missing-index [db a indexk]
-  (let [{:as db :keys [schema]}
-        (update db :schema (fn [db-schema]
-                             (compile-a-schema db-schema a
-                                               (merge (db-schema a)
-                                                      (case indexk
-                                                        :ae schema/ae
-                                                        :ave schema/ave)))))
+  (let [{:as db
+         :keys [schema]} (update db :schema
+                                 (fn [db-schema]
+                                   (compile-a-schema db-schema a
+                                                     (merge (db-schema a)
+                                                            (case indexk
+                                                              :ae schema/ae
+                                                              :ave schema/ave)))))
         a-schema (schema a)
         many? (many? a-schema)
         {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]
@@ -439,12 +443,9 @@
                        (if-some [v (m a)]
                          (f db e a v nil true false)
                          db)))
-                   (-> db
-                       (update indexk transient)
-                       transient)
+                   (transient-1 db indexk)
                    (:eav db))
-        (-> persistent!
-            (update indexk persistent!)))))
+        (persistent-1 indexk))))
 
 (defn merge-schema!
   "Merge additional schema options into a db. Indexes are not created for existing data."

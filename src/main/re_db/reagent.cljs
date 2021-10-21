@@ -28,9 +28,9 @@
                  (j/push! c watchable)
                  (array watchable)))))
 
-(defn depend-on! [^Reader this ^clj context]
-  (capture-watchable! context this)
-  @this)
+(defn depend-on! [^Reader reader ^clj context]
+  (capture-watchable! context reader)
+  @reader)
 
 ;; just for debugging
 (defn captured-patterns []
@@ -42,28 +42,28 @@
                          (conj [(.-e i) (.-a i) (.-v i)])))
                #{})))
 
-(defn recompute! [^Reader this]
-  (let [newval (j/call this .-f)]
-    (reset! this newval)
+(defn recompute! [^Reader reader]
+  (let [newval (j/call reader .-f)]
+    (reset! reader newval)
     newval))
 
-(j/defn invalidate! [^Reader this tx]
+(j/defn invalidate! [^Reader reader tx]
   (when
    ;; only trigger! once per transaction
-   (not (== tx (j/!get this .-tx)))
-    (j/!set this .-tx tx)
-    (let [newval (recompute! this)]
-      (reduce-kv (fn [_ k f] (f k this js/undefined newval) nil) nil (.-watches this)))))
+   (not (== tx (j/!get reader .-tx)))
+    (j/!set reader .-tx tx)
+    (let [newval (recompute! reader)]
+      (reduce-kv (fn [_ k f] (f k reader js/undefined newval) nil) nil (.-watches reader)))))
 
 (defn make-reader [conn e a v read-fn value]
-  (let [this (Reader. {} nil e a v read-fn value)]
-    (set! (.-on-unwatched this)
+  (let [reader (Reader. {} nil e a v read-fn value)]
+    (set! (.-on-unwatched reader)
           (fn []
             (js/setTimeout
-             #(when (empty? (.-watches this))
+             #(when (empty? (.-watches reader))
                 (swap! conn update-in [:cached-readers e a] dissoc v))
              100)))
-    this))
+    reader))
 
 (defn logged-read* [conn e a v read-fn]
   ;; evaluates & returns read-fn, caching the value,
@@ -74,11 +74,11 @@
   ;; it is reused among consumers and cleaned up when
   ;; no longer observed.
   (if-some [context ratom/*ratom-context*]
-    (if-let [inv (fast/get-some-in @conn [:cached-readers e a v])]
-      (depend-on! inv context)
-      (let [inv (make-reader conn e a v read-fn (read-fn))]
-        (swap! conn assoc-in [:cached-readers e a v] inv)
-        (depend-on! inv context)))
+    (let [reader (or (fast/get-some-in @conn [:cached-readers e a v])
+                     (let [reader (make-reader conn e a v read-fn (read-fn))]
+                       (swap! conn assoc-in [:cached-readers e a v] reader)
+                       reader))]
+      (depend-on! reader context))
     (read-fn)))
 
 (defn keys-when [m vpred]

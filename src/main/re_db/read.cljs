@@ -115,42 +115,40 @@
   (let [db @conn
         a-schema (db/get-schema db a)
         v (cond->> v (db/ref? a-schema) (resolve-e conn))]
-    (or (-av_ conn a v)
-        (if (db/ave? a-schema)
-          #{}
+    (if (db/ave? a-schema)
+      (-av_ conn a v)
+      (do
+        (warn! :ave a)
+        (if auto-index?
           (do
-            (warn! :ave a)
-            (if auto-index?
-              (do
-                (swap! conn db/add-missing-index a :ave)
-                (recur conn [a v]))
-              (->> (:eav db)
-                   (reduce-kv
-                    (fn [out e m]
-                      (cond-> out
-                              (= (m a) v)
-                              (conj e)))
-                    #{}))))))))
+            (swap! conn db/add-missing-index a :ave)
+            (recur conn [a v]))
+          (->> (:eav db)
+               (reduce-kv
+                (fn [out e m]
+                  (cond-> out
+                          (= (m a) v)
+                          (conj e)))
+                #{})))))))
 
 (defn _a_
   "Returns [e v] pairs for entities containing attribute (a).
    Optional `return-values?` param for returning only the entity-id."
   [conn a]
-  (or (-ae conn a)
-      (let [db @conn]
-        (if (db/ae? (db/get-schema db a))
-          #{}
+  (let [db @conn]
+    (if (db/ae? (db/get-schema db a))
+      (-ae conn a)
+      (do
+        (warn! :ae a)
+        (if auto-index?
           (do
-            (warn! :ae a)
-            (if auto-index?
-              (do
-                (swap! conn db/add-missing-index a :ae)
-                (recur conn a))
-              (->> (:eav db)
-                   (reduce-kv
-                    (fn [out e m] (cond-> out
-                                          (some? (m a)) (conj e)))
-                    #{}))))))))
+            (swap! conn db/add-missing-index a :ae)
+            (recur conn a))
+          (->> (:eav db)
+               (reduce-kv
+                (fn [out e m] (cond-> out
+                                      (some? (m a)) (conj e)))
+                #{})))))))
 
 (declare entity Entity)
 
