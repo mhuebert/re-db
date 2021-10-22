@@ -85,8 +85,9 @@ Like Datomic and DataScript, re-db has an `Entity` type. Unlike the alternatives
 
 What you can do with an entity:
 
-- Dereference it to get the raw entity map - `@person`
-- Look up any attribute - `(:person/name person)`
+- Dereference to get the raw entity map - `@person`. 
+- `touch` it to get a raw map with all relationships included (as ids or Entity instances)
+- Look up an attribute - `(:person/name person)`
   - if it is a relationship attribute, the result will also be wrapped as an `Entity`
 - Look up reverse attributes to find other entities pointing to this one - `(:pet/_owner person)`
 

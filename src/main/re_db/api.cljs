@@ -39,7 +39,10 @@
 
 (m/defpartial touch {:f '(read/touch _)}
   ([entity])
-  ([entity pull]))
+  ([entity entity-refs?]))
+
+(m/defpartial pull {:f '(read/pull (conn) _)}
+  [id pull])
 
 (m/defpartial transact! {:f '(d/transact! (conn) _)}
   ([txs])

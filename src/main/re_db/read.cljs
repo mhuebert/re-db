@@ -173,21 +173,20 @@
                   recursions (if (zero? recurse) false recurse)
                   _ (assert (or (contains? #{false :...} recurse) (number? recurse))
                             (str "Recursion parameter must be a number or :..., not " recurse))
-                  set-a a
                   is-reverse? (reverse-attr? a)
-                  a (cond-> a is-reverse? forward-attr)
-                  a-schema (db/get-schema db a)
+                  forward-a (cond-> a is-reverse? forward-attr)
+                  a-schema (db/get-schema db forward-a)
                   is-many (db/many? a-schema)
                   ;; ids of related entities
                   ids (if is-reverse?
-                       (fast/get-in db [:vae e a])
-                       (m a))
+                       (fast/get-in db [:vae e forward-a])
+                       (m forward-a))
                   entities (when (seq ids)
                              (if recursions
                                (let [found (conj found e)
                                      pullv (if (number? recursions)
                                              ;; decrement recurse parameter
-                                             (update-in pullv [i a] dec)
+                                             (update-in pullv [i forward-a] dec)
                                              pullv)]
                                  (into #{}
                                        (keep #(if (and (= :... recursions) (found %))
@@ -198,31 +197,45 @@
                                (into #{} (keep #(db/get-entity db %)) ids)))]
               (cond-> m
                       (seq entities)
-                      (assoc set-a (cond-> entities (not is-many) first)))))
+                      (assoc a (cond-> entities (not is-many) first)))))
           m))))
 
 (defn touch
-  "Returns entity as map, following relationships specified
-   in pull expression. (Entire entities are always returned,
-   pull only opts-in to following a relationship)"
-  ([^Entity this]
-   (let [conn (.-conn this)
-         m @this
-         db @conn]
-     (let [with-reverse-refs
-           (reduce-kv
-            (fn [m a e] (assoc m (reverse-attr a) (entity conn e)))
-            m
-            (-v__ conn (:db/id m)))]
-       (reduce-kv (fn [m a v]
-                    (let [a-schema (db/get-schema db a)]
-                      (if (db/ref? a-schema)
-                        (if (db/many? a-schema)
-                          (mapv #(entity conn %) v)
-                          (assoc m a (entity conn v)))
-                        m))) with-reverse-refs m))))
-  ([^Entity this pull]
-   (pull* @this pull @(.-conn this) #{})))
+  "Returns entity as map, including reverse refs. Pass `entity-refs?` to
+   wrap refs with entity api."
+  ([entity] (touch entity false))
+  ([entity* entity-refs?]
+   (let [conn (.-conn ^Entity entity*)]
+     (if entity-refs?
+       (let [m @entity*
+             db @conn]
+         (let [with-reverse-refs
+               (reduce-kv
+                (fn [m a e] (assoc m (reverse-attr a) (mapv #(entity conn %) e)))
+                m
+                (-v__ conn (:db/id m)))]
+           (reduce-kv (fn [m a v]
+                        (let [a-schema (db/get-schema db a)]
+                          (if (db/ref? a-schema)
+                            (if (db/many? a-schema)
+                              (mapv #(entity conn %) v)
+                              (assoc m a (entity conn v)))
+                            m))) with-reverse-refs m)))
+       (let [{:keys [db/id] :as m} @entity*]
+         (reduce-kv
+          (fn [m a e] (assoc m (reverse-attr a) e))
+          m
+          (-v__ conn id)))))))
+
+(defn pull
+  "Returns entity as map, as well as linked entities specified in `pull`.
+
+  (pull conn 1 [:children]) =>
+    {:db/id 1
+     :children [{:db/id 2}
+                {:db/id 3}]}"
+  [conn id pull]
+  (pull* (get conn id) pull @conn #{}))
 
 (defn- ids-where-1 [conn q]
   (cond (vector? q) (av_ conn q)

@@ -42,7 +42,7 @@
     (is (= {:db/id "fred"
             :name "Fred"
             :_authors #{"1"}
-            :pet "fido"} (read/touch* conn (read/get conn "fred")))
+            :pet "fido"} (read/touch (read/entity conn "fred")))
         "refs with cardinality-many")))
 
 (deftest upserts
@@ -200,7 +200,8 @@
 
 
 (deftest refs
-  (let [db (doto (d/create-conn {:owner {:db/valueType :db.type/ref}})
+  (let [db (doto (d/create-conn {:owner (merge schema/ref
+                                               schema/unique-value)})
              (d/transact! [{:db/id "fred"
                             :name "Fred"}
                            {:db/id "ball"
@@ -209,10 +210,11 @@
     (is (= {:db/id "fred"
             :name "Fred"
             :_owner #{"ball"}}
-           (read/touch* db (read/get db "fred")))
+           (-> (read/entity db "fred")
+               (read/touch)))
         "touch adds refs to entity"))
 
-  (let [db (doto (d/create-conn {:authors {:db/valueType :db.type/ref
+  (let [conn (doto (d/create-conn {:authors {:db/valueType :db.type/ref
                                            :db/cardinality :db.cardinality/many}
                                  :pet {:db/valueType :db.type/ref}})
              (d/transact! [{:db/id "fred"
@@ -227,10 +229,10 @@
     (is (= {:db/id "fred"
             :name "Fred"
             :_authors #{"1"}
-            :pet "fido"} (read/touch* db (read/get db "fred")))
+            :pet "fido"} (read/touch (read/entity conn "fred")))
         "refs with cardinality-many")
     (is (= {:db/id "fido"}
-           (read/get db "fido")))))
+           (read/get conn "fido")))))
 
 (deftest touch-refs
 
@@ -247,18 +249,15 @@
                     {:db/id "A.3"
                      :children #{"A.4"}}])
 
-    (is (-> (api/entity "A")
-            (api/touch [:children])
+    (is (-> (api/pull "A" [:children])
             :children first :children
             (= #{"A.1"})))
 
-    (is (-> (api/entity "A")
-            (api/touch [{:children 1}])
+    (is (-> (api/pull "A" [{:children 1}])
             :children first :children first :children
             (= #{"A.2"})))
 
-    (is (-> (api/entity "A")
-            (api/touch [{:children :...}])
+    (is (-> (api/pull "A" [{:children :...}])
             :children first :children first :children first :children first :children
             (= #{"A.4"}))))
 
@@ -267,8 +266,7 @@
                      :name "A"
                      :child {:db/id "B"
                              :name "B"}}])
-    (is (-> (api/entity "A")
-            (api/touch [:child])
+    (is (-> (api/pull "A" [:child])
             (= {:db/id "A"
                 :name "A"
                 :child {:db/id "B"
@@ -278,12 +276,11 @@
             (api/touch)
             :child
             type
-            (= read/Entity)))
+            (= js/String)))
 
     (is (-> (api/entity "A")
             (api/touch)
             :child
-            :db/id
             (= "B")))))
 
 #_(comment
