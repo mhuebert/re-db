@@ -283,7 +283,7 @@
     (and (instance? Entity other)
          (identical? conn (.-conn ^Entity other))
          (= (-resolve-e! this conn e)
-            (-resolve-e! other conn e))))
+            (-resolve-e! other conn (.-e other)))))
   ISeqable
   (-seq [this] (seq @this))
   IDeref
