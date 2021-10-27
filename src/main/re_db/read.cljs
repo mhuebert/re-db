@@ -279,11 +279,11 @@
     (-hash (let [e (-resolve-e! this conn e)]
              [e (fast/get-in @conn [:eav e])])))
   IEquiv
-  (-equiv [this other]
+  (-equiv [this ^Entity other]
     (and (instance? Entity other)
-         (identical? conn (.-conn ^Entity other))
+         (identical? conn (.-conn other))
          (= (-resolve-e! this conn e)
-            (-resolve-e! other conn e))))
+            (-resolve-e! other conn (.-e other)))))
   ISeqable
   (-seq [this] (seq @this))
   IDeref

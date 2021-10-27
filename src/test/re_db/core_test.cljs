@@ -419,7 +419,10 @@
   (let [conn (read/create-conn {:email schema/unique-id})]
     (d/transact! conn [{:db/id "a"
                         :name "b"
-                        :email "c"}])
+                        :email "c"}
+                       {:db/id "d"
+                        :name "e"
+                        :email "f"}])
     (let [e1 (read/entity conn "a")
           e2 (read/entity conn "a")]
       (is (identical? @e1 @e2))
@@ -430,7 +433,13 @@
           e2 (read/entity conn [:email "c"])]
       (is (= @e1 @e2))
       (is (= e1 e2))
-      (is (= (hash e1) (hash e2))))))
+      (is (= (hash e1) (hash e2))))
+
+    (let [e1 (read/entity conn "a")
+          e2 (read/entity conn "d")]
+      (is (not (identical? @e1 @e2)))
+      (is (not= e1 e2))
+      (is (not= (hash e1) (hash e2))))))
 
 (deftest meta-impl
   (api/with-conn {}
