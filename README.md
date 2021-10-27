@@ -2,15 +2,15 @@
 
 Currently ALPHA (routine change/breakage). Thanks to [NextJournal](https://nextjournal.com) for supporting development.
 
-Re-DB is (attempts to be) a fast, reactive client-side triple-store for handling global state in ClojureScript apps. It is inspired by [Datomic](https://www.datomic.com) and [DataScript](https://github.com/tonsky/datascript) and works in conjunction with [Reagent](https://reagent-project.github.io). We're focusing on performance to allow for exploration of using a triple-store for more client-side state.
+Re-DB is (attempts to be) a fast, reactive client-side triple-store for handling global state in ClojureScript apps. It is inspired by [Datomic](https://www.datomic.com) and [DataScript](https://github.com/tonsky/datascript) and works in conjunction with [Reagent](https://reagent-project.github.io). 
 
-There are a number of similar projects targeting ClojureScript (Asami, DataScript, DataHike) which also deserve your attention. Out-of-the-box I couldn't found anything that is simultaneously fast enough for my use-cases and also reactive in a fine-grained way, so that small changes to data result in small updates to the view layer.
+There are a number of similar projects targeting ClojureScript (Asami, DataScript, DataHike) which also deserve your attention. Out-of-the-box I couldn't found anything that is simultaneously fast enough for my use-cases and also reactive in a fine-grained way, so that small changes to data result in small updates to the view layer. 
 
-Performance is a big topic - re-db focuses on three aspects:
+Re-db focuses on three aspects of performance:
 
-1. How fast can we load the database with ~large initial data? (this is a common pain point in real-world use of eg. DataScript)
-2. How fast can we update views after transacting new data? (leverage the inherent structure of triples to efficiently bind views to data.)
-3. How fast can we read from the database? (Existing client-side datalog is quite slow; & moreover, many common use-cases don't require or benefit from the expressivity of datalog... we can get quite far via simple lookup functions.)
+1. Load a large(ish) initial dataset - this is in the "critical path" of pageload and is a frequently-encountered problem with alternatives. 
+2. Update views after a transaction - minimize the work required to determine what needs to re-render.
+3. Read from the database - currently we only support relatively simple & fast lookups, observing that many common use-cases don't require or benefit from the greater expressivity of datalog.
 
 How are we doing?
 
@@ -78,6 +78,19 @@ To write data, pass a collection of transactions to `d/transact!`. There are two
     ```
 
 `d/transact!` returns a "tx-report" containing `:db-before`, `:db-after`, and `:datoms`. `:datoms` can be used to move forward and backward through time by transacting `[:db/datoms <...>]` and `[:db/datoms-reverse <...>]`.
+
+### Transaction functions
+
+Transaction functions can be specified in the schema under `:db/tx-fns`. The function will be passed the currently `db` and the operation (vector) and must return a new list of operations.
+
+```clj 
+;; schema 
+{:db/tx-fns {:my-op (fn [db [_ & args]] ...)}}
+
+;; transaction
+(d/transact! [[:my-op ...]])
+
+```
 
 ### Entity api
 

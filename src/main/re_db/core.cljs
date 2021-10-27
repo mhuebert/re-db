@@ -345,16 +345,19 @@
 
 (defn- commit-tx [db tx]
   (if (vector? tx)
-    (case (tx 0)
-      :db/add (add db (update tx 1 resolve-e db))
-      :db/retractEntity (retract-entity db (update tx 1 resolve-e db))
-      :db/retract (retract-attr db (update tx 1 resolve-e db))
-      :db/datoms (reduce commit-datom db (tx 1))
-      :db/datoms-reverse (->> (tx 1)
-                              (reverse)
-                              (map reverse-datom)
-                              (reduce commit-datom db))
-      (throw (js/Error (str "No db op: " (tx 0)))))
+    (let [operation (tx 0)]
+      (case operation
+        :db/add (add db (update tx 1 resolve-e db))
+        :db/retractEntity (retract-entity db (update tx 1 resolve-e db))
+        :db/retract (retract-attr db (update tx 1 resolve-e db))
+        :db/datoms (reduce commit-datom db (tx 1))
+        :db/datoms-reverse (->> (tx 1)
+                                (reverse)
+                                (map reverse-datom)
+                                (reduce commit-datom db))
+        (if-let [op (fast/get-in db [:schema :db/tx-fns operation])]
+          (reduce commit-tx db (op db tx))
+          (throw (js/Error (str "No db op: " operation))))))
     (add-map db (update tx :db/id resolve-e db))))
 
 (defn transient-map [m] (reduce-kv #(fast/update! %1 %2 transient) (transient m) m))

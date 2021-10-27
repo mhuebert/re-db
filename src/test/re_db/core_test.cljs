@@ -283,6 +283,21 @@
             :child
             (= "B")))))
 
+(deftest custom-db-operations
+  ;; add an operation by
+  (api/with-conn {:db/tx-fns {:db/times-ten (fn [db [_ e a v]]
+                                                  [[:db/add e a (* 10 v)]])}}
+    (api/transact! [[:db/times-ten :matt :age 3.9]])
+    (is (= 39 (api/get :matt :age))
+        "Custom db/operation can be specified in schema"))
+
+  (api/with-conn {:db/tx-fns {:db/times (fn [db [_ e a v]]
+                                              [[:db/add e a (* (:multiplier (d/get-entity db :times) 0) v)]])}}
+    (api/transact! [[:db/add :times :multiplier 10]
+                    [:db/times :matt :age 3.9]])
+    (is (= 39 (api/get :matt :age))
+        "custom db/operation can read from db")))
+
 #_(comment
    ;; idea: schemaless "touch" - pass in pull syntax to crawl relationships
 
