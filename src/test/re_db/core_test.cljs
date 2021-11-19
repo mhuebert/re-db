@@ -443,3 +443,14 @@
                     (with-meta m)
                     (vary-meta dissoc :a)
                     meta))))))
+
+(deftest reverse-lookups
+  (api/with-conn {:pet {:db/valueType :db.type/ref}
+                  :tag-id schema/unique-id}
+    (api/transact! [{:db/id "owner"
+                     :pet [:tag-id "f1"]}
+                    {:tag-id "f1"}])
+    (is (some? (-> (api/entity [:tag-id "f1"])
+                   :_pet
+                   first
+                   deref)))))

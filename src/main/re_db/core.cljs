@@ -300,30 +300,31 @@
 
 (declare add-map)
 
+(defn handle-lookup-ref [db v]
+  (if (vector? v)
+    (or (resolve-e v db)
+        {(v 0) (v 1)})
+    v))
+
 (defn resolve-attr-refs [[db m :as state] a v a-schema]
   (let [[db newv]
         (if (many? a-schema)
           (reduce
            (fn [[db vs :as state] v]
-             (cond
-               ;; don't rewrite lookup refs - late-bind
-               #_#_(vector? v)
-               [db (set-replace vs v (or (resolve-e v db) v))]
-
-               (map? v)
-               (let [sub-entity (resolve-map-e db v)]
-                 [(add-map db sub-entity)
-                  (set-replace vs v (:db/id sub-entity))])
-               :else state))
+             (let [v (handle-lookup-ref db v)]
+               (if (map? v)
+                 (let [sub-entity (resolve-map-e db v)]
+                   [(add-map db sub-entity)
+                    (set-replace vs v (:db/id sub-entity))])
+                 state)))
            [db v]
            v)
-          (cond (vector? v)
-                [db (or (resolve-e v db) v)]
-                (map? v)
-                (let [sub-entity (resolve-map-e db v)]
-                  [(add-map db sub-entity)
-                   (:db/id sub-entity)])
-                :else [db v]))]
+          (let [v (handle-lookup-ref db v)]
+            (if (map? v)
+              (let [sub-entity (resolve-map-e db v)]
+                [(add-map db sub-entity)
+                 (:db/id sub-entity)])
+              [db v])))]
     (if (identical? v newv)
       state
       [db (assoc m a newv)])))
