@@ -453,4 +453,13 @@
     (is (some? (-> (api/entity [:tag-id "f1"])
                    :_pet
                    first
-                   deref)))))
+                   deref))))
+
+  (api/with-conn {:system/id schema/unique-id
+                  :system/notifications {:db/valueType :db.type/ref
+                                         :db/cardinality :db.cardinality/many}}
+    (let [s (random-uuid)
+          n (random-uuid)]
+      (api/transact! [{:system/id s :system/notifications #{[:system/id n]}}])
+      (api/transact! [{:notification/kind :sms :system/id n}])
+      (is (= 1 (count (:system/notifications (api/entity [:system/id s]))))))))

@@ -311,20 +311,20 @@
         (if (many? a-schema)
           (reduce
            (fn [[db vs :as state] v]
-             (let [v (handle-lookup-ref db v)]
-               (if (map? v)
-                 (let [sub-entity (resolve-map-e db v)]
+             (let [v-resolved (handle-lookup-ref db v)]
+               (if (map? v-resolved)
+                 (let [sub-entity (resolve-map-e db v-resolved)]
                    [(add-map db sub-entity)
                     (set-replace vs v (:db/id sub-entity))])
                  state)))
            [db v]
            v)
-          (let [v (handle-lookup-ref db v)]
-            (if (map? v)
-              (let [sub-entity (resolve-map-e db v)]
+          (let [v-resolved (handle-lookup-ref db v)]
+            (if (map? v-resolved)
+              (let [sub-entity (resolve-map-e db v-resolved)]
                 [(add-map db sub-entity)
                  (:db/id sub-entity)])
-              [db v])))]
+              [db v-resolved])))]
     (if (identical? v newv)
       state
       [db (assoc m a newv)])))
@@ -348,7 +348,14 @@
   (if (vector? tx)
     (let [operation (tx 0)]
       (case operation
-        :db/add (add db (update tx 1 resolve-e db))
+        :db/add (let [e (tx 1)]
+                  (if-let [resolved-e (resolve-e e db)]
+                    (add db (assoc tx 1 resolved-e))
+                    (do
+                      ;; id cannot be resolved - upsert lookup ref
+                      (assert (vector? e) "db/id missing")
+                      (add-map db {(e 0) (e 1)
+                                   (tx 2) (tx 3)}))))
         :db/retractEntity (retract-entity db (update tx 1 resolve-e db))
         :db/retract (retract-attr db (update tx 1 resolve-e db))
         :db/datoms (reduce commit-datom db (tx 1))
