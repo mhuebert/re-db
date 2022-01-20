@@ -5,11 +5,27 @@
         com.lucasbradstreet/cljs-uuid-utils {:mvn/version "1.0.2"}
         reagent/reagent {:mvn/version "1.1.0"}
         metosin/malli {:mvn/version "0.6.1"}
-        datascript/datascript {:mvn/version "1.2.8"}
-        io.github.ribelo/doxa {:git/sha "8270dfefd9a7ffcaa6df988d26c66f57fb2a99b9"}}
- :aliases {:test {:extra-paths ["src/test"]
-                  :extra-deps {edn-query-language/eql {:mvn/version "1.0.2"}
-                               juji/editscript        {:mvn/version "0.5.7"}
-                               meander/epsilon        {:mvn/version "0.0.650"}
-                               com.taoensso/encore    {:mvn/version "3.10.1"}
-                               com.taoensso/timbre    {:mvn/version "5.1.2"}}}}}
+
+
+        ;; Datomic
+        com.datomic/datomic-pro {:mvn/version "1.0.6269"
+                                 :exclusions [org.slf4j/slf4j-nop]}}
+ :aliases {:test {:extra-paths ["src/test"]}
+
+           :clerk {:extra-paths ["src/notebooks"]
+                   :extra-deps {io.github.nextjournal/clerk
+                                {:mvn/version "0.4.316"}}}
+
+           :bench {:extra-paths ["src/bench"]
+                   :extra-deps {datascript/datascript {:mvn/version "1.2.8"}
+                                io.github.ribelo/doxa {:git/sha "8270dfefd9a7ffcaa6df988d26c66f57fb2a99b9"}
+                                edn-query-language/eql {:mvn/version "1.0.2"}
+                                juji/editscript {:mvn/version "0.5.7"}
+                                meander/epsilon {:mvn/version "0.0.650"}
+                                com.taoensso/encore {:mvn/version "3.10.1"}
+                                com.taoensso/timbre {:mvn/version "5.1.2"}}}}
+ :mvn/repos
+ {"central" {:url "https://repo1.maven.org/maven2/"}
+  "clojars" {:url "https://clojars.org/repo"}
+  "jitpack" {:url "https://jitpack.io"}
+  "my.datomic.com" {:url "https://my.datomic.com/repo"}}}

@@ -1,0 +1,4 @@
+{:tasks {dev (do (shell "yarn install")
+                 (shell "yarn shadow-cljs -A:test:clerk watch test")
+
+                 )}}
