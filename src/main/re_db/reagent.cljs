@@ -43,9 +43,8 @@
                #{})))
 
 (defn recompute! [^Reader reader]
-  (let [newval (j/call reader .-f)]
-    (reset! reader newval)
-    newval))
+  (doto (j/call reader .-f)
+    (->> (reset! reader))))
 
 (j/defn invalidate! [^Reader reader tx]
   (when

@@ -15,23 +15,20 @@
 
 
 ;; string key where we write the conn onto a DOM node
-(def dom-context-key "re-db-conn")
+(def context-key (str ::conn))
 
-;; helper function to find an ancestor node that matches `pred`
-(defn dom-closest [el pred]
-  (if (pred el)
-    el
-    (when-let [parent (.-parentNode ^js el)]
-      (recur parent pred))))
+(defn dom-closest [el getval]
+  (when el
+    (if-some [v (getval el)]
+      v
+      (recur (.-parentNode ^js el) getval))))
 
 ;; find conn associated with element by crawling ancestors
 (defn element-conn [el]
-  (-> el
-      (dom-closest (j/get dom-context-key))
-      (j/get dom-context-key)))
+  (dom-closest el (j/get context-key)))
 
 ;; React interop
-(defonce conn-context (react/createContext dom-context-key))
+(defonce conn-context (react/createContext context-key))
 
 ;; find conn associated with the given/current component
 (defn component-conn
@@ -50,7 +47,7 @@
 (defn bind-conn
   [conn body]
   (reagent/with-let [conn (api/->conn conn)
-                     ref-fn #(some-> % (j/!set dom-context-key conn))]
+                     ref-fn #(some-> % (j/!set context-key conn))]
     (react/createElement (.-Provider conn-context)
                          #js{:value conn}
                          (reagent/as-element

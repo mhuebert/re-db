@@ -4,20 +4,23 @@
 (defmacro get-in
   "Compiled version of get-in, faster than `get-in` function"
   [m ks]
-  (if-not (vector? ks)
-    `(clojure.core/get-in ~m ~ks)
+  (if (and (:ns &env)
+           (vector? ks))
     `(-> ~m
          ~@(for [k ks]
-             (list 'clojure.core/get k)))))
+             (list 'clojure.core/get k)))
+    `(clojure.core/get-in ~m ~ks)))
 
 (defmacro get-some-in
   "Get-in, stops at nil values"
   [m ks]
-  (if-not (vector? ks)
-    `(clojure.core/get-in ~m ~ks)
+  (if (and (:ns &env)
+           (vector? ks))
     `(some-> (get ~m ~(first ks))
              ~@(for [k (rest ks)]
-                 (list 'clojure.core/get k)))))
+                 (list 'clojure.core/get k)))
+    `(clojure.core/get-in ~m ~ks)))
+
 
 (defmacro get-in-objs
   "Lookups in javascript objects, keywords converted to strings"
@@ -30,62 +33,92 @@
 
 
 (defmacro defmemo-1 [name fsym]
-  `(let [cache# (volatile! {})]
-     (defn ~name [x#]
-       (if-some [res# (@cache# x#)]
-         res#
-         (let [res# (~fsym x#)]
-           (vswap! cache# assoc x# res#)
-           res#)))))
+  (if (:ns &env)
+    `(let [cache# (volatile! {})]
+       (defn ~name [x#]
+         (if-some [res# (@cache# x#)]
+           res#
+           (let [res# (~fsym x#)]
+             (vswap! cache# assoc x# res#)
+             res#))))
+    `(def ~name (memoize ~fsym))))
 
 (defmacro if-found [[sym lookup-expr] then else]
-  `(let [~sym ~(concat lookup-expr (list 're-db.fast/nf-sentinel))]
-     (if (identical? ~sym ~'re-db.fast/nf-sentinel)
-       ~else
-       ~then)))
-
-(defmacro invoke->
-  "Like -> but calls each function using -invoke"
-  {:added "1.0"}
-  [x & forms]
-  (loop [x x, forms forms]
-    (if forms
-      (let [form (first forms)
-            threaded (if (seq? form)
-                       (with-meta `(~'cljs.core/-invoke ~(first form) ~x ~@(next form)) (meta form))
-                       (list form x))]
-        (recur threaded (next forms)))
-      x)))
+  (let [sentinel (if (:ns &env) 're-db.fast/nf-sentinel ::not-found)]
+    `(let [~sym ~(concat lookup-expr (list sentinel))]
+       (if (identical? ~sym ~sentinel)
+         ~else
+         ~then))))
 
 (defmacro update! [m k f & args]
   `(let [m# ~m]
      (assoc! m# ~k (~f (m# ~k) ~@args))))
 
-(def assoc-seq! 're-db.fast/assoc-seq!)
-(def assoc-seq 're-db.fast/assoc-seq)
-(def assoc-some 're-db.fast/assoc-some)
-(def assoc-some! 're-db.fast/assoc-some!)
-
 (defmacro update-seq! [m k f & args]
   `(let [m# ~m]
-     (~assoc-seq! m# ~k (~f (m# ~k) ~@args))))
+     (~'re-db.fast/assoc-seq! m# ~k (~f (m# ~k) ~@args))))
 
 (defmacro update-some! [m k f & args]
   `(let [m# ~m]
-     (~assoc-some! m# ~k (~f (m# ~k) ~@args))))
+     (~'re-db.fast/assoc-some! m# ~k (~f (m# ~k) ~@args))))
 
 (defmacro update-index! [index [k1 k2] f & args]
   `(let [index# ~index
          index-a# (index# ~k1)
          index-v# (get index-a# ~k2)]
-     (~assoc-seq! index# ~k1
-      (~assoc-seq index-a# ~k2 (~f index-v# ~@args)))))
+     (~'re-db.fast/assoc-seq! index# ~k1
+      (~'re-db.fast/assoc-seq index-a# ~k2 (~f index-v# ~@args)))))
 
 (defmacro assoc-index! [index [k1 k2] v]
   `(update! ~index ~k1 assoc ~k2 ~v))
 
 (defmacro dissoc-index! [index [k1 k2]]
   `(update-seq! ~index ~k1 dissoc ~k2))
+
+
+(defn comp6
+  "Comps functions which receive acc as 1st value followed by 6 unchanged values"
+  [fs]
+  (let [[f1 f2 f3 f4 f5 f6 f7 f8] fs]
+    (case (count fs)
+      0 (fn [acc _ _ _ _ _ _] acc)
+      1 f1
+      2 (fn [acc a1 a2 a3 a4 a5 a6] (-> acc (f1 a1 a2 a3 a4 a5 a6) (f2 a1 a2 a3 a4 a5 a6)))
+      3 (fn [acc a1 a2 a3 a4 a5 a6] (-> acc (f1 a1 a2 a3 a4 a5 a6) (f2 a1 a2 a3 a4 a5 a6) (f3 a1 a2 a3 a4 a5 a6)))
+      4 (fn [acc a1 a2 a3 a4 a5 a6] (-> acc (f1 a1 a2 a3 a4 a5 a6) (f2 a1 a2 a3 a4 a5 a6) (f3 a1 a2 a3 a4 a5 a6) (f4 a1 a2 a3 a4 a5 a6)))
+      5 (fn [acc a1 a2 a3 a4 a5 a6] (-> acc (f1 a1 a2 a3 a4 a5 a6) (f2 a1 a2 a3 a4 a5 a6) (f3 a1 a2 a3 a4 a5 a6) (f4 a1 a2 a3 a4 a5 a6) (f5 a1 a2 a3 a4 a5 a6)))
+      6 (fn [acc a1 a2 a3 a4 a5 a6] (-> acc (f1 a1 a2 a3 a4 a5 a6) (f2 a1 a2 a3 a4 a5 a6) (f3 a1 a2 a3 a4 a5 a6) (f4 a1 a2 a3 a4 a5 a6) (f5 a1 a2 a3 a4 a5 a6) (f6 a1 a2 a3 a4 a5 a6)))
+      7 (fn [acc a1 a2 a3 a4 a5 a6] (-> acc (f1 a1 a2 a3 a4 a5 a6) (f2 a1 a2 a3 a4 a5 a6) (f3 a1 a2 a3 a4 a5 a6) (f4 a1 a2 a3 a4 a5 a6) (f5 a1 a2 a3 a4 a5 a6) (f6 a1 a2 a3 a4 a5 a6) (f7 a1 a2 a3 a4 a5 a6)))
+      8 (fn [acc a1 a2 a3 a4 a5 a6] (-> acc (f1 a1 a2 a3 a4 a5 a6) (f2 a1 a2 a3 a4 a5 a6) (f3 a1 a2 a3 a4 a5 a6) (f4 a1 a2 a3 a4 a5 a6) (f5 a1 a2 a3 a4 a5 a6) (f6 a1 a2 a3 a4 a5 a6) (f7 a1 a2 a3 a4 a5 a6) (f8 a1 a2 a3 a4 a5 a6)))
+      (comp6 (cons (comp6 (take 8 fs))
+                   (drop 8 fs))))))
+
+(defn merge-maps [m1 m2]
+  (if (some? m1)
+    (merge m1 m2)
+    m2)
+  (merge m1 m2))
+
+(defn assoc-seq! [m a v]
+  (if (seq v)
+    (assoc! m a v)
+    (dissoc! m a)))
+
+(defn assoc-seq [m a v]
+  (if (seq v)
+    (assoc m a v)
+    (dissoc m a)))
+
+
+(defn assoc-some! [m a v]
+  (if (some? v)
+    (assoc! m a v)
+    (dissoc! m a)))
+
+(defn assoc-some [m a v]
+  (if (some? v)
+    (assoc m a v)
+    (dissoc m a)))
 
 (defmacro update-db-index! [db [i x y] f & args]
   `(update! ~db ~i update-index! [~x ~y] ~f ~@args))

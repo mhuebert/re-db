@@ -6,13 +6,16 @@
             [re-db.util :refer [guard set-replace]]
             [re-db.schema :as schema]))
 
-(def ^boolean index-all-ave? false)
-(def ^boolean index-all-ae? false)
+(def index-all-ave? false)
+(def index-all-ae? false)
 
-(js/console.info "re-db/index-all:"
-                 (str (cond-> #{}
-                              index-all-ave? (conj :ave)
-                              index-all-ae? (conj :ae))))
+(defrecord Schema [ave many unique ref ae index-fn])
+
+(#?(:cljs js/console.info
+    :clj  prn) "re-db/index-all:"
+               (str (cond-> #{}
+                            index-all-ave? (conj :ave)
+                            index-all-ae? (conj :ae))))
 
 ;; used to log datoms while building up a tx-report
 (def ^:dynamic *datoms* nil)
@@ -27,11 +30,11 @@
 ;; Schema properties are mirrored in javascript properties for fast lookups
 
 ;; Attribute-schema lookups (fast path)
-(defn ave? [a-schema] (true? (j/!get a-schema :ave?)))
-(defn ae? [a-schema] (true? (j/!get a-schema :ae?)))
-(defn many? [a-schema] (true? (j/!get a-schema :many?)))
-(defn unique? [a-schema] (true? (j/!get a-schema :unique?)))
-(defn ref? [a-schema] (true? (j/!get a-schema :ref?)))
+(defn ave? [^Schema a-schema] (true? (:ave a-schema)))
+(defn ae? [^Schema a-schema] (true? (:ae a-schema)))
+(defn many? [^Schema a-schema] (true? (:many a-schema)))
+(defn unique? [^Schema a-schema] (true? (:unique a-schema)))
+(defn ref? [^Schema a-schema] (true? (:ref a-schema)))
 
 (defn resolve-lookup-ref [[a v] db]
   (when v
@@ -60,7 +63,8 @@
   [a v]
   (fn [coll e]
     (if (seq coll) #_(some-> coll (disj e) seq)
-      (throw (js/Error. (unique-err-msg a v e coll)))
+      (throw (#?(:cljs js/Error.
+                 :clj Exception.) (unique-err-msg a v e coll)))
       #{e})))
 
 ;; when the schema is normalized - we make lists of per-value and per-datom
@@ -130,7 +134,7 @@
     (when (or (seq per-value) (seq per-datom))
       (let [per-values (fast/comp6 per-value)
             per-datoms (fast/comp6 per-datom)]
-        (fn [db [e ^keyword a v pv]]
+        (fn [db [e a v pv]]
           (let [v? (boolean (if is-many? (seq v) (some? v)))
                 pv? (boolean (if is-many? (seq pv) (some? pv)))]
             (as-> db db
@@ -156,18 +160,17 @@
                             db))))))))))
 
 (defn compile-a-schema* [{:as a-schema
-                          :db/keys [index unique cardinality valueType db/index-ae]}]
+                          :db/keys [index unique cardinality valueType index-ae]}]
   (let [unique? (boolean unique)
         index (or index-all-ave? index)
         ae (or index-all-ae? index-ae)
-        a-schema (j/assoc! a-schema
-                           :ave? (boolean (or index unique?))
-                           :many? (= cardinality :db.cardinality/many)
-                           :unique? unique?
-                           :ref? (= valueType :db.type/ref)
-                           :ae? ae)]
-    (j/assoc! a-schema :index-fn (make-indexer a-schema))))
-
+        a-schema (map->Schema
+                  {:ave (boolean (or index unique?))
+                   :many (= cardinality :db.cardinality/many)
+                   :unique unique?
+                   :ref (= valueType :db.type/ref)
+                   :ae ae})]
+    (assoc a-schema :index-fn (make-indexer a-schema))))
 
 ;; Lookup functions
 
@@ -176,17 +179,17 @@
 (defn get-schema [db a] (or (fast/get-in db [:schema a]) default-schema))
 (defn get-entity [db e] (fast/get-in db [:eav e]))
 
-(defn fqn [^keyword k] (.-fqn k))
-(defn- update-indexes [db datom schema]
+(defn fqn [#?(:cljs ^keyword k :clj k)] (.-fqn k))
+(defn- update-indexes [db datom ^Schema schema]
   (if (identical? "db/id" (fqn (aget datom 1)))
     db
-    (if-some [index (j/!get schema :index-fn)]
+    (if-some [index (:index-fn schema)]
       (index db datom)
       db)))
 
 (defn index [db schema e a v pv]
-  (let [datom #js[e a v pv]]
-    (some-> *datoms* (j/push! datom))
+  (let [datom (#?(:cljs array :clj vector) e a v pv)]
+    (some-> *datoms* (#?(:cljs j/push! :clj conj) datom))
     (update-indexes db datom schema)))
 
 ;; transactions
@@ -255,7 +258,7 @@
         (index a-schema e a v pv))))
 
 (j/defn reverse-datom [^js [e a v pv]]
-  #js[e a pv v])
+  (#?(:cljs array :clj vector) e a pv v))
 
 ;; generate internal db uuids
 (defonce last-e (volatile! 0.1))
@@ -365,7 +368,10 @@
                                 (reduce commit-datom db))
         (if-let [op (fast/get-in db [:schema :db/tx-fns operation])]
           (reduce commit-tx db (op db tx))
-          (throw (js/Error (str "No db op: " operation))))))
+          (do
+            ;; TODO
+            (prn :no-op-found (fast/get-in db [:schema :db/tx-fns operation]))
+            (throw (#?(:cljs js/Error :clj Exception.) (str "No db op: " operation)))))))
     (add-map db (update tx :db/id resolve-e db))))
 
 (defn transient-map [m] (reduce-kv #(fast/update! %1 %2 transient) (transient m) m))
@@ -412,11 +418,11 @@
               :keys [notify-listeners?
                      report-datoms?]
               :or {notify-listeners? true}}]
-   (when-let [tx-report (binding [*datoms* (when (boolean (or notify-listeners? report-datoms?)) #js[])]
+   (when-let [tx-report (binding [*datoms* (when (boolean (or notify-listeners? report-datoms?)) #?(:cljs #js[] :clj []))]
                           (some-> (cond (nil? txs) nil
                                         (:datoms txs) txs
                                         (sequential? txs) (transaction @conn txs)
-                                        :else (throw (js/Error "Transact! was not passed a valid transaction")))
+                                        :else (throw (#?(:cljs js/Error :clj Exception.) "Transact! was not passed a valid transaction")))
                                   (assoc :tx (vswap! tx-num inc))))]
      (commit! conn tx-report opts)
      tx-report)))

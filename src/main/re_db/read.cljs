@@ -16,26 +16,32 @@
 ;; tracked index lookups
 
 (defn -av_ [conn a v]
+  #_[a v ...e]
   (logged-read! conn nil a v
     (fast/get-in @conn [:ave a v])))
 
 (defn -va_ [conn v a]
+  #_[v a ...e]
   (logged-read! conn nil a v
     (fast/get-in @conn [:vae v a])))
 
-(defn -ae [conn a]
+(defn -a_ [conn a]
+  #_[a ...e]
   (logged-read! conn nil a nil
     (fast/get-in @conn [:ae a])))
 
 (defn -e__ [conn e]
+  #_[e {<a> <v>}]
   (logged-read! conn e nil nil
     (fast/get-in @conn [:eav e])))
 
 (defn -ea_ [conn e a]
+  #_[e a ?v]
   (logged-read! conn e a nil
     (fast/get-in @conn [:eav e a])))
 
 (defn -v__ [conn v]
+  #_[v {<a> ...e}]
   (logged-read! conn nil nil v
     (fast/get-in @conn [:vae v])))
 
@@ -137,7 +143,7 @@
   [conn a]
   (let [db @conn]
     (if (db/ae? (db/get-schema db a))
-      (-ae conn a)
+      (-a_ conn a)
       (do
         (warn! :ae a)
         (if auto-index?

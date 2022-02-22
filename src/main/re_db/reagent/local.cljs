@@ -10,17 +10,15 @@
 ;;
 ;; prototyped solution:
 ;;
-;; 1. A "cursor" is a view of an entity which allows reactive-read (via @ or lookup)
-;;    and mutation (via reset!, which runs a transaction) - so we can treat it like
-;;    a familiar local-state ratom
-;; 2. We create our cursor using the `local-state` function. it accepts a :key parameter
+;; 1. A "EAtom", entity-atom, wraps an entity to allow reactive-read (via @ or lookup)
+;;    and mutation (via reset!, which runs a transaction)
+;; 2. We create our entity-atom using the `local-state` function. it accepts a :key parameter
 ;;    allowing us to differentiate instances of the same component. Default values can be
 ;;    passed.
 
-;; a cursor always causes a dependency on the "whole entity" - since the purpose
-;; is local-component-state we don't need to differentiate attribute reads.
+;; an entity-atom always causes a dependency on the "whole entity"
 
-(deftype Cursor [conn e defaults]
+(deftype EAtom [conn e defaults]
   IDeref
   (-deref [this]
     (merge defaults (read/-e__ conn e)))
@@ -39,7 +37,15 @@
   (-swap! [this f a b xs] (reset! this (apply f @this a b xs))))
 
 ;; a string key where we'll memoize the cursor per-component-instance
-(def local-state-key (str ::cursor))
+(def ratom-cache-key (str ::local-state))
+
+;; memoize result of `initial-val-fn` on current ratom context
+(defn ratom-memo [key initial-val-fn]
+  (let [obj ratom/*ratom-context*
+        !cache (j/get obj ratom-cache-key (doto (volatile! {})
+                                            (->> (j/!set obj ratom-cache-key))))]
+    (or (@!cache key)
+        (doto (initial-val-fn) (->> (swap! !cache assoc key))))))
 
 (defn local-state
   "Return a local-state cursor for a Reagent component.
@@ -48,21 +54,8 @@
   [conn & {:keys [key defaults component]
            :or {component (reagent/current-component)
                 key :singleton}}]
-
-  ;; make a db-id out of the current component + provided key
   (let [e {(type *current-component*) key}]
-    (j/get component local-state-key
-           (let [cur (Cursor. conn e defaults)]
-             (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retractEntity e]]
-
-                                                                        ;; NOTE - not implemented - just a
-                                                                        ;; reminder that these on-dispose retractions
-                                                                        ;; are logically part of a previous transaction
-                                                                        ;; but occur after a reagent render tick..
-                                                                        ;; when implementing history/time-travel we
-                                                                        ;; may want to consider this transaction part of
-                                                                        ;; the previous transaction, possibly even batch these
-                                                                        ;; transactions.
-                                                                        {:merge-with-last? true}))
-             (j/!set component local-state-key cur)
-             cur))))
+    (ratom-memo e
+                (fn []
+                  (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retractEntity e]]))
+                  (EAtom. conn e defaults)))))

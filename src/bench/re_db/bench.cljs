@@ -9,21 +9,22 @@
             [ribelo.doxa :as dx]
             [clojure.walk :as walk]
             [re-db.test-helpers :as th :refer [bench]]
-            [re-db.fast :as fast]))
+            [re-db.fast :as fast]
+            [re-db.schema :as schema]))
 
 (def schema {:user/pets {:db/valueType :db.type/ref
                          :db/cardinality :db.cardinality/many}
              :pet/owner {:db/valueType :db.type/ref}
              :user/name {:db/index true}
-             :db/ref-id rd/index-ave
+             :db/ref-id schema/ave
              :friend {:db/valueType :db.type/ref
                       #_#_:db/cardinality :db.cardinality/many}
              :alias {:db/cardinality :db.cardinality/many}
 
-             ;:name rd/indexed
-             ;:age rd/indexed-ae
-             ;:last-name rd/indexed-ae
-             ;:sex rd/indexed
+             ;:name schema/indexed
+             ;:age schema/indexed-ae
+             ;:last-name schema/indexed-ae
+             ;:sex schema/indexed
              })
 
 ;; obj vs Map
@@ -239,8 +240,8 @@
                                            :person/name (str (random-uuid))
                                            :pet/name (str (random-uuid))}) (range)))]
       (bench "pre/post indexing"
-             "pre-indexing" #(doto (rd/create-conn {:user/name rd/index-ave
-                                                    :pet/name rd/index-ave})
+             "pre-indexing" #(doto (rd/create-conn {:user/name schema/ave
+                                                    :pet/name schema/ave})
                                (rd/transact! samples))
              "post-indexing" #(doto (rd/create-conn)
                                 (rd/transact! samples)
