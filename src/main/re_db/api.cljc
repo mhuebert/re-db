@@ -1,9 +1,40 @@
 (ns re-db.api
-  (:refer-clojure :exclude [get get-in contains? select-keys namespace clone])
+  (:refer-clojure :exclude [get get-in contains? select-keys namespace clone bound-fn])
   (:require [re-db.core :as d]
             [re-db.read :as read]
             [re-db.macros :as m])
-  (:require-macros [re-db.api :as api]))
+  #?(:cljs (:require-macros re-db.api)))
+
+(defmacro with-conn
+  "Evaluates body with *current-conn* bound to `conn`, which may be a connection or a schema"
+  [conn & body]
+  `(binding [~'re-db.api/*current-conn* (~'re-db.api/->conn ~conn)]
+     ~@body))
+
+(defmacro branch
+  "Evaluates body with *current-conn* bound to a fork of `conn`. Returns a transaction."
+  [conn & body]
+  (let [[conn body] (if (or (symbol? conn) (map? conn))
+                      [conn body]
+                      [('re-db.api/conn) (cons conn body)])]
+    `(binding [~'re-db.api/*current-conn* (~'re-db.api/clone ~conn)
+               ~'re-db.core/*branch-tx-log* (atom [])]
+       (let [db-before# @~'re-db.api/*current-conn*
+             val# (do ~@body)
+             txs# @~'re-db.core/*branch-tx-log*]
+         (with-meta {:db-before db-before#
+                     :db-after @~'re-db.api/*current-conn*
+                     :datoms (into [] (mapcat :datoms) txs#)}
+                    {:value val#})))))
+
+(defmacro bound-fn
+  "Define an anonymous function where *conn* is bound at definition-time"
+  [& body]
+  `(let [f# (~'fn ~@body)
+         conn# (~'re-db.api/conn)]
+     (fn [& args#]
+       (binding [~'re-db.api/*current-conn* conn#]
+         (apply f# args#)))))
 
 (defonce ^:dynamic *current-conn* (read/create-conn {}))
 

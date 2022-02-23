@@ -1,11 +1,13 @@
 (ns re-db.core-test
-  (:require [cljs.test :refer-macros [deftest is testing]]
-            [re-db.core :as d :include-macros true]
+  (:require [clojure.test :refer [deftest is testing]]
+            [re-db.core :as d]
             [re-db.read :as read]
             [re-db.api :as api]
             [re-db.schema :as schema]
-            [reagent.core :as r])
-  (:require-macros [re-db.test-helpers :refer [throws]]))
+            [re-db.util :as util]
+            [re-db.test-helpers :refer [throws]]))
+
+(defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
 (deftest datom-tx
 
@@ -120,8 +122,9 @@
   (let [conn (d/create-conn {:dog {:db/index true}})
         tx-log (atom [])]
 
-    (is (satisfies? cljs.core/IDeref conn)
-        "DB is an atom")
+    #?(:cljs
+       (is (satisfies? cljs.core/IDeref conn)
+           "DB is an atom"))
 
     (d/listen! conn ::basic #(swap! tx-log conj (:datoms %2)))
 
@@ -133,7 +136,7 @@
 
     (d/transact! conn [{:db/id "herman" :occupation "teacher"}])
 
-    (is (= (js->clj (last @tx-log))
+    (is (= (->clj (last @tx-log))
            [["herman" :occupation "teacher" nil]])
         "Tx-log listener called with datoms")
 
@@ -160,7 +163,7 @@
         "Retract attribute")
 
     (is (= [["herman" :occupation nil "teacher"]]
-           (js->clj (last @tx-log)))
+           (->clj (last @tx-log)))
         "retraction datom")
 
     (is (= 1 (count (read/where conn [[:occupation "teacher"]])))
@@ -197,8 +200,6 @@
         (is (= (api/get "a" :name/last) "c"))))))
 
 
-
-
 (deftest refs
   (let [db (doto (d/create-conn {:owner (merge schema/ref
                                                schema/unique-value)})
@@ -215,17 +216,17 @@
         "touch adds refs to entity"))
 
   (let [conn (doto (d/create-conn {:authors {:db/valueType :db.type/ref
-                                           :db/cardinality :db.cardinality/many}
-                                 :pet {:db/valueType :db.type/ref}})
-             (d/transact! [{:db/id "fred"
-                            :name "Fred"
-                            :pet {:db/id "fido"}}
-                           {:db/id "mary"
-                            :name "Mary"}
-                           {:db/id "1"
-                            :name "One"
-                            :authors #{"fred" "mary"}}
-                           #_[:db/add "1" :authors #{"fred" "mary"}]]))]
+                                             :db/cardinality :db.cardinality/many}
+                                   :pet {:db/valueType :db.type/ref}})
+               (d/transact! [{:db/id "fred"
+                              :name "Fred"
+                              :pet {:db/id "fido"}}
+                             {:db/id "mary"
+                              :name "Mary"}
+                             {:db/id "1"
+                              :name "One"
+                              :authors #{"fred" "mary"}}
+                             #_[:db/add "1" :authors #{"fred" "mary"}]]))]
     (is (= {:db/id "fred"
             :name "Fred"
             :_authors #{"1"}
@@ -265,18 +266,18 @@
     (api/transact! [{:db/id "A"
                      :name "A"
                      :child {:db/id "B"
-                             :name "B"}}])
+                             :name "B-name"}}])
     (is (-> (api/pull "A" [:child])
+            ;; error - not navigating to :child
             (= {:db/id "A"
                 :name "A"
                 :child {:db/id "B"
-                        :name "B"}})))
+                        :name "B-name"}})))
 
     (is (-> (api/entity "A")
             (api/touch)
             :child
-            type
-            (= js/String)))
+            string?))
 
     (is (-> (api/entity "A")
             (api/touch)
@@ -286,16 +287,16 @@
 (deftest custom-db-operations
   ;; add an operation by
   (api/with-conn {:db/tx-fns {:db/times-ten (fn [db [_ e a v]]
-                                                  [[:db/add e a (* 10 v)]])}}
+                                              [[:db/add e a (* 10 v)]])}}
     (api/transact! [[:db/times-ten :matt :age 3.9]])
-    (is (= 39 (api/get :matt :age))
+    (is (= 39.0 (api/get :matt :age))
         "Custom db/operation can be specified in schema"))
 
   (api/with-conn {:db/tx-fns {:db/times (fn [db [_ e a v]]
-                                              [[:db/add e a (* (:multiplier (d/get-entity db :times) 0) v)]])}}
+                                          [[:db/add e a (* (:multiplier (d/get-entity db :times) 0) v)]])}}
     (api/transact! [[:db/add :times :multiplier 10]
                     [:db/times :matt :age 3.9]])
-    (is (= 39 (api/get :matt :age))
+    (is (= 39.0 (api/get :matt :age))
         "custom db/operation can read from db")))
 
 #_(comment
@@ -392,7 +393,6 @@
   )
 
 (deftest where
-
   (let [conn (read/create-conn {:person/id (merge
                                             schema/unique-id
                                             schema/ae)
@@ -445,11 +445,12 @@
                     meta))))))
 
 (deftest reverse-lookups
-  (api/with-conn {:pet {:db/valueType :db.type/ref}
+  (api/with-conn {:pet schema/ref
                   :tag-id schema/unique-id}
     (api/transact! [{:db/id "owner"
                      :pet [:tag-id "f1"]}
                     {:tag-id "f1"}])
+
     (is (some? (-> (api/entity [:tag-id "f1"])
                    :_pet
                    first
@@ -458,8 +459,8 @@
   (api/with-conn {:system/id schema/unique-id
                   :system/notifications {:db/valueType :db.type/ref
                                          :db/cardinality :db.cardinality/many}}
-    (let [s (random-uuid)
-          n (random-uuid)]
+    (let [s (util/random-uuid)
+          n (util/random-uuid)]
       (api/transact! [{:system/id s :system/notifications #{[:system/id n]}}])
       (api/transact! [{:notification/kind :sms :system/id n}])
       (is (= 1 (count (:system/notifications (api/entity [:system/id s]))))))))

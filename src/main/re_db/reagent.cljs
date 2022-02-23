@@ -2,8 +2,11 @@
   (:require [applied-science.js-interop :as j]
             [re-db.fast :as fast]
             [reagent.ratom :as ratom]
-            [re-db.core :as db])
+            [re-db.core :as db]
+            [re-db.util :as util])
   (:require-macros re-db.reagent))
+
+(defn ratom-context [] ratom/*ratom-context*)
 
 ;; modified from reagent.ratom/RAtom
 (deftype Reader [^:mutable watches on-unwatched e a v f ^:mutable value]
@@ -35,7 +38,7 @@
 ;; just for debugging
 (defn captured-patterns []
   ;; reagent internals
-  (->> (j/get ratom/*ratom-context* .-captured)
+  (->> (j/get (ratom-context) .-captured)
        (reduce (fn [patterns ^Reader i]
                  (cond-> patterns
                          (instance? Reader i)
@@ -72,7 +75,7 @@
   ;; there can only be one reader per e-a-v pattern,
   ;; it is reused among consumers and cleaned up when
   ;; no longer observed.
-  (if-some [context ratom/*ratom-context*]
+  (if-some [context (ratom-context)]
     (let [reader (or (fast/get-some-in @conn [:cached-readers e a v])
                      (let [reader (make-reader conn e a v read-fn (read-fn))]
                        (swap! conn assoc-in [:cached-readers e a v] reader)
@@ -82,12 +85,12 @@
 
 (defn keys-when [m vpred]
   (reduce-kv (fn [m a v]
-               (cond-> m (vpred v) (conj a)))
+               (cond-> m ^boolean (vpred v) (conj a)))
              #{}
              m))
 
-(defn- many-a? [db-schema] (keys-when db-schema db/many?))
-(defn- ref-a? [db-schema] (keys-when db-schema db/ref?))
+(defn- many-a? [db-schema] (keys-when db-schema #(:many ^db/Schema %)))
+(defn- ref-a? [db-schema] (keys-when db-schema #(:ref ^db/Schema %)))
 
 (defn invalidate-readers!
   ;; given a re-db transaction, invalidates readers based on
@@ -95,8 +98,8 @@
   [_conn {:keys [datoms tx]
           {:keys [cached-readers schema]} :db-after}]
   (when cached-readers
-    (let [many? (keys-when schema db/many?)
-          ref? (keys-when schema db/ref?)
+    (let [many? (keys-when schema (fn [^db/Schema a-schema] (:many a-schema)))
+          ref? (keys-when schema (fn [^db/Schema a-schema] (:ref a-schema)))
           found! (fn [^Reader reader]
                    (some-> reader (invalidate! tx)))
           _ (cached-readers nil)

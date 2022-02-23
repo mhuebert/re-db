@@ -1,4 +1,5 @@
-(ns re-db.schema)
+(ns re-db.schema
+  (:refer-clojure :exclude [ref]))
 
 ;; schema
 (def many {:db/cardinality :db.cardinality/many})

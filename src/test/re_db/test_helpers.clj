@@ -4,7 +4,9 @@
   (let [message (when (string? (last body)) (last body))
         body (cond-> body
                      message (drop-last))]
-    (cond-> `(~'cljs.test/is (~'thrown? ~'js/Error ~@body))
+    (cond-> `(~(if (:ns &env) 'cljs.test/is 'clojure.test/is)
+              (~'thrown? ~(if (:ns &env) 'js/Error 'Exception)
+               ~@body))
             message (concat (list message)))))
 
 (defmacro bench [label & pairs]

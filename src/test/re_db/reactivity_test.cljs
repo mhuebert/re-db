@@ -5,7 +5,7 @@
             [re-db.core :as db]
             [re-db.read :as read :refer [create-conn]]
             [re-db.reagent :refer [captured-patterns]]
-            [re-db.reagent.local :refer [local-state]]
+            [re-db.reagent.local-state :refer [local-state]]
             [re-db.reagent.context :as context]
             [re-db.schema :as schema]
             [reagent.core :as reagent :refer [track!]]

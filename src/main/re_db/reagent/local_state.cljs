@@ -1,17 +1,19 @@
-(ns re-db.reagent.local
+(ns re-db.reagent.local-state
   (:require [applied-science.js-interop :as j]
-            [re-db.read :as read]
             [re-db.core :as db]
             [reagent.ratom :as ratom]
+            [re-db.read :as read]
             [reagent.core :as reagent]
-            [reagent.impl.component :refer [*current-component*]]))
+            [reagent.impl.component :refer [*current-component* component-name]])
+  (:require-macros [re-db.reagent.local-state :as macros]))
 
 ;; problem: how to store local-state in re-db, to enable time-travel
 ;;
 ;; prototyped solution:
 ;;
-;; 1. A "EAtom", entity-atom, wraps an entity to allow reactive-read (via @ or lookup)
-;;    and mutation (via reset!, which runs a transaction)
+;; 1. A "EAtom", entity-atom, wraps an entity to allow
+;;    - reactive-read (via @ or lookup)
+;;    - mutation (via reset!, which runs a transaction)
 ;; 2. We create our entity-atom using the `local-state` function. it accepts a :key parameter
 ;;    allowing us to differentiate instances of the same component. Default values can be
 ;;    passed.
@@ -40,22 +42,23 @@
 (def ratom-cache-key (str ::local-state))
 
 ;; memoize result of `initial-val-fn` on current ratom context
-(defn ratom-memo [key initial-val-fn]
-  (let [obj ratom/*ratom-context*
-        !cache (j/get obj ratom-cache-key (doto (volatile! {})
-                                            (->> (j/!set obj ratom-cache-key))))]
+(defn ratom-memo [component key initial-val-fn]
+  (let [!cache (j/get component ratom-cache-key (doto (volatile! {})
+                                                  (->> (j/!set component ratom-cache-key))))]
     (or (@!cache key)
-        (doto (initial-val-fn) (->> (swap! !cache assoc key))))))
+        (doto (initial-val-fn) (->> (vswap! !cache assoc key))))))
 
-(defn local-state
+(defn local-state*
   "Return a local-state cursor for a Reagent component.
     :key      - to differentiate instances of this component
     :defaults - a map of default values (these will not be stored in re-db)"
-  [conn & {:keys [key defaults component]
+  [conn & {:keys [key defaults component location]
            :or {component (reagent/current-component)
                 key :singleton}}]
-  (let [e {(type *current-component*) key}]
-    (ratom-memo e
+
+  (let [e {component key}]
+    (ratom-memo component
+                e
                 (fn []
                   (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retractEntity e]]))
                   (EAtom. conn e defaults)))))
