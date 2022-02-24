@@ -4,7 +4,7 @@
             [re-db.api :as api]
             [re-db.core :as db]
             [re-db.read :as read :refer [create-conn]]
-            [re-db.reagent :refer [captured-patterns]]
+            [re-db.reagent :refer [read-index! captured-patterns]]
             [re-db.reagent.local-state :refer [local-state]]
             [re-db.reagent.context :as context]
             [re-db.schema :as schema]
@@ -97,22 +97,31 @@
 (def eval-count (atom 0))
 
 (deftest listen
-  (api/with-conn {}
-    (let [log (atom nil)]
-      (api/listen [[1 nil nil]] #(reset! log 1))
-      (api/listen [[2 :a nil]] #(reset! log 2))
+  (api/with-conn {:x schema/ref}
+    (let [log (atom [])]
+      (reagent/track! #(do (read-index! (api/conn) :eav 1)
+                           (swap! log conj 1)))
+      (reagent/track! #(do (read-index! (api/conn) :eav 2 :a)
+                           (swap! log conj 2)))
+      (reagent/track! #(do (read-index! (api/conn) :vae 99)
+                           (swap! log conj 3)))
+
 
       (api/transact! [[:db/add 1 :name "a"]])
       (reagent/flush)
-      (is (= @log 1))
+      (is (= @log [1 2 3 1]))
 
       (api/transact! [[:db/add 2 :b "b"]])
       (reagent/flush)
-      (is (= @log 1))
+      (is (= @log [1 2 3 1]))
 
       (api/transact! [[:db/add 2 :a "a"]])
       (reagent/flush)
-      (is (= @log 2))
+      (is (= @log [1 2 3 1 2]))
+
+      (api/transact! [[:db/add 3 :x 99]])
+      (reagent/flush)
+      (is (= @log [1 2 3 1 2 3]))
 
       )))
 

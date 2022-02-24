@@ -3,6 +3,7 @@
             [re-db.core :as db]
             [reagent.ratom :as ratom]
             [re-db.read :as read]
+            [re-db.reagent :refer [read-index!]]
             [reagent.core :as reagent]
             [reagent.impl.component :refer [*current-component* component-name]])
   (:require-macros [re-db.reagent.local-state :as macros]))
@@ -23,12 +24,12 @@
 (deftype EAtom [conn e defaults]
   IDeref
   (-deref [this]
-    (merge defaults (read/$e__ conn e)))
+    (merge defaults (read-index! conn :eav e)))
   ILookup
   (-lookup [this a]
-    (get (read/$e__ conn e) a (get defaults a)))
+    (get (read-index! conn :eav e) a (get defaults a)))
   (-lookup [this a not-found]
-    (get (read/$e__ conn e) a (get defaults a not-found)))
+    (get (read-index! conn :eav e) a (get defaults a not-found)))
   IReset
   (-reset! [this new-value]
     (db/transact! conn [(assoc new-value :db/id e)]))

@@ -80,8 +80,7 @@
   ([txs opts]))
 
 (m/defpartial listen {:f '(read/listen (conn) _)}
-  ([callback])
-  ([patterns callback]))
+  [callback])
 
 (def merge-schema! (partial d/merge-schema! (conn)))
 

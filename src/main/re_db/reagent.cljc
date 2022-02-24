@@ -3,19 +3,39 @@
             [applied-science.js-interop :as j]
             [re-db.core :as db]
             [re-db.fast :as fast]
-            [re-db.util :as util])
+            [re-db.util :as util]
+            [clojure.string :as str])
   #?(:cljs (:require-macros re-db.reagent)))
 
-(defmacro logged-read! [conn e a v expr]
-  (if (:ns &env)
-    `(~'re-db.reagent/logged-read* ~conn ~e ~a ~v (fn [] ~expr))
-    expr))
+
+(defn simple-sym [s] (and (symbol? s)
+                          (not (str/starts-with? (name s) "."))
+                          (not (str/starts-with? (name s) "?"))))
+
+(defn simplify-sym [s]
+  (symbol (-> (name s)
+              (str/replace #"^\?" "")
+              (str/replace #"^\.\.\." ""))))
+
+(defn parse-pattern [pattern]
+  (let [args (take-while simple-sym pattern)
+        index (->> pattern (map #(cond-> % (map? %) seq)) flatten (map simplify-sym) str/join keyword)
+        path (into [index] args)
+        eav (zipmap args args)]
+    (assoc eav :path path)))
+
+(defmacro read-index! [conn index & args]
+  (let [{e \e a \a v \v} (zipmap (name index) args)
+        expr `(fast/get-in @~conn ~(into [index] args))]
+    (if (:ns &env)
+      `(~'re-db.reagent/cached-index-read ~conn ~e ~a ~v (fn [] ~expr))
+      expr)))
 
 #?(:clj (def ^:dynamic *ratom-context* nil))
 
 (defn ratom-context [] #?(:cljs ratom/*ratom-context* :clj *ratom-context*))
 
-(defprotocol IReader
+(defprotocol IReaction
   (recompute! [reader])
   (invalidate! [reader tx]))
 
@@ -24,36 +44,37 @@
   (capture! [context watcher]))
 
 (util/support-clj-protocols
- (deftype Reader [!watchers
-                  !on-unwatched
-                  e a v f
-                  !value
-                  !tx]
-   IReader
-   (recompute! [this]
-     (vreset! !value (f)))
-   (invalidate! [this next-tx]
-    ;; only trigger! once per transaction
-     (when-not (== next-tx @!tx)
-       (vreset! !tx next-tx)
-       (let [newval (recompute! this)]
-         (reduce-kv (fn [_ k f] (f k this #?(:cljs js/undefined :clj nil) newval) nil) nil @!watchers))))
-   IWatchable
-   #?(:cljs
-      (-notify-watches [this old new] (throw (js/Error. "-notify-watches Unsupported"))))
-   (-add-watch [this key f]
-     (vswap! !watchers assoc key f))
-   (-remove-watch [this key]
-     (vswap! !watchers dissoc key)
-     (when (empty? @!watchers)
-       (@!on-unwatched this)))
-   IReset
-   (-reset! [this newval] (vreset! !value newval))
-   IDeref
-   (-deref [this] @!value)
-   ICaptureWatchers
-   (capture! [context watcher]
-     (prn ::reader-does-not-capture-readers))))
+  (deftype Reader [!watchers
+                   !on-unwatched
+                   e a v
+                   f
+                   !value
+                   !tx]
+    IReaction
+    (recompute! [this]
+      (vreset! !value (f)))
+    (invalidate! [this next-tx]
+     ;; only trigger! once per transaction
+      (when-not (== next-tx @!tx)
+        (vreset! !tx next-tx)
+        (let [newval (recompute! this)]
+          (reduce-kv (fn [_ k f] (f k this #?(:cljs js/undefined :clj nil) newval) nil) nil @!watchers))))
+    IWatchable
+    #?(:cljs
+       (-notify-watches [this old new] (throw (js/Error. "-notify-watches Unsupported"))))
+    (-add-watch [this key f]
+      (vswap! !watchers assoc key f))
+    (-remove-watch [this key]
+      (vswap! !watchers dissoc key)
+      (when (empty? @!watchers)
+        (@!on-unwatched this)))
+    IReset
+    (-reset! [this newval] (vreset! !value newval))
+    IDeref
+    (-deref [this] @!value)
+    ICaptureWatchers
+    (capture! [context watcher]
+      (prn ::reader-does-not-capture-readers))))
 
 #?(:cljs
    (extend-protocol ICaptureWatchers
@@ -93,7 +114,7 @@
             (volatile! value)
             (volatile! nil)))
 
-(defn logged-read* [conn e a v read-fn]
+(defn cached-index-read [conn e a v read-fn]
   ;; evaluates & returns read-fn, caching the value,
   ;; recomputing when the given e-a-v pattern
   ;; is invalidated by a transaction on `conn`.

@@ -2,7 +2,7 @@
   (:refer-clojure :exclude [get peek])
   (:require [re-db.core :as db]
             [re-db.fast :as fast]
-            [re-db.reagent :as re-db.reagent :refer [logged-read!]]
+            [re-db.reagent :as re-db.reagent :refer [read-index!]]
             [re-db.util :as util :refer [guard]]
             [re-db.schema :as schema]
             #?(:cljs [reagent.core :as reagent])
@@ -13,38 +13,6 @@
 
 (#?(:cljs js/console.info :clj prn) "re-db/auto-index:" auto-index?)
 
-;; tracked index lookups
-
-(defn $av_ [conn a v]
-  #_[a v ...e]
-  (logged-read! conn nil a v
-    (fast/get-in @conn [:ave a v])))
-
-(defn $va_ [conn v a]
-  #_[v a ...e]
-  (logged-read! conn nil a v
-    (fast/get-in @conn [:vae v a])))
-
-(defn $a_ [conn a]
-  #_[a ...e]
-  (logged-read! conn nil a nil
-    (fast/get-in @conn [:ae a])))
-
-(defn $e__ [conn e]
-  #_[e {<a> <v>}]
-  (logged-read! conn e nil nil
-    (fast/get-in @conn [:eav e])))
-
-(defn $ea_ [conn e a]
-  #_[e a ?v]
-  (logged-read! conn e a nil
-    (fast/get-in @conn [:eav e a])))
-
-(defn $v__ [conn v]
-  #_[v {<a> ...e}]
-  (logged-read! conn nil nil v
-    (fast/get-in @conn [:vae v])))
-
 ;; lookup refs
 
 (defn resolve-lookup-ref [conn [a v]]
@@ -52,7 +20,7 @@
   (if (vector? v)                                           ;; nested lookup ref
     (resolve-lookup-ref conn [a (resolve-lookup-ref conn v)])
     (when v
-      (first ($av_ conn a v)))))
+      (first (read-index! conn :ave a v)))))
 
 (defn resolve-e
   "Returns id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
@@ -68,12 +36,12 @@
   "Read entity or attribute reactively"
   ([conn e]
    (some->> (resolve-e conn e)
-            ($e__ conn)))
+            (read-index! conn :eav)))
   ([conn e attr]
    (get conn e attr nil))
   ([conn e attr not-found]
    (if-some [id (resolve-e conn e)]
-     (or ($ea_ conn id attr) not-found)
+     (or (read-index! conn :eav id attr) not-found)
      not-found)))
 
 ;; non-reactive alternative
@@ -122,7 +90,7 @@
         a-schema (db/get-schema db a)
         v (cond->> v ^boolean (:ref a-schema) (resolve-e conn))]
     (if ^boolean (:ave a-schema)
-      ($av_ conn a v)
+      (read-index! conn :ave a v)
       (do
         (warn! :ave a)
         (if auto-index?
@@ -144,7 +112,7 @@
   (let [db @conn
         a-schema (db/get-schema db a)]
     (if ^boolean (:ae a-schema)
-      ($a_ conn a)
+      (read-index! conn :ae a)
       (do
         (warn! :ae a)
         (if auto-index?
@@ -167,7 +135,7 @@
       (assoc m (reverse-attr a) e))
     m
     ;; TODO - support this pattern
-    ($v__ conn v))))
+    (read-index! conn :vae v))))
 
 (defn- pull* [{:as m e :db/id} pullv db found]
   (when m
@@ -282,7 +250,7 @@
    (-seq [this] (seq @this))
    IDeref
    (-deref [this]
-     ($e__ conn (-resolve-e! this conn e)))
+     (read-index! conn :eav (-resolve-e! this conn e)))
    ILookup
    (-lookup [this a]
      (let [e (-resolve-e! this conn e)
@@ -295,8 +263,8 @@
        (if is-reverse
          (do
            (assert is-ref?)
-           (mapv #(entity conn %) ($va_ conn e a)))
-         (let [v ($ea_ conn e a)
+           (mapv #(entity conn %) (read-index! conn :vae e a)))
+         (let [v (read-index! conn :eav e a)
                is-many? ^boolean (:many a-schema)]
            (if is-ref?
              (if is-many?
@@ -321,7 +289,7 @@
                (reduce-kv
                 (fn [m a e] (assoc m (reverse-attr a) (mapv #(entity conn %) e)))
                 m
-                ($v__ conn (:db/id m)))]
+                (read-index! conn :vae (:db/id m)))]
            (reduce-kv (fn [m a v]
                         (let [a-schema (db/get-schema db a)]
                           (if ^boolean (:ref a-schema)
@@ -333,7 +301,7 @@
          (reduce-kv
           (fn [m a e] (assoc m (reverse-attr a) e))
           m
-          ($v__ conn id)))))))
+          (read-index! conn :vae id)))))))
 
 (defn entity [conn id]
   (Entity. conn (resolve-e conn id) false nil))
@@ -345,17 +313,6 @@
 (def create-conn (comp listen-conn db/create-conn))
 
 (defn listen
-  ([conn callback]
-   #?(:cljs
-      (db/listen! conn (str (random-uuid)) callback)))
-  ([conn patterns callback]
-   #?(:cljs
-     (let [initialized? (volatile! false)
-           rxn (reagent/track!
-                (fn []
-                  (doseq [[e a v] patterns]
-                    (logged-read! conn e a v nil))
-                  (when @initialized? (callback conn))
-                  (vreset! initialized? true)
-                  nil))]
-       #(reagent/dispose! rxn)))))
+  [conn callback]
+  #?(:cljs
+     (db/listen! conn (str (random-uuid)) callback)))
