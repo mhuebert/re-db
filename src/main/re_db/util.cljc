@@ -45,7 +45,11 @@
                         -hash hasheq
 
                         IEquiv Object
-                        -equiv equals} form)))
+                        -equiv equals
+
+                        IWatchable clojure.lang.IRef
+                        -add-watch addWatch
+                        -remove-watch removeWatch} form)))
 
 (defn random-uuid []
   #?(:cljs (cljs.core/random-uuid)

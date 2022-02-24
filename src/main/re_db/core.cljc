@@ -112,7 +112,7 @@
 
 (def make-indexer
   (memoize
-   (fn  [^Schema a-schema]
+   (fn [^Schema a-schema]
      ;; one indexer per attribute
      (let [[per-value per-datom] (->> (cond-> []
                                               (:ave a-schema) (conj (ave-indexer a-schema))
@@ -419,12 +419,13 @@
                          (sequential? txs) txs
                          :else (throw (#?(:cljs js/Error :clj Exception.) "Transact! was not passed a valid transaction")))]
       (let [db-after (-> (reduce commit-tx (transient-map db-before) txs)
-                         (persistent-map!))]
-        (with-meta {:db-before db-before
-                    :db-after db-after
-                    :datoms (if *datoms* #?(:cljs (vec *datoms*)
-                                            :clj  @*datoms*) [])}
-                   (assoc opts :tx (vswap! tx-num inc)))))))
+                         (persistent-map!))
+            datoms #?(:cljs (vec *datoms*)
+                      :clj (or (some-> *datoms* deref) []))]
+        {:db-before db-before
+         :db-after db-after
+         :datoms datoms
+         :tx (vswap! tx-num inc)}))))
 
 (defn transact!
   ([conn txs] (transact! conn txs {}))
