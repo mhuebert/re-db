@@ -2,6 +2,10 @@
   (:refer-clojure :exclude [get-in])
  #?(:cljs (:require-macros re-db.fast)))
 
+
+;; `gets` impl from cljs.analyzer
+;; https://github.com/clojure/clojurescript/blob/master/src/main/clojure/cljs/analyzer.cljc#L205
+
 #?(:clj (def SENTINEL (Object.))
    :cljs (def SENTINEL (js-obj)))
 
