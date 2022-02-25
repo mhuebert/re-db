@@ -7,26 +7,9 @@
             [clojure.string :as str])
   #?(:cljs (:require-macros re-db.reagent)))
 
-
-(defn simple-sym [s] (and (symbol? s)
-                          (not (str/starts-with? (name s) "."))
-                          (not (str/starts-with? (name s) "?"))))
-
-(defn simplify-sym [s]
-  (symbol (-> (name s)
-              (str/replace #"^\?" "")
-              (str/replace #"^\.\.\." ""))))
-
-(defn parse-pattern [pattern]
-  (let [args (take-while simple-sym pattern)
-        index (->> pattern (map #(cond-> % (map? %) seq)) flatten (map simplify-sym) str/join keyword)
-        path (into [index] args)
-        eav (zipmap args args)]
-    (assoc eav :path path)))
-
 (defmacro read-index! [conn index & args]
   (let [{e \e a \a v \v} (zipmap (name index) args)
-        expr `(fast/get-in @~conn ~(into [index] args))]
+        expr `(fast/gets @~conn ~index ~@args)]
     (if (:ns &env)
       `(~'re-db.reagent/cached-index-read ~conn ~e ~a ~v (fn [] ~expr))
       expr)))
@@ -144,10 +127,11 @@
   ;; given a re-db transaction, invalidates readers based on
   ;; patterns found in transacted datoms.
   [_conn {:as tx-report
-          :keys [datoms tx]
-          {:keys [cached-readers schema]} :db-after}]
+          :keys [datoms]
+          {:as db-after :keys [cached-readers schema]} :db-after}]
   (when cached-readers
-    (let [many? (many-a? schema)
+    (let [tx (db/tx-current db-after)
+          many? (many-a? schema)
           ref? (ref-a? schema)
           found! (fn [^Reader reader]
                    (some-> reader (invalidate! tx)))

@@ -1,15 +1,29 @@
 (ns re-db.fast
-  (:refer-clojure :exclude [get-in]))
+  (:refer-clojure :exclude [get-in])
+ #?(:cljs (:require-macros re-db.fast)))
 
-(defmacro get-in
-  "Compiled version of get-in, faster than `get-in` function"
-  [m ks]
-  (if (and (:ns &env)
-           (vector? ks))
-    `(-> ~m
-         ~@(for [k ks]
-             (list 'clojure.core/get k)))
-    `(clojure.core/get-in ~m ~ks)))
+#?(:clj (def SENTINEL (Object.))
+   :cljs (def SENTINEL (js-obj)))
+
+(defn gets
+  ([m k0 k1]
+   (let [m (get m k0 SENTINEL)]
+     (when-not (identical? m SENTINEL)
+       (get m k1))))
+  ([m k0 k1 k2]
+   (let [m (get m k0 SENTINEL)]
+     (when-not (identical? m SENTINEL)
+       (let [m (get m k1 SENTINEL)]
+         (when-not (identical? m SENTINEL)
+           (get m k2))))))
+  ([m k0 k1 k2 k3]
+   (let [m (get m k0 SENTINEL)]
+     (when-not (identical? m SENTINEL)
+       (let [m (get m k1 SENTINEL)]
+         (when-not (identical? m SENTINEL)
+           (let [m (get m k2 SENTINEL)]
+             (when-not (identical? m SENTINEL)
+               (get m k3)))))))))
 
 (defmacro get-some-in
   "Get-in, stops at nil values"
@@ -44,7 +58,7 @@
     `(def ~name (memoize ~fsym))))
 
 (defmacro if-found [[sym lookup-expr] then else]
-  (let [sentinel (if (:ns &env) 're-db.fast/nf-sentinel ::not-found)]
+  (let [sentinel `SENTINEL]
     `(let [~sym ~(concat lookup-expr (list sentinel))]
        (if (identical? ~sym ~sentinel)
          ~else
@@ -75,6 +89,34 @@
 (defmacro dissoc-index! [index [k1 k2]]
   `(update-seq! ~index ~k1 dissoc ~k2))
 
+(defn assoc-seq! [m a v]
+  (if (seq v)
+    (assoc! m a v)
+    (dissoc! m a)))
+
+(defn assoc-seq [m a v]
+  (if (seq v)
+    (assoc m a v)
+    (dissoc m a)))
+
+(defn assoc-some! [m a v]
+  (if (some? v)
+    (assoc! m a v)
+    (dissoc! m a)))
+
+(defn assoc-some [m a v]
+  (if (some? v)
+    (assoc m a v)
+    (dissoc m a)))
+
+(defmacro update-db-index! [db [i x y] f & args]
+  `(update! ~db ~i update-index! [~x ~y] ~f ~@args))
+
+(defmacro assoc-db-index! [db [i x y] v]
+  `(update! ~db ~i assoc-index! [~x ~y] ~v))
+
+(defmacro dissoc-db-index! [db [i x y]]
+  `(update! ~db ~i dissoc-index! [~x ~y]))
 
 (defn comp6
   "Comps functions which receive acc as 1st value followed by 6 unchanged values"
@@ -99,32 +141,3 @@
     m2)
   (merge m1 m2))
 
-(defn assoc-seq! [m a v]
-  (if (seq v)
-    (assoc! m a v)
-    (dissoc! m a)))
-
-(defn assoc-seq [m a v]
-  (if (seq v)
-    (assoc m a v)
-    (dissoc m a)))
-
-
-(defn assoc-some! [m a v]
-  (if (some? v)
-    (assoc! m a v)
-    (dissoc! m a)))
-
-(defn assoc-some [m a v]
-  (if (some? v)
-    (assoc m a v)
-    (dissoc m a)))
-
-(defmacro update-db-index! [db [i x y] f & args]
-  `(update! ~db ~i update-index! [~x ~y] ~f ~@args))
-
-(defmacro assoc-db-index! [db [i x y] v]
-  `(update! ~db ~i assoc-index! [~x ~y] ~v))
-
-(defmacro dissoc-db-index! [db [i x y]]
-  `(update! ~db ~i dissoc-index! [~x ~y]))

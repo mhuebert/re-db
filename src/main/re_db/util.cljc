@@ -54,3 +54,11 @@
 (defn random-uuid []
   #?(:cljs (cljs.core/random-uuid)
      :clj (java.util.UUID/randomUUID)))
+
+(defmacro swap-> [ref & args]
+  `(let [ref# ~ref]
+     (swap! ref# (fn [val#] (-> val# ~@args)))))
+
+(defmacro swap->> [ref & args]
+  `(let [ref# ~ref]
+     (swap! ref# (fn [val#] (->> val# ~@args)))))

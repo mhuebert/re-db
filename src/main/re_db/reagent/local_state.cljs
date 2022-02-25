@@ -24,15 +24,15 @@
 (deftype EAtom [conn e defaults]
   IDeref
   (-deref [this]
-    (merge defaults (read-index! conn :eav e)))
+    (merge defaults (read-index! conn :eav ::local-state e)))
   ILookup
   (-lookup [this a]
-    (get (read-index! conn :eav e) a (get defaults a)))
+    (get (read-index! conn :eav ::local-state e) a (get defaults a)))
   (-lookup [this a not-found]
-    (get (read-index! conn :eav e) a (get defaults a not-found)))
+    (get (read-index! conn :eav ::local-state e) a (get defaults a not-found)))
   IReset
   (-reset! [this new-value]
-    (db/transact! conn [(assoc new-value :db/id e)]))
+    (db/transact! conn [[:db/add ::local-state e new-value]]))
   ISwap
   (-swap! [this f] (reset! this (f @this)))
   (-swap! [this f a] (reset! this (f @this a)))
