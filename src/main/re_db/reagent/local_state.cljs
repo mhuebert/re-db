@@ -38,8 +38,10 @@
   (-swap! [this f a b] (reset! this (f @this a b)))
   (-swap! [this f a b xs] (reset! this (apply f @this a b xs))))
 
-(defn id [^EAtom !state] (.-e !state))
-(defn get* [db !state] (get (db/get-entity db ::local-state) (id !state)))
+(defn from-db
+  "Read value of EAtom from a db (point-in-time)"
+  [!state db]
+  (get (db/get-entity db ::local-state) (.-e !state)))
 
 ;; a string key where we'll memoize the cursor per-component-instance
 (def ratom-cache-key (str ::local-state))
@@ -58,9 +60,6 @@
   [conn & {:keys [key or component location]
            :or {component (reagent/current-component)
                 key :singleton}}]
-  (ratom-memo component
-              key
-              (let [e {location key}]
-                (fn []
-                  (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retractEntity e]]))
-                  (EAtom. conn e or false)))))
+  (let [e {location key}]
+    (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retract ::local-state e]]))
+    (EAtom. conn {location key} or false)))

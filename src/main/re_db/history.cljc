@@ -32,9 +32,9 @@
                          (assoc :tx new-tx))]
         (assoc tx-report :db-after db-after)))))
 
-(defn commit? [db tx-report]
+(defn commit? [db options]
   (or (current? db)
-      (:travel-to tx-report)))
+      (:travel-to options)))
 
 (defn travel-tx [{:as db :keys [history]} travel-to]
   {:pre [(int? travel-to) (not (neg? travel-to))]}

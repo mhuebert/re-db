@@ -393,29 +393,31 @@
 
 (defn- transaction [db-before txs options]
   {:pre [db-before (sequential? txs)]}
-  (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
-    (let [db-after (persistent-map! (reduce commit-tx (transient-map (history/without-history db-before)) txs))
-          datoms (if *datoms*
-                   #?(:cljs (vec *datoms*)
-                      :clj  @*datoms*)
-                   [])]
-      (-> options
-          (assoc :db-before db-before
-                 :db-after db-after
-                 :datoms datoms)
-          (history/handle-tx-report options)))))
+  (if (history/commit? db-before options)
+    (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
+      (let [db-after (persistent-map! (reduce commit-tx (transient-map (history/without-history db-before)) txs))
+            datoms (if *datoms*
+                     #?(:cljs (vec *datoms*)
+                        :clj  @*datoms*)
+                     [])]
+        (-> options
+            (assoc :db-before db-before
+                   :db-after db-after
+                   :datoms datoms)
+            (history/handle-tx-report options))))
+    (history/handle-tx-report {:db-before db-before :db-after db-before :datoms []} {})))
 
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
   ;; transaction functions and arbitrary effects
-  "Commits a tx-report to conn"
-  ([conn tx-report] (commit! conn tx-report {}))
-  ([conn tx-report options]
+  "Commits a tx-report to !conn"
+  ([!conn tx-report] (commit! !conn tx-report {}))
+  ([!conn tx-report options]
    (when (seq (:datoms tx-report))
-     (if (history/commit? @conn tx-report)
+     (if (history/commit? @!conn tx-report)
        (do
 
-         (reset! conn (:db-after tx-report))
+         (reset! !conn (:db-after tx-report))
 
          (when *branch-tx-log*
            (swap! *branch-tx-log* conj tx-report))
@@ -423,24 +425,29 @@
          (when (and (:notify-listeners? options true)
                     (not *prevent-notify*))
            (doseq [f (-> tx-report :db-after :listeners vals)]
-             (f conn tx-report)))
+             (f !conn tx-report)))
          tx-report)
        (prn (str "Ignoring transaction - db is frozen in the past"))))))
 
 (defn transact!
+  "Transacts txs and returns a tx-report"
   ([conn txs] (transact! conn txs {}))
   ([conn txs opts]
    (commit! conn (transaction @conn txs opts) opts)))
 
-(defn as-of [db travel-to]
-  (if-some [tx (history/travel-tx db travel-to)]
-    (:db-after (transaction db tx {:travel-to travel-to}))
+(defn as-of
+  "Returns db as of `tx` in history"
+  [db tx]
+  (if-some [txs (history/travel-tx db tx)]
+    (:db-after (transaction db txs {:travel-to tx}))
     db))
 
-(defn travel! [conn travel-to]
-  (when-some [tx (history/travel-tx @conn travel-to)]
-    (commit! conn
-             (transaction @conn tx {:travel-to travel-to}))))
+(defn travel!
+  "Moves !conn to `tx` in history"
+  [!conn tx]
+  (when-some [txs (history/travel-tx @!conn tx)]
+    (commit! !conn
+             (transaction @!conn txs {:travel-to tx}))))
 
 (defn compile-a-schema [db-schemas a a-schema]
   (if (or (= :db/ident a) (not= "db" (namespace a)))
