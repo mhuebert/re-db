@@ -1,6 +1,7 @@
 (ns re-db.travel-test
   (:require [clojure.test :refer [is are deftest testing]]
             [re-db.core :as db]
+            [re-db.history :as history]
             [re-db.schema :as schema]
             [re-db.test-helpers :refer [throws]]))
 

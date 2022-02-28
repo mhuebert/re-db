@@ -1,4 +1,5 @@
 (ns re-db.reagent.local-state
+  (:refer-clojure :exclude [read])
   (:require [applied-science.js-interop :as j]
             [re-db.core :as db]
             [reagent.ratom :as ratom]
@@ -21,23 +22,24 @@
 
 ;; an entity-atom always causes a dependency on the "whole entity"
 
-(deftype EAtom [conn e defaults]
+(deftype EAtom [conn e default ^:mutable ^:volatile-mutable modified?]
   IDeref
   (-deref [this]
-    (merge defaults (read-index! conn :eav ::local-state e)))
-  ILookup
-  (-lookup [this a]
-    (get (read-index! conn :eav ::local-state e) a (get defaults a)))
-  (-lookup [this a not-found]
-    (get (read-index! conn :eav ::local-state e) a (get defaults a not-found)))
+    (if-some [v (read-index! conn :eav ::local-state e)]
+      v
+      default))
   IReset
   (-reset! [this new-value]
+    (set! modified? true)
     (db/transact! conn [[:db/add ::local-state e new-value]]))
   ISwap
   (-swap! [this f] (reset! this (f @this)))
   (-swap! [this f a] (reset! this (f @this a)))
   (-swap! [this f a b] (reset! this (f @this a b)))
   (-swap! [this f a b xs] (reset! this (apply f @this a b xs))))
+
+(defn id [^EAtom !state] (.-e !state))
+(defn get* [db !state] (get (db/get-entity db ::local-state) (id !state)))
 
 ;; a string key where we'll memoize the cursor per-component-instance
 (def ratom-cache-key (str ::local-state))
@@ -52,14 +54,13 @@
 (defn local-state*
   "Return a local-state cursor for a Reagent component.
     :key      - to differentiate instances of this component
-    :defaults - a map of default values (these will not be stored in re-db)"
-  [conn & {:keys [key defaults component location]
+    :default  - initial value"
+  [conn & {:keys [key or component location]
            :or {component (reagent/current-component)
                 key :singleton}}]
-
-  (let [e {component key}]
-    (ratom-memo component
-                e
+  (ratom-memo component
+              key
+              (let [e {location key}]
                 (fn []
                   (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retractEntity e]]))
-                  (EAtom. conn e defaults)))))
+                  (EAtom. conn e or false)))))

@@ -3,6 +3,7 @@
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
+            [re-db.history :as history]
             [re-db.util :as util :refer [guard set-replace]]
             [re-db.schema :as schema]))
 
@@ -390,35 +391,10 @@
   (swap! conn assoc-in [:listeners key] f)
   #(unlisten! conn key))
 
-
-(defn tx-last [db] (-> (:history db) first :tx))
-(defn tx-current [db] (:tx db))
-(defn traveling? [db] (not= (tx-last db) (tx-current db)))
-
-(defn update-history
-  [{:as tx-report :keys [datoms db-before db-after travel-to]} options]
-  (if travel-to ;; only moving location
-    (update tx-report :db-after assoc
-            ;; update "location" tx + copy history from db-after
-            :tx travel-to
-            :history (:history db-before))
-    (do
-      (assert (= (tx-last db-before) (tx-current db-before))
-              (str "Can only append to history from the edge of time. last-tx: " (tx-last db-before) ", current-tx: " (tx-current db-before)))
-      (let [history-length (get-in tx-report [:db-after :schema :db/keep-history] ##Inf)
-            old-tx (tx-last db-before)
-            new-tx (inc old-tx)
-            db-after (-> db-after
-                         (assoc :history (->> (:history db-before)
-                                              (cons (assoc options :tx new-tx :datoms datoms))
-                                              (take history-length)))
-                         (assoc :tx new-tx))]
-        (assoc tx-report :db-after db-after)))))
-
 (defn- transaction [db-before txs options]
   {:pre [db-before (sequential? txs)]}
   (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
-    (let [db-after (persistent-map! (reduce commit-tx (transient-map (dissoc db-before :history :tx)) txs))
+    (let [db-after (persistent-map! (reduce commit-tx (transient-map (history/without-history db-before)) txs))
           datoms (if *datoms*
                    #?(:cljs (vec *datoms*)
                       :clj  @*datoms*)
@@ -427,51 +403,44 @@
           (assoc :db-before db-before
                  :db-after db-after
                  :datoms datoms)
-          (update-history options)))))
+          (history/handle-tx-report options)))))
 
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
   ;; transaction functions and arbitrary effects
   "Commits a tx-report to conn"
-  [conn options tx-report]
-  (when (seq (:datoms tx-report))
-    (if (and (traveling? @conn) (nil? (:travel-to tx-report)))
-      (prn (str "Ignoring transaction - db is frozen in the past"))
-      (do
+  ([conn tx-report] (commit! conn tx-report {}))
+  ([conn tx-report options]
+   (when (seq (:datoms tx-report))
+     (if (history/commit? @conn tx-report)
+       (do
 
-        (reset! conn (:db-after tx-report))
+         (reset! conn (:db-after tx-report))
 
-        (when *branch-tx-log*
-          (swap! *branch-tx-log* conj tx-report))
+         (when *branch-tx-log*
+           (swap! *branch-tx-log* conj tx-report))
 
-        (when (and (:notify-listeners? options true)
-                   (not *prevent-notify*))
-          (doseq [f (-> tx-report :db-after :listeners vals)]
-            (f conn tx-report)))
-        tx-report))))
+         (when (and (:notify-listeners? options true)
+                    (not *prevent-notify*))
+           (doseq [f (-> tx-report :db-after :listeners vals)]
+             (f conn tx-report)))
+         tx-report)
+       (prn (str "Ignoring transaction - db is frozen in the past"))))))
 
 (defn transact!
   ([conn txs] (transact! conn txs {}))
   ([conn txs opts]
-   (commit! conn opts (transaction @conn txs opts))))
+   (commit! conn (transaction @conn txs opts) opts)))
+
+(defn as-of [db travel-to]
+  (if-some [tx (history/travel-tx db travel-to)]
+    (:db-after (transaction db tx {:travel-to travel-to}))
+    db))
 
 (defn travel! [conn travel-to]
-  {:pre [(int? travel-to) (not (neg? travel-to))]}
-  (let [{:as db :keys [history]} @conn
-        [start end] (sort [travel-to (tx-current db)])
-        datoms (into []
-                     (comp (drop-while #(<= (:tx %) start))
-                           (take (- end start))
-                           (map :datoms))
-                     (reverse history))]
-    (assert (<= travel-to (tx-last db)) (str "Cannot move past the end of history. to: " travel-to ", last: " (tx-last db)))
-    (case (compare travel-to (tx-current db))
-      1 ;; forward
-      (transact! conn [[:db/datoms (apply concat datoms)]] {:travel-to travel-to})
-      -1 ;; backward
-      (transact! conn [[:db/datoms-reverse (apply concat datoms)]] {:travel-to travel-to})
-      0 ;; ;; no-op
-      conn)))
+  (when-some [tx (history/travel-tx @conn travel-to)]
+    (commit! conn
+             (transaction @conn tx {:travel-to travel-to}))))
 
 (defn compile-a-schema [db-schemas a a-schema]
   (if (or (= :db/ident a) (not= "db" (namespace a)))
@@ -520,10 +489,9 @@
     :db/cardinality [:db.cardinality/many]"
   ([] (create-conn {}))
   ([schema]
-   (atom (with-meta {:ae {}
-                     :eav {}
-                     :vae {}
-                     :ave {}
-                     :schema (compile-db-schema schema)}
-                    {:history (list (with-meta [] {:tx 0}))
-                     :tx 0}))))
+   (atom (-> {:ae {}
+              :eav {}
+              :vae {}
+              :ave {}
+              :schema (compile-db-schema schema)}
+             history/init-history))))

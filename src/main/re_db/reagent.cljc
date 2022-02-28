@@ -4,6 +4,7 @@
             [re-db.core :as db]
             [re-db.fast :as fast]
             [re-db.util :as util]
+            [re-db.history :as history]
             [clojure.string :as str])
   #?(:cljs (:require-macros re-db.reagent)))
 
@@ -130,7 +131,7 @@
           :keys [datoms]
           {:as db-after :keys [cached-readers schema]} :db-after}]
   (when cached-readers
-    (let [tx (db/tx-current db-after)
+    (let [tx (history/current-tx db-after)
           many? (many-a? schema)
           ref? (ref-a? schema)
           found! (fn [^Reader reader]
