@@ -1,6 +1,7 @@
 (ns re-db.api
   (:refer-clojure :exclude [get get-in contains? select-keys namespace clone bound-fn])
   (:require [re-db.core :as d]
+            [re-db.history :as history]
             [re-db.read :as read]
             [re-db.macros :as m])
   #?(:cljs (:require-macros re-db.api)))
@@ -92,3 +93,6 @@
    (fn [& args]
      (binding [*current-conn* conn]
        (apply f args)))))
+
+(m/defpartial as-of {:f '(re-db.core/as-of (conn) _)}
+  [tx])
