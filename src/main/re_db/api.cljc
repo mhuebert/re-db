@@ -93,6 +93,3 @@
    (fn [& args]
      (binding [*current-conn* conn]
        (apply f args)))))
-
-(m/defpartial as-of {:f '(re-db.core/as-of (conn) _)}
-  [tx])

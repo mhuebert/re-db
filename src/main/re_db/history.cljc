@@ -8,6 +8,7 @@
 ;;     IFF that connection is already pointing at an entry in !history
 
 
+
 (defn init-history [db]
   (assoc db :history (list {:tx 0})
             :tx 0))

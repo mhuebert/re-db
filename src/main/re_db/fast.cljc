@@ -29,6 +29,20 @@
              (when-not (identical? m SENTINEL)
                (get m k3)))))))))
 
+(defn gets-some
+  ([m k0 k1]
+   (when-some [m (m k0)]
+     (m k1)))
+  ([m k0 k1 k2]
+   (when-some [m (m k0)]
+     (when-some [m (m k1)]
+       (m k2))))
+  ([m k0 k1 k2 k3]
+   (when-some [m (m k0)]
+     (when-some [m (m k1)]
+       (when-some [m (m k2)]
+         (m k3))))))
+
 (defmacro get-some-in
   "Get-in, stops at nil values"
   [m ks]

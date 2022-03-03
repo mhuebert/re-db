@@ -136,22 +136,20 @@
           ref? (ref-a? schema)
           found! (fn [^Reader reader]
                    (some-> reader (invalidate! tx)))
-          _ (cached-readers nil)
-          __ (when _ (_ nil))
           trigger-patterns! (j/fn [^js [e a v pv :as datom]]
 
                               ;; triggers patterns for datom, with "early termination"
                               ;; for paths that don't lead to any invalidators.
 
-                              (when-some [e (cached-readers e)]
+                              (when-let [e (cached-readers e)]
                                 ;; e__
-                                (found! (fast/get-some-in e [nil nil]))
+                                (found! (fast/gets-some e nil nil))
                                 ;; ea_
-                                (found! (fast/get-some-in e [a nil])))
-                              (when _
+                                (found! (fast/gets-some e a nil)))
+                              (when-let [_ (cached-readers nil)]
                                 (let [is-many (many? a)
                                       is-ref (ref? a)]
-                                  (when __
+                                  (when-let [__ (_ nil)]
                                     (when is-ref
                                       (if is-many
                                         (do (doseq [v v] (found! (__ v)))

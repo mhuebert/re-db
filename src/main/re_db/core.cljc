@@ -391,8 +391,9 @@
   (swap! conn assoc-in [:listeners key] f)
   #(unlisten! conn key))
 
-(defn noop-report [db-before]
-  (history/handle-tx-report {:db-before db-before :db-after db-before :datoms []} {}))
+(defn noop-report [options db-before]
+  (prn :no-op)
+  (history/handle-tx-report (merge options {:db-before db-before :db-after db-before :datoms []}) {}))
 
 (defn- transaction
   ([db-before {:keys [txs options]}] (transaction db-before txs options))
@@ -411,8 +412,8 @@
                       :db-after db-after
                       :datoms datoms)
                (history/handle-tx-report options))
-           (noop-report db-before))))
-     (noop-report db-before))))
+           (noop-report options db-before))))
+     (noop-report options db-before))))
 
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
