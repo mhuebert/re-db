@@ -3,9 +3,7 @@
             [applied-science.js-interop :as j]
             [re-db.core :as db]
             [re-db.fast :as fast]
-            [re-db.util :as util]
-            [re-db.history :as history]
-            [clojure.string :as str])
+            [re-db.util :as util])
   #?(:cljs (:require-macros re-db.reagent)))
 
 (defmacro read-index! [conn index & args]
@@ -131,7 +129,7 @@
           :keys [datoms]
           {:as db-after :keys [cached-readers schema]} :db-after}]
   (when cached-readers
-    (let [tx (history/current-tx db-after)
+    (let [tx (:tx db-after)
           many? (many-a? schema)
           ref? (ref-a? schema)
           found! (fn [^Reader reader]

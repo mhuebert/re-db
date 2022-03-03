@@ -3,7 +3,6 @@
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.history :as history]
             [re-db.util :as util :refer [guard set-replace]]
             [re-db.schema :as schema]))
 
@@ -391,29 +390,26 @@
   (swap! conn assoc-in [:listeners key] f)
   #(unlisten! conn key))
 
-(defn noop-report [options db-before]
-  (prn :no-op)
-  (history/handle-tx-report (merge options {:db-before db-before :db-after db-before :datoms []}) {}))
+(defonce !tx-clock (atom 0))
 
 (defn- transaction
   ([db-before {:keys [txs options]}] (transaction db-before txs options))
   ([db-before txs options]
    {:pre [db-before (or (nil? txs) (sequential? txs))]}
-   (if (history/commit? db-before options)
-     (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
-       (let [db-after (persistent-map! (reduce commit-tx (transient-map (history/without-history db-before)) txs))
-             datoms (if *datoms*
-                      #?(:cljs (vec *datoms*)
-                         :clj  @*datoms*)
-                      [])]
-         (if (seq datoms)
-           (-> options
-               (assoc :db-before db-before
-                      :db-after db-after
-                      :datoms datoms)
-               (history/handle-tx-report options))
-           (noop-report options db-before))))
-     (noop-report options db-before))))
+   (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
+     (let [db-after (-> (reduce commit-tx (transient-map (dissoc db-before :tx)) txs)
+                        (persistent-map!)
+                        (assoc :tx (swap! !tx-clock inc)))
+           datoms (if *datoms*
+                    #?(:cljs (vec *datoms*)
+                       :clj  @*datoms*)
+                    [])]
+       (assoc options
+         :db-before db-before
+         :db-after (if (seq datoms)
+                     db-after
+                     db-before)
+         :datoms datoms)))))
 
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
@@ -422,31 +418,22 @@
   ([!conn tx-report] (commit! !conn tx-report {}))
   ([!conn tx-report options]
    (when (seq (:datoms tx-report))
-     (if (history/commit? @!conn tx-report)
-       (do
+     (reset! !conn (:db-after tx-report))
 
-         (reset! !conn (:db-after tx-report))
+     (when *branch-tx-log*
+       (swap! *branch-tx-log* conj tx-report))
 
-         (when *branch-tx-log*
-           (swap! *branch-tx-log* conj tx-report))
-
-         (when (and (:notify-listeners? options true)
-                    (not *prevent-notify*))
-           (doseq [f (-> tx-report :db-after :listeners vals)]
-             (f !conn tx-report)))
-         tx-report)
-       (prn (str "Ignoring transaction - db is frozen in the past"))))))
+     (when (and (:notify-listeners? options true)
+                (not *prevent-notify*))
+       (doseq [f (-> tx-report :db-after :listeners vals)]
+         (f !conn tx-report)))
+     tx-report)))
 
 (defn transact!
   "Transacts txs and returns a tx-report"
   ([conn txs] (transact! conn txs {}))
   ([conn txs opts]
    (commit! conn (transaction @conn txs opts) opts)))
-
-(defn db-as-of
-  "Returns db as of `tx` in history"
-  [db tx]
-  (:db-after (transaction db (history/travel-tx db tx))))
 
 (defn compile-a-schema [db-schemas a a-schema]
   (if (or (= :db/ident a) (not= "db" (namespace a)))
@@ -487,10 +474,6 @@
   [db schema]
   (swap! db update :schema (comp compile-db-schema (partial merge-with merge)) schema))
 
-(def core-ks [:ae :eav :vae :ave :schema])
-(def history-ks (keys (history/init-history {})))
-(def all-ks (into core-ks history-ks))
-
 (defn create-conn
   "Create a new db, with optional schema, which should be a mapping of attribute keys to
   the following options:
@@ -499,23 +482,8 @@
     :db/cardinality [:db.cardinality/many]"
   ([] (create-conn {}))
   ([schema]
-   (atom (-> {:ae {}
-              :eav {}
-              :vae {}
-              :ave {}
-              :schema (compile-db-schema schema)}
-             history/init-history))))
-
-(defn clone [!conn]
-  (atom (select-keys @!conn all-ks)))
-
-(defn travel!
-  "Moves !conn to `tx` in history"
-  [!conn tx]
-  (let [db @!conn]
-    (doto !conn (commit! (transaction db (history/travel-tx db tx))))))
-
-(defn as-of
-  "Returns new !conn with `tx` set"
-  [!conn tx]
-  (travel! (clone !conn) tx))
+   (atom {:ae {}
+          :eav {}
+          :vae {}
+          :ave {}
+          :schema (compile-db-schema schema)})))
