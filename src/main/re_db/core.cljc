@@ -398,8 +398,7 @@
    {:pre [db-before (or (nil? txs) (sequential? txs))]}
    (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
      (let [db-after (-> (reduce commit-tx (transient-map (dissoc db-before :tx)) txs)
-                        (persistent-map!)
-                        (assoc :tx (swap! !tx-clock inc)))
+                        (persistent-map!))
            datoms (if *datoms*
                     #?(:cljs (vec *datoms*)
                        :clj  @*datoms*)
@@ -417,17 +416,21 @@
   "Commits a tx-report to !conn"
   ([!conn tx-report] (commit! !conn tx-report {}))
   ([!conn tx-report options]
-   (when (seq (:datoms tx-report))
-     (reset! !conn (:db-after tx-report))
+   (let [tx (swap! !tx-clock inc)
+         tx-report (-> tx-report
+                       (assoc :tx tx)
+                       (assoc-in [:db-after :tx] tx))]
+     (when (seq (:datoms tx-report))
+       (reset! !conn (:db-after tx-report))
 
-     (when *branch-tx-log*
-       (swap! *branch-tx-log* conj tx-report))
+       (when *branch-tx-log*
+         (swap! *branch-tx-log* conj tx-report))
 
-     (when (and (:notify-listeners? options true)
-                (not *prevent-notify*))
-       (doseq [f (-> tx-report :db-after :listeners vals)]
-         (f !conn tx-report)))
-     tx-report)))
+       (when (and (:notify-listeners? options true)
+                  (not *prevent-notify*))
+         (doseq [f (-> tx-report :db-after :listeners vals)]
+           (f !conn tx-report)))
+       tx-report))))
 
 (defn transact!
   "Transacts txs and returns a tx-report"
