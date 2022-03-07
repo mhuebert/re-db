@@ -1,5 +1,6 @@
 (ns re-db.util
   (:refer-clojure :exclude [random-uuid])
+  (:require [clojure.set :as set])
   #?(:cljs (:require-macros re-db.util)))
 
 (defn guard [x f] (when (f x) x))
@@ -63,13 +64,11 @@
   `(let [ref# ~ref]
      (swap! ref# (fn [val#] (->> val# ~@args)))))
 
-(defn take-until
-  "Returns a lazy sequence of successive items from coll until
-   (pred item) returns true, including that item. pred must be
-   free of side-effects."
-  [pred coll]
-  (lazy-seq
-   (when-let [s (seq coll)]
-     (if (pred (first s))
-       (cons (first s) nil)
-       (cons (first s) (take-until pred (rest s)))))))
+(defn set-diff [s1 s2]
+  (cond (identical? s1 s2) nil
+        (nil? s1) [s2 nil]
+        (nil? s2) [nil s1]
+        :else (let [added (guard (set/difference s2 s1) seq)
+                    removed (guard (set/difference s1 s2) seq)]
+                (when (or added removed)
+                  [added removed]))))

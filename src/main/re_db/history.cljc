@@ -1,6 +1,6 @@
 (ns re-db.history
   (:require [re-db.core :as db]
-            [re-db.util :refer [swap-> take-until]]))
+            [re-db.util :refer [swap->]]))
 
 (defn last-tx [history] (-> history :log first :tx))
 (defn current-tx [history] (:tx @(:conn history)))

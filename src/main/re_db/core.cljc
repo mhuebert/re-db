@@ -1,9 +1,8 @@
 (ns re-db.core
-  (:refer-clojure :exclude [indexed? ref clone])
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.util :as util :refer [guard set-replace]]
+            [re-db.util :refer [guard set-replace set-diff]]
             [re-db.schema :as schema]))
 
 (def index-all-ave? false)
@@ -281,15 +280,6 @@
     (let [e-from-attr (e-from-unique-attr db m)]
       (assert (not (false? e-from-attr)) (str "must have a unique attribute" m))
       (assoc m :db/id (or e-from-attr (gen-e))))))
-
-(defn set-diff [s1 s2]
-  (cond (identical? s1 s2) nil
-        (nil? s1) [s2 nil]
-        (nil? s2) [nil s1]
-        :else (let [added (set/difference s2 s1)
-                    removed (set/difference s1 s2)]
-                (when (or (seq added) (seq removed))
-                  [added removed]))))
 
 (defn- add-attr-index [[db m :as state] e a pv ^Schema a-schema]
   (let [v (m a)

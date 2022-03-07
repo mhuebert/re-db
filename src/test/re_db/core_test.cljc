@@ -10,7 +10,7 @@
 (defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
 (defn db= [& dbs]
-  (apply = (map #(dissoc % :history :tx) dbs)))
+  (apply = (map #(dissoc % :tx) dbs)))
 
 (deftest datom-tx
 
