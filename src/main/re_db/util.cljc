@@ -1,7 +1,7 @@
 (ns re-db.util
   (:refer-clojure :exclude [random-uuid])
   (:require [clojure.set :as set])
-  #?(:cljs (:require-macros re-db.util)))
+  #?(:cljs (:require-macros [re-db.util :as util])))
 
 (defn guard [x f] (when (f x) x))
 
@@ -72,3 +72,20 @@
                     removed (guard (set/difference s1 s2) seq)]
                 (when (or added removed)
                   [added removed]))))
+
+
+;; atom with metadata
+(util/support-clj-protocols
+ (deftype MAtom [^:volatile-mutable state metadata]
+   IDeref
+   (-deref [o] state)
+
+   IReset
+   (-reset! [o new-value]
+     (set! state new-value))
+
+   IMeta
+   (-meta [o] metadata)
+
+   IWithMeta
+   (-with-meta [o meta] (MAtom. state meta))))
