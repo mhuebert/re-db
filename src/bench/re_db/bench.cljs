@@ -364,7 +364,7 @@
  ;;;;;;;;;;;;;;;;;;;;;;;;;;
  ;; Nested lookups
  ;;
- ;; comparing consecutive get-in vs fast/get-in, ie. consecutive get
+ ;; comparing consecutive get-in vs fast/gets, ie. consecutive get
  ;;   get-in uses reduce to loop through keys,
  ;;   vs (-> x (get y) (get z))
  ;; also looks at javascript object lookups,
@@ -390,7 +390,7 @@
                                                                                     (rand-nth "abcdefghijklmnopqrs1234567890!$%&*")))))
        ks (keys m)
        get-in #(get-in m [% :db/valueType])                 ;s (samples 1000)
-       fast-get-in #(fast/get-in m [% :db/valueType])       ;s (samples 1000)
+       fast-get-in #(fast/gets m % :db/valueType)       ;s (samples 1000)
        string-kw-obj (->obj-with-string-kws m)
        get-string-kws (fn [^clj a]
                         (fast/get-in-objs string-kw-obj [a :db/valueType]))

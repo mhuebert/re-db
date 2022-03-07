@@ -3,30 +3,12 @@
             [applied-science.js-interop :as j]
             [re-db.core :as db]
             [re-db.fast :as fast]
-            [re-db.util :as util]
-            [clojure.string :as str])
+            [re-db.util :as util])
   #?(:cljs (:require-macros re-db.reagent)))
-
-
-(defn simple-sym [s] (and (symbol? s)
-                          (not (str/starts-with? (name s) "."))
-                          (not (str/starts-with? (name s) "?"))))
-
-(defn simplify-sym [s]
-  (symbol (-> (name s)
-              (str/replace #"^\?" "")
-              (str/replace #"^\.\.\." ""))))
-
-(defn parse-pattern [pattern]
-  (let [args (take-while simple-sym pattern)
-        index (->> pattern (map #(cond-> % (map? %) seq)) flatten (map simplify-sym) str/join keyword)
-        path (into [index] args)
-        eav (zipmap args args)]
-    (assoc eav :path path)))
 
 (defmacro read-index! [conn index & args]
   (let [{e \e a \a v \v} (zipmap (name index) args)
-        expr `(fast/get-in @~conn ~(into [index] args))]
+        expr `(fast/gets @~conn ~index ~@args)]
     (if (:ns &env)
       `(~'re-db.reagent/cached-index-read ~conn ~e ~a ~v (fn [] ~expr))
       expr)))
@@ -144,29 +126,28 @@
   ;; given a re-db transaction, invalidates readers based on
   ;; patterns found in transacted datoms.
   [_conn {:as tx-report
-          :keys [datoms tx]
-          {:keys [cached-readers schema]} :db-after}]
+          :keys [datoms]
+          {:as db-after :keys [cached-readers schema]} :db-after}]
   (when cached-readers
-    (let [many? (many-a? schema)
+    (let [tx (:tx db-after)
+          many? (many-a? schema)
           ref? (ref-a? schema)
           found! (fn [^Reader reader]
                    (some-> reader (invalidate! tx)))
-          _ (cached-readers nil)
-          __ (when _ (_ nil))
           trigger-patterns! (j/fn [^js [e a v pv :as datom]]
 
                               ;; triggers patterns for datom, with "early termination"
                               ;; for paths that don't lead to any invalidators.
 
-                              (when-some [e (cached-readers e)]
+                              (when-let [e (cached-readers e)]
                                 ;; e__
-                                (found! (fast/get-some-in e [nil nil]))
+                                (found! (fast/gets-some e nil nil))
                                 ;; ea_
-                                (found! (fast/get-some-in e [a nil])))
-                              (when _
+                                (found! (fast/gets-some e a nil)))
+                              (when-let [_ (cached-readers nil)]
                                 (let [is-many (many? a)
                                       is-ref (ref? a)]
-                                  (when __
+                                  (when-let [__ (_ nil)]
                                     (when is-ref
                                       (if is-many
                                         (do (doseq [v v] (found! (__ v)))

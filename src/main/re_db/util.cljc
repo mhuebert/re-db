@@ -1,5 +1,6 @@
 (ns re-db.util
   (:refer-clojure :exclude [random-uuid])
+  (:require [clojure.set :as set])
   #?(:cljs (:require-macros re-db.util)))
 
 (defn guard [x f] (when (f x) x))
@@ -54,3 +55,20 @@
 (defn random-uuid []
   #?(:cljs (cljs.core/random-uuid)
      :clj (java.util.UUID/randomUUID)))
+
+(defmacro swap-> [ref & args]
+  `(let [ref# ~ref]
+     (swap! ref# (fn [val#] (-> val# ~@args)))))
+
+(defmacro swap->> [ref & args]
+  `(let [ref# ~ref]
+     (swap! ref# (fn [val#] (->> val# ~@args)))))
+
+(defn set-diff [s1 s2]
+  (cond (identical? s1 s2) nil
+        (nil? s1) [s2 nil]
+        (nil? s2) [nil s1]
+        :else (let [added (guard (set/difference s2 s1) seq)
+                    removed (guard (set/difference s1 s2) seq)]
+                (when (or added removed)
+                  [added removed]))))

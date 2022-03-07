@@ -51,7 +51,7 @@
   ([conn e]
    (let [db @conn]
      (when-some [e (db/resolve-e e db)]
-       (fast/get-in db [:eav e]))))
+       (fast/gets db :eav e))))
   ([conn e attr]
    (core/get (peek conn e) attr))
   ([conn e attr not-found]
@@ -154,7 +154,7 @@
              is-many ^boolean (:many a-schema)
              ;; ids of related entities
              ids (if is-reverse?
-                   (fast/get-in db [:vae e forward-a])
+                   (fast/gets db :vae e forward-a)
                    (cond-> (m forward-a) (not is-many) list))
              entities (when (seq ids)
                         (if recursions
@@ -237,7 +237,7 @@
    IHash
    (-hash [this]
      (hash (let [e (-resolve-e! this conn e)]
-             [e (fast/get-in @conn [:eav e])])))
+             [e (fast/gets @conn :eav e)])))
 
    IEquiv
    (-equiv [this other]

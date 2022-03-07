@@ -1,9 +1,8 @@
 (ns re-db.core
-  (:refer-clojure :exclude [indexed? ref])
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.util :as util :refer [guard set-replace]]
+            [re-db.util :refer [guard set-replace set-diff]]
             [re-db.schema :as schema]))
 
 (def index-all-ave? false)
@@ -31,7 +30,7 @@
   (when v
     (if (vector? v)
       (resolve-lookup-ref [a (resolve-lookup-ref v db)] db)
-      (first (fast/get-in db [:ave a v])))))
+      (first (fast/gets db :ave a v)))))
 
 (defn resolve-e
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
@@ -168,8 +167,8 @@
 
 (def default-schema (compile-a-schema* {::default? true}))
 
-(defn get-schema ^Schema [db a] (or (fast/get-in db [:schema a]) default-schema))
-(defn get-entity [db e] (fast/get-in db [:eav e]))
+(defn get-schema ^Schema [db a] (or (fast/gets db :schema a) default-schema))
+(defn get-entity [db e] (fast/gets db :eav e))
 
 (defn- update-indexes [db datom ^Schema schema]
   (if (= :db/id #?(:cljs (aget datom 1)
@@ -190,12 +189,12 @@
 
 (defn- clear-empty-ent [db e]
   (cond-> db
-          (empty? (fast/get-in db [:eav e]))
+          (empty? (fast/gets db :eav e))
           (fast/update! :eav dissoc! e)))
 
 (defn- retract-attr
   [db [_ e a v]]
-  (if-some [pv (fast/get-in db [:eav e a])]
+  (if-some [pv (fast/gets db :eav e a)]
     (let [a-schema (get-schema db a)]
       (if ^boolean (:many a-schema)
         (if-some [removals (guard (set/intersection v pv) seq)]
@@ -282,15 +281,6 @@
       (assert (not (false? e-from-attr)) (str "must have a unique attribute" m))
       (assoc m :db/id (or e-from-attr (gen-e))))))
 
-(defn set-diff [s1 s2]
-  (cond (identical? s1 s2) nil
-        (nil? s1) [s2 nil]
-        (nil? s2) [nil s1]
-        :else (let [added (set/difference s2 s1)
-                    removed (set/difference s1 s2)]
-                (when (or (seq added) (seq removed))
-                  [added removed]))))
-
 (defn- add-attr-index [[db m :as state] e a pv ^Schema a-schema]
   (let [v (m a)
         is-many ^boolean (:many a-schema)]
@@ -366,17 +356,19 @@
                                 (reverse)
                                 (map reverse-datom)
                                 (reduce commit-datom db))
-        (if-let [op (fast/get-in db [:schema :db/tx-fns operation])]
+        (if-let [op (fast/gets db :schema :db/tx-fns operation)]
           (reduce commit-tx db (op db tx))
           (do
             ;; TODO
-            (prn :no-op-found (fast/get-in db [:schema :db/tx-fns operation]))
+            (prn :no-op-found (fast/gets db :schema :db/tx-fns operation))
             (throw (#?(:cljs js/Error :clj Exception.) (str "No db op: " operation)))))))
     (add-map db (update tx :db/id resolve-e db))))
 
+
+(defn transient-k [m k] (transient (update m k transient)))
+(defn persistent-k [m k] (update (persistent! m) k persistent!))
 (defn transient-map [m] (reduce-kv (fn [m k _v] (fast/update! m k transient)) (transient m) m))
-(defn persistent-map! [m] (let [m (persistent! m)]
-                            (reduce-kv (fn [m k _v] (update m k persistent!)) m m)))
+(defn persistent-map! [m] (let [m (persistent! m)] (reduce-kv (fn [m k _v] (update m k persistent!)) m m)))
 
 (def ^:dynamic *prevent-notify* false)
 
@@ -388,50 +380,53 @@
   (swap! conn assoc-in [:listeners key] f)
   #(unlisten! conn key))
 
+(defonce !tx-clock (atom 0))
+
+(defn- transaction
+  ([db-before {:keys [txs options]}] (transaction db-before txs options))
+  ([db-before txs options]
+   {:pre [db-before (or (nil? txs) (sequential? txs))]}
+   (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
+     (let [db-after (-> (reduce commit-tx (transient-map (dissoc db-before :tx)) txs)
+                        (persistent-map!))
+           datoms (if *datoms*
+                    #?(:cljs (vec *datoms*)
+                       :clj  @*datoms*)
+                    [])]
+       (assoc options
+         :db-before db-before
+         :db-after (if (seq datoms)
+                     db-after
+                     db-before)
+         :datoms datoms)))))
+
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
   ;; transaction functions and arbitrary effects
-  "Commits a tx-report to conn"
-  [conn
-   {:keys [notify-listeners?]
-    :or {notify-listeners? true}}
-   {:as tx-report :keys [db-after]}]
+  "Commits a tx-report to !conn"
+  ([!conn tx-report] (commit! !conn tx-report {}))
+  ([!conn tx-report options]
+   (let [tx (swap! !tx-clock inc)
+         tx-report (-> tx-report
+                       (assoc :tx tx)
+                       (assoc-in [:db-after :tx] tx))]
+     (when (seq (:datoms tx-report))
+       (reset! !conn (:db-after tx-report))
 
-  (reset! conn db-after)
+       (when *branch-tx-log*
+         (swap! *branch-tx-log* conj tx-report))
 
-  (when *branch-tx-log*
-    (swap! *branch-tx-log* conj tx-report))
-
-  (when (and notify-listeners? (not *prevent-notify*))
-    (doseq [f (vals (:listeners db-after))]
-      (f conn tx-report)))
-  tx-report)
-
-(defonce tx-num (volatile! 0))
-
-(defn- transaction [db-before txs {:as opts
-                                   :keys [notify-listeners?
-                                          report-datoms?]
-                                   :or {notify-listeners? true}}]
-  (binding [*datoms* (when (boolean (or notify-listeners? report-datoms?)) #?(:cljs #js[] :clj (volatile! [])))]
-    (when-let [txs (cond (nil? txs) nil
-                         (:datoms txs) nil
-                         (sequential? txs) txs
-                         :else (throw (#?(:cljs js/Error :clj Exception.) "Transact! was not passed a valid transaction")))]
-      (let [db-after (-> (reduce commit-tx (transient-map db-before) txs)
-                         (persistent-map!))
-            datoms #?(:cljs (vec *datoms*)
-                      :clj (or (some-> *datoms* deref) []))]
-        {:db-before db-before
-         :db-after db-after
-         :datoms datoms
-         :tx (vswap! tx-num inc)}))))
+       (when (and (:notify-listeners? options true)
+                  (not *prevent-notify*))
+         (doseq [f (-> tx-report :db-after :listeners vals)]
+           (f !conn tx-report)))
+       tx-report))))
 
 (defn transact!
+  "Transacts txs and returns a tx-report"
   ([conn txs] (transact! conn txs {}))
   ([conn txs opts]
-   (some->> (transaction @conn txs opts)
-            (commit! conn opts))))
+   (commit! conn (transaction @conn txs opts) opts)))
 
 (defn compile-a-schema [db-schemas a a-schema]
   (if (or (= :db/ident a) (not= "db" (namespace a)))
@@ -443,9 +438,6 @@
 (defn compile-db-schema [schema]
   (->> (assoc schema :db/ident {:db/unique :db.unique/identity})
        (reduce-kv compile-a-schema {})))
-
-(defn transient-1 [m k] (transient (update m k transient)))
-(defn persistent-1 [m k] (update (persistent! m) k persistent!))
 
 (defn add-missing-index [db a indexk]
   (let [{:as db
@@ -466,9 +458,9 @@
                        (if-some [v (m a)]
                          (f db e a v nil true false)
                          db)))
-                   (transient-1 db indexk)
+                   (transient-k db indexk)
                    (:eav db))
-        (persistent-1 indexk))))
+        (persistent-k indexk))))
 
 (defn merge-schema!
   "Merge additional schema options into a db. Indexes are not created for existing data."
@@ -488,9 +480,3 @@
           :vae {}
           :ave {}
           :schema (compile-db-schema schema)})))
-
-(let [conn (doto (create-conn {:children schema/many})
-             (transact! [[:db/add 1 :children #{1 2}]]))]
-  (transact! conn [{:db/id 1 :children #{1 2}}
-                   [:db/add 1 :children #{3}]
-                   [:db/retract 1 :children #{1}]]))

@@ -25,11 +25,11 @@
           counter (atom 0)
           conn (api/conn)
           component (fn [{:keys [app/id]}]
-                      (let [state (local-state conn
-                                               :defaults {:i (swap! counter inc)}
-                                               :key id)]
-                        (swap! state assoc :id-cap (str/capitalize id))
-                        (swap! log conj [(get state :i) id (:id-cap state)])
+                      (let [!state (local-state :conn conn
+                                                :default {:i (swap! counter inc)}
+                                                :key id)]
+                        (swap! !state assoc :id-cap (str/capitalize id))
+                        (swap! log conj [(@!state :i) id (@!state :id-cap)])
                         [:div "Hello"]))]
       (rdom/render [:div
                     [component {:app/id "a"}]

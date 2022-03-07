@@ -9,6 +9,9 @@
 
 (defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
+(defn db= [& dbs]
+  (apply = (map #(dissoc % :tx) dbs)))
+
 (deftest datom-tx
 
   (let [schema {:authors {:db/valueType :db.type/ref
@@ -25,19 +28,19 @@
         conn (d/create-conn schema)
         tx-report (d/transact! conn tx)]
 
-    (is (= @conn
-           @(doto (d/create-conn schema)
-              (d/transact! [[:db/datoms (:datoms tx-report)]])))
+    (is (db= @conn
+             @(doto (d/create-conn schema)
+                (d/transact! [[:db/datoms (:datoms tx-report)]])))
         :db/datoms)
 
-    (is (= @(d/create-conn schema)
-           (let [conn (d/create-conn schema)
-                 {:keys [datoms]} (d/transact! conn tx)]
-             (d/transact! conn [[:db/datoms-reverse datoms]])
-             @conn)
-           @(doto (d/create-conn schema)
-              (d/transact! [[:db/datoms (:datoms tx-report)]
-                            [:db/datoms-reverse (:datoms tx-report)]])))
+    (is (db= @(d/create-conn schema)
+             (let [conn (d/create-conn schema)
+                   {:keys [datoms]} (d/transact! conn tx)]
+               (d/transact! conn [[:db/datoms-reverse datoms]])
+               @conn)
+             @(doto (d/create-conn schema)
+                (d/transact! [[:db/datoms (:datoms tx-report)]
+                              [:db/datoms-reverse (:datoms tx-report)]])))
         :db/datoms-reverse)
 
     ;(read/touch db (read/get db "fred"))
