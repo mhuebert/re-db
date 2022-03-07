@@ -49,10 +49,10 @@
   "Return a local-state cursor for a Reagent component.
     :key      - to differentiate instances of this component
     :default  - initial value"
-  [& {:keys [key default component location conn]
+  [& {:keys [key default component location conn id]
       :or {component (reagent/current-component)
            key :singleton
            conn ::api/conn}}]
-  (let [e {location key}]
-    (ratom/add-on-dispose! ratom/*ratom-context* #(do (prn :retracting-local-state e) (some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]]))))
+  (let [e (or id {location key})]
+    (ratom/add-on-dispose! ratom/*ratom-context* #(some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]])))
     (EAtom. conn e default false)))
