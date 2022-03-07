@@ -9,17 +9,6 @@
             [reagent.impl.component :refer [*current-component* component-name]])
   (:require-macros [re-db.reagent.local-state :as macros]))
 
-;; problem: how to store local-state in re-db, to enable time-travel
-;;
-;; prototyped solution:
-;;
-;; 1. A "EAtom", entity-atom, wraps an entity to allow
-;;    - reactive-read (via @ or lookup)
-;;    - mutation (via reset!, which runs a transaction)
-;; 2. We create our entity-atom using the `local-state` function. it accepts a :key parameter
-;;    allowing us to differentiate instances of the same component. Default values can be
-;;    passed.
-
 ;; an entity-atom always causes a dependency on the "whole entity"
 
 (defn- resolve-conn [conn]
@@ -65,5 +54,5 @@
            key :singleton
            conn ::api/conn}}]
   (let [e {location key}]
-    (ratom/add-on-dispose! ratom/*ratom-context* #(some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]])))
+    (ratom/add-on-dispose! ratom/*ratom-context* #(do (prn :retracting-local-state e) (some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]]))))
     (EAtom. conn e default false)))

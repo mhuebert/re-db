@@ -9,7 +9,7 @@
 (deftest history-snapshots
   "History based on resetting to snapshots"
   (d/with-conn {:children schema/many}
-    (let [!history (history/from-conn (d/conn) :log-snapshots? true)
+    (let [!history (history/from-conn (d/conn) :mode :snapshot)
           txs (cons (history/last-tx @!history)
                     (map :tx [(d/transact! [[:db/add 1 :children #{1}]])
                               (d/transact! [[:db/add 1 :children #{2 4}]])
@@ -28,7 +28,7 @@
 (deftest history-datoms
   "History based on (re)play of datoms"
   (d/with-conn {:children schema/many}
-    (let [!history (history/from-conn (d/conn) :log-snapshots? false)
+    (let [!history (history/from-conn (d/conn) :mode :diff)
           txs (cons (history/last-tx @!history)
                     (map :tx [(d/transact! [[:db/add 1 :children #{1}]])
                               (d/transact! [[:db/add 1 :children #{2 4}]])

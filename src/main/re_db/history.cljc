@@ -9,18 +9,27 @@
 (def traveling? (complement current?))
 
 (defn from-conn [conn & {:keys [length
-                                log-snapshots?]
+                                mode]
                          :or {length ##Inf
-                              log-snapshots? true}}]
-  (let [!history (atom {:log (list {:tx 0 :datoms [] :db-after @conn})
-                        :conn conn})]
-    (db/listen! conn ::history (fn [_ tx-report]
-                                 (let [tx-report (-> tx-report
-                                                     (dissoc :db-before)
-                                                     (cond-> (not log-snapshots?)
-                                                             (dissoc :db-after)))]
+                              mode :snapshot}}]
+  (let [key [::history (swap! db/!tx-clock inc)]
+        !history (atom {:log (list {:tx 0 :datoms [] :db-after @conn})
+                        :conn conn
+                        :mode mode
+                        :key key})]
+    (db/listen! conn key
+                (fn [_ tx-report]
+                                 ;; always store other metadata from the tx (hence dissoc, not select-keys)
+                                 (let [tx-report (dissoc tx-report
+                                                         :db-before
+                                                         (case mode :diff :db-after
+                                                                    :snapshot :datoms))]
                                    (swap! !history update :log (comp #(take length %) conj) tx-report))))
     !history))
+
+(defn unlisten [!history]
+  (let [{:keys [conn key]} @!history]
+    (db/unlisten! conn key)))
 
 (defn travel-txs [history db destination-tx]
   {:pre [(int? destination-tx) (not (neg? destination-tx))]}
