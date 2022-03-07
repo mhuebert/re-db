@@ -1,8 +1,8 @@
 (ns re-db.reagent.local-state
-  (:refer-clojure :exclude [read])
   (:require [applied-science.js-interop :as j]
             [re-db.core :as db]
             [reagent.ratom :as ratom]
+            [re-db.api :as api]
             [re-db.read :as read]
             [re-db.reagent :refer [read-index!]]
             [reagent.core :as reagent]
@@ -22,16 +22,19 @@
 
 ;; an entity-atom always causes a dependency on the "whole entity"
 
+(defn- resolve-conn [conn]
+  (if (keyword? conn) (api/conn) conn))
+
 (deftype EAtom [conn e default ^:mutable ^:volatile-mutable modified?]
   IDeref
   (-deref [this]
-    (if-some [v (read-index! conn :eav ::local-state e)]
-      v
+    (if ^boolean modified?
+      (read-index! (resolve-conn conn) :eav ::local-state e)
       default))
   IReset
   (-reset! [this new-value]
     (set! modified? true)
-    (db/transact! conn [[:db/add ::local-state e new-value]]))
+    (db/transact! (resolve-conn conn) [[:db/add ::local-state e new-value]]))
   ISwap
   (-swap! [this f] (reset! this (f @this)))
   (-swap! [this f a] (reset! this (f @this a)))
@@ -57,9 +60,10 @@
   "Return a local-state cursor for a Reagent component.
     :key      - to differentiate instances of this component
     :default  - initial value"
-  [conn & {:keys [key or component location]
-           :or {component (reagent/current-component)
-                key :singleton}}]
+  [& {:keys [key default component location conn]
+      :or {component (reagent/current-component)
+           key :singleton
+           conn ::api/conn}}]
   (let [e {location key}]
-    (ratom/add-on-dispose! ratom/*ratom-context* #(db/transact! conn [[:db/retract ::local-state e]]))
-    (EAtom. conn {location key} or false)))
+    (ratom/add-on-dispose! ratom/*ratom-context* #(some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]])))
+    (EAtom. conn e default false)))

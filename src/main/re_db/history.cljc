@@ -57,4 +57,6 @@
 (defn as-of
   "Returns conn with db-value at `tx`"
   [!history tx]
-  (atom (db-as-of @!history tx)))
+  (if (= tx (last-tx @!history))
+    (:conn @!history)
+    (atom (db-as-of @!history tx))))

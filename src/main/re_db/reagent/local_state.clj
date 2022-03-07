@@ -5,7 +5,6 @@
   (->> ((juxt :file :line :column) (meta form))
        (str/join ":")))
 
-(defmacro local-state [conn & {:as opts}]
+(defmacro local-state [& {:as opts}]
   `(~'re-db.reagent.local-state/local-state*
-    ~conn
     ~@(mapcat identity (assoc opts :location (code-location &form)))))
