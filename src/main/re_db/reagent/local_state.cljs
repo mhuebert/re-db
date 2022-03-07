@@ -41,8 +41,8 @@
   (-swap! [this f a b] (reset! this (f @this a b)))
   (-swap! [this f a b xs] (reset! this (apply f @this a b xs))))
 
-(defn from-db
-  "Read value of EAtom from a db (point-in-time)"
+(defn snapshot
+  "Read value of EAtom from a db snapshot (point-in-time)"
   [!state db]
   (get (db/get-entity db ::local-state) (.-e !state)))
 

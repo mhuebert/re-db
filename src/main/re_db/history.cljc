@@ -5,6 +5,7 @@
 (defn last-tx [history] (-> history :log first :tx))
 (defn current-tx [history] (:tx @(:conn history)))
 (defn current? [history] (= (last-tx history) (current-tx history)))
+
 (def traveling? (complement current?))
 
 (defn from-conn [conn & {:keys [length
@@ -57,6 +58,4 @@
 (defn as-of
   "Returns conn with db-value at `tx`"
   [!history tx]
-  (if (= tx (last-tx @!history))
-    (:conn @!history)
-    (atom (db-as-of @!history tx))))
+  (atom (db-as-of @!history tx)))
