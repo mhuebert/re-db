@@ -462,9 +462,11 @@
         (persistent-k indexk))))
 
 (defn merge-schema!
-  "Merge additional schema options into a db. Indexes are not created for existing data."
+  "Merge additional schema options into a db. Does not update indexes for existing data.
+   Any attribute present in `schema` will replace existing schema for that attribute."
   [db schema]
-  (swap! db update :schema (comp compile-db-schema (partial merge-with merge)) schema))
+  (swap! db update :schema (fn [old-schema]
+                             (reduce-kv compile-a-schema old-schema schema))))
 
 (defn create-conn
   "Create a new db, with optional schema, which should be a mapping of attribute keys to
