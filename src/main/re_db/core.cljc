@@ -382,23 +382,22 @@
 
 (defonce !tx-clock (atom 0))
 
-(defn- transaction
-  ([db-before {:keys [txs options]}] (transaction db-before txs options))
-  ([db-before txs options]
-   {:pre [db-before (or (nil? txs) (sequential? txs))]}
-   (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
-     (let [db-after (-> (reduce commit-tx (transient-map (dissoc db-before :tx)) txs)
-                        (persistent-map!))
-           datoms (if *datoms*
-                    #?(:cljs (vec *datoms*)
-                       :clj  @*datoms*)
-                    [])]
-       (assoc options
-         :db-before db-before
-         :db-after (if (seq datoms)
-                     db-after
-                     db-before)
-         :datoms datoms)))))
+(defn transaction
+  [db-before txs options]
+  {:pre [db-before (or (nil? txs) (sequential? txs))]}
+  (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
+    (let [db-after (-> (reduce commit-tx (transient-map (dissoc db-before :tx)) txs)
+                       (persistent-map!))
+          datoms (if *datoms*
+                   #?(:cljs (vec *datoms*)
+                      :clj  @*datoms*)
+                   [])]
+      (assoc options
+        :db-before db-before
+        :db-after (if (seq datoms)
+                    db-after
+                    db-before)
+        :datoms datoms))))
 
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
