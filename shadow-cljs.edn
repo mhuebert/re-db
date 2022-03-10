@@ -1,4 +1,4 @@
-{:deps true
+{:deps {:aliases [:bench :clerk :dev :test]}
  :dev-http {8008 "public"}
  :builds
  {:test
