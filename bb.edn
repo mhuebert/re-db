@@ -1,4 +1,4 @@
 {:tasks {dev (do (shell "yarn install")
-                 (shell "yarn shadow-cljs watch test"))
-         server (shell "yarn shadow-cljs server")
+                 (shell "yarn shadow-cljs -A:dev:test:clerk watch test"))
+         server (shell "yarn shadow-cljs -A:dev:test:clerk server")
          bench (shell "yarn shadow-cljs release bench")}}

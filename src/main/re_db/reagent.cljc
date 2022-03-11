@@ -60,7 +60,7 @@
 
 #?(:cljs
    (extend-protocol ICaptureWatchers
-     ratom/Reaction
+     object
      (capture! [^ratom/Reaction this watchable]
        (j/!update this .-captured
                   (fn [^array c]
