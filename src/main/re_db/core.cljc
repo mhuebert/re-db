@@ -275,11 +275,17 @@
 
 ;; adds :db/id to entity based on unique attributes
 (defn- resolve-map-e [db m]
-  (if (some? (:db/id m))
-    m
-    (let [e-from-attr (e-from-unique-attr db m)]
-      (assert (not (false? e-from-attr)) (str "must have a unique attribute" m))
-      (assoc m :db/id (or e-from-attr (gen-e))))))
+  (let [e (:db/id m)]
+    (cond (nil? e) (let [e-from-attr (e-from-unique-attr db m)]
+                     (assert (not (false? e-from-attr)) (str "must have a unique attribute" m))
+                     (assoc m :db/id (or e-from-attr (gen-e))))
+          ;; support for lookup ref as :db/id. avoids iterating over keys to find a unique attribute
+          ;; when we already know which attribute is unique/identity.
+          (vector? e) (let [[a v] e]
+                        (-> m
+                            (assoc :db/id (or (resolve-e e db) (gen-e))
+                                   a v)))
+          :else m)))
 
 (defn- add-attr-index [[db m :as state] e a pv ^Schema a-schema]
   (let [v (m a)
@@ -362,7 +368,7 @@
             ;; TODO
             (prn :no-op-found (fast/gets db :schema :db/tx-fns operation))
             (throw (#?(:cljs js/Error :clj Exception.) (str "No db op: " operation)))))))
-    (add-map db (update tx :db/id resolve-e db))))
+    (add-map db tx)))
 
 
 (defn transient-k [m k] (transient (update m k transient)))

@@ -67,7 +67,11 @@
                            {:pet/collar-nr 1
                             :pet/name "pookie"}
                            {:pet/collar-nr 2
-                            :pet/name "fido"}]))]
+                            :pet/name "fido"}
+                           {:db/id [:email "peter@example.com"]
+                            :name "Peter"}
+                           {:email "peter@example.com"
+                            :age 32}]))]
     (is (= (-> db
                (read/entity "fred")
                :friend
@@ -86,6 +90,12 @@
                 :pets
                 (map :pet/name)
                 set)))
+
+    (is (= ["Peter" 32]
+           (->> (read/entity db [:email "peter@example.com"])
+                ((juxt :name :age)))))
+
+
 
     ))
 

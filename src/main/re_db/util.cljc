@@ -48,6 +48,9 @@
                         IEquiv Object
                         -equiv equals
 
+                        ISwap clojure.lang.IAtom
+                        -swap! swap
+
                         IWatchable clojure.lang.IRef
                         -add-watch addWatch
                         -remove-watch removeWatch} form)))
