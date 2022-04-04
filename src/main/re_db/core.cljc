@@ -10,11 +10,12 @@
 
 (defrecord Schema [^boolean ave ^boolean many ^boolean unique ^boolean ref ^boolean ae index-fn])
 
-(#?(:cljs js/console.info
-    :clj  prn) "re-db/index-all:"
-               (str (cond-> #{}
-                            index-all-ave? (conj :ave)
-                            index-all-ae? (conj :ae))))
+(comment
+ (#?(:cljs js/console.info
+     :clj  prn) "re-db/index-all:"
+                (str (cond-> #{}
+                             index-all-ave? (conj :ave)
+                             index-all-ae? (conj :ae)))))
 
 ;; used to log datoms while building up a tx-report
 (def ^:dynamic *datoms* nil)

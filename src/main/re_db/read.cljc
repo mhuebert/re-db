@@ -11,7 +11,7 @@
 
 (def auto-index? true)
 
-(#?(:cljs js/console.info :clj prn) "re-db/auto-index:" auto-index?)
+(comment (#?(:cljs js/console.info :clj prn) "re-db/auto-index:" auto-index?))
 
 ;; lookup refs
 
@@ -35,8 +35,8 @@
 (defn get
   "Read entity or attribute reactively"
   ([conn e]
-   (some->> (resolve-e conn e)
-            (read-index! conn :eav)))
+   (when-let [id (resolve-e conn e)]
+     (read-index! conn :eav id)))
   ([conn e attr]
    (get conn e attr nil))
   ([conn e attr not-found]
@@ -272,7 +272,7 @@
                (some->> v (entity conn)))
              v)))))
    (-lookup [this a not-found]
-     (if-some [val (get this a)]
+     (if-some [val (core/get this a)]
        val
        not-found))))
 
