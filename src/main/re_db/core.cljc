@@ -8,24 +8,15 @@
 (def index-all-ave? false)
 (def index-all-ae? false)
 
-(defrecord Schema [ave many unique ref ae index-fn])
+(defrecord Schema [ave many unique ref ae index-fn schema-map])
 
 ;; accessor fns, ugly definitions because ^boolean hints are inconsistent
 ;; across clj / cljs
-#?(:cljs
-   (do
-     (defn ^boolean unique? [^Schema s] (.-unique s))
-     (defn ^boolean many? [^Schema s] (.-many s))
-     (defn ^boolean ref? [^Schema s] (.-ref s))
-     (defn ^boolean ave? [^Schema s] (.-ave s))
-     (defn ^boolean ae? [^Schema s] (.-ae s)))
-   :clj
-   (do
-     (defn unique? [^Schema s] (.-unique s))
-     (defn many? [^Schema s] (.-many s))
-     (defn ref? [^Schema s] (.-ref s))
-     (defn ave? [^Schema s] (.-ave s))
-     (defn ae? [^Schema s] (.-ae s))))
+(defn #?(:cljs ^boolean unique? :clj unique?) [^Schema s] (.-unique s))
+(defn #?(:cljs ^boolean many? :clj many?) [^Schema s] (.-many s))
+(defn #?(:cljs ^boolean ref? :clj ref?) [^Schema s] (.-ref s))
+(defn #?(:cljs ^boolean ave? :clj ave?) [^Schema s] (.-ave s))
+(defn #?(:cljs ^boolean ae? :clj ae?) [^Schema s] (.-ae s))
 
 (comment
  (#?(:cljs js/console.info
@@ -169,7 +160,7 @@
                                   (per-values db e a nil pv1 false true)) db pv)
                                db))))))))))))
 
-(defn compile-a-schema* ^Schema [{:db/keys [index unique cardinality valueType index-ae]}]
+(defn compile-a-schema* ^Schema [{:as schema-map :db/keys [index unique cardinality valueType index-ae]}]
   (let [unique? (boolean unique)
         index (or index-all-ave? index)
         ae (boolean (or index-all-ae? index-ae))
@@ -178,7 +169,8 @@
                    :many (= cardinality :db.cardinality/many)
                    :unique unique?
                    :ref (= valueType :db.type/ref)
-                   :ae ae})]
+                   :ae ae
+                   :schema-map schema-map})]
     (assoc a-schema :index-fn (make-indexer a-schema))))
 
 ;; Lookup functions
@@ -451,12 +443,12 @@
   ([conn txs opts]
    (commit! conn (transaction @conn txs opts) opts)))
 
-(defn compile-a-schema [db-schemas a a-schema]
+(defn compile-a-schema [db-schemas a a-schema-map]
   (if (or (= :db/ident a) (not= "db" (namespace a)))
-    (let [^Schema a-schema (compile-a-schema* a-schema)]
+    (let [^Schema a-schema (compile-a-schema* a-schema-map)]
       (-> (assoc db-schemas a a-schema)
           (update :db/uniques (if (unique? a-schema) (fnil conj #{}) disj) a)))
-    (assoc db-schemas a a-schema)))
+    (assoc db-schemas a a-schema-map)))
 
 (defn compile-db-schema [schema]
   (->> (assoc schema :db/ident {:db/unique :db.unique/identity})
@@ -467,11 +459,11 @@
          :keys [schema]} (update db :schema
                                  (fn [db-schema]
                                    (compile-a-schema db-schema a
-                                                     (merge (get db-schema a)
+                                                     (merge (:schema-map (get db-schema a))
                                                             (case indexk
                                                               :ae schema/ae
                                                               :ave schema/ave)))))
-        a-schema ^Schema (schema a)
+        a-schema ^Schema (get schema a)
         is-many (many? a-schema)
         {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]
     (-> (reduce-kv (if (and is-many (= per :value))
