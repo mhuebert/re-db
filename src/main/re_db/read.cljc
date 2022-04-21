@@ -16,7 +16,7 @@
 ;; lookup refs
 
 (defn resolve-lookup-ref [conn [a v]]
-  (assert (:unique (db/get-schema @conn a)))
+  (assert (db/unique? (db/get-schema @conn a)))
   (if (vector? v)                                           ;; nested lookup ref
     (resolve-lookup-ref conn [a (resolve-lookup-ref conn v)])
     (when v
@@ -88,8 +88,8 @@
   [conn [a v]]
   (let [db @conn
         a-schema (db/get-schema db a)
-        v (cond->> v ^boolean (:ref a-schema) (resolve-e conn))]
-    (if ^boolean (:ave a-schema)
+        v (cond->> v (db/ref? a-schema) (resolve-e conn))]
+    (if (db/ave? a-schema)
       (read-index! conn :ave a v)
       (do
         (warn! :ave a)
@@ -111,7 +111,7 @@
   [conn a]
   (let [db @conn
         a-schema (db/get-schema db a)]
-    (if ^boolean (:ae a-schema)
+    (if (db/ae? a-schema)
       (read-index! conn :ae a)
       (do
         (warn! :ae a)
@@ -151,7 +151,7 @@
              is-reverse? (reverse-attr? a)
              forward-a (cond-> a is-reverse? forward-attr)
              ^db/Schema a-schema (db/get-schema db forward-a)
-             is-many ^boolean (:many a-schema)
+             is-many (db/many? a-schema)
              ;; ids of related entities
              ids (if is-reverse?
                    (fast/gets db :vae e forward-a)
@@ -258,16 +258,16 @@
            a (cond-> a is-reverse forward-attr)
            db @conn
            a-schema (db/get-schema db a)
-           is-ref? ^boolean (:ref a-schema)]
+           is-ref (db/ref? a-schema)]
 
        (if is-reverse
          (do
-           (assert is-ref?)
+           (assert is-ref)
            (mapv #(entity conn %) (read-index! conn :vae e a)))
          (let [v (read-index! conn :eav e a)
-               is-many? ^boolean (:many a-schema)]
-           (if is-ref?
-             (if is-many?
+               is-many (db/many? a-schema)]
+           (if is-ref
+             (if is-many
                (mapv #(entity conn %) v)
                (some->> v (entity conn)))
              v)))))
@@ -292,8 +292,8 @@
                 (read-index! conn :vae (:db/id m)))]
            (reduce-kv (fn [m a v]
                         (let [a-schema (db/get-schema db a)]
-                          (if ^boolean (:ref a-schema)
-                            (if ^boolean (:many a-schema)
+                          (if (db/ref? a-schema)
+                            (if (db/many? a-schema)
                               (mapv #(entity conn %) v)
                               (assoc m a (entity conn v)))
                             m))) with-reverse-refs m)))

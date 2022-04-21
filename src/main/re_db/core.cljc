@@ -8,7 +8,24 @@
 (def index-all-ave? false)
 (def index-all-ae? false)
 
-(defrecord Schema [^boolean ave ^boolean many ^boolean unique ^boolean ref ^boolean ae index-fn])
+(defrecord Schema [ave many unique ref ae index-fn])
+
+;; accessor fns, ugly definitions because ^boolean hints are inconsistent
+;; across clj / cljs
+#?(:cljs
+   (do
+     (defn ^boolean unique? [^Schema s] (.-unique s))
+     (defn ^boolean many? [^Schema s] (.-many s))
+     (defn ^boolean ref? [^Schema s] (.-ref s))
+     (defn ^boolean ave? [^Schema s] (.-ave s))
+     (defn ^boolean ae? [^Schema s] (.-ae s)))
+   :clj
+   (do
+     (defn unique? [^Schema s] (.-unique s))
+     (defn many? [^Schema s] (.-many s))
+     (defn ref? [^Schema s] (.-ref s))
+     (defn ave? [^Schema s] (.-ave s))
+     (defn ae? [^Schema s] (.-ae s))))
 
 (comment
  (#?(:cljs js/console.info
@@ -61,7 +78,7 @@
 ;; when the schema is normalized - we make lists of per-value and per-datom
 ;; indexers - which all datoms are looped through.
 (defn ave-indexer [^Schema schema]
-  (let [is-unique (:unique schema)]
+  (let [is-unique (unique? schema)]
     {:index :ave
      :per :value
      :f (fn [db e a v pv v? pv?]
@@ -105,8 +122,8 @@
    :per :datom
    :f (if (::default? a-schema)
         (fn [db e a v pv v? pv?]
-          (ae-indexer* db e a v pv v? pv? (:many (get-schema db a))))
-        (let [is-many ^boolean (:many a-schema)]
+          (ae-indexer* db e a v pv v? pv? (many? (get-schema db a))))
+        (let [is-many (many? a-schema)]
           (fn [db e a v pv v? pv?]
             (ae-indexer* db e a v pv v? pv? is-many))))})
 
@@ -115,15 +132,15 @@
    (fn [^Schema a-schema]
      ;; one indexer per attribute
      (let [[per-value per-datom] (->> (cond-> []
-                                              (:ave a-schema) (conj (ave-indexer a-schema))
-                                              (:ref a-schema) (conj (vae-indexer a-schema))
-                                              (:ae a-schema) (conj (ae-indexer a-schema)))
+                                              (ave? a-schema) (conj (ave-indexer a-schema))
+                                              (ref? a-schema) (conj (vae-indexer a-schema))
+                                              (ae? a-schema) (conj (ae-indexer a-schema)))
                                       (reduce (fn [out {:keys [per f]}]
                                                 (case per
                                                   :value (update out 0 conj f)
                                                   :datom (update out 1 conj f)))
                                               [[] []]))
-           is-many? (:many a-schema)]
+           is-many? (many? a-schema)]
        (when (or (seq per-value) (seq per-datom))
          (let [per-values (fast/comp6 per-value)
                per-datoms (fast/comp6 per-datom)]
@@ -197,7 +214,7 @@
   [db [_ e a v]]
   (if-some [pv (fast/gets db :eav e a)]
     (let [a-schema (get-schema db a)]
-      (if ^boolean (:many a-schema)
+      (if (many? a-schema)
         (if-some [removals (guard (set/intersection v pv) seq)]
           (-> db
               (fast/update-db-index! [:eav e a] (fnil set/difference #{}) removals)
@@ -224,8 +241,8 @@
              (fast/update! db :eav assoc! e {:db/id e}))
         m (get-entity db e)
         pv (get m a)
-        v (cond-> v ^boolean (:ref a-schema) (resolve-e db))]
-    (if ^boolean (:many a-schema)
+        v (cond-> v (ref? a-schema) (resolve-e db))]
+    (if (many? a-schema)
       (if-some [additions (guard (set/difference v pv) seq)]
         (-> db
             (fast/update-db-index! [:eav e a] into-set additions)
@@ -239,7 +256,7 @@
 
 (j/defn commit-datom [db ^js [e a v pv]]
   (let [a-schema (get-schema db a)]
-    (-> (if ^boolean (:many a-schema)
+    (-> (if (many? a-schema)
           ;; for cardinality/many, `v` is a set of "additions" and `pv` is a set of "removals"
           (fast/update-db-index! db
                                  [:eav e a]
@@ -290,7 +307,7 @@
 
 (defn- add-attr-index [[db m :as state] e a pv ^Schema a-schema]
   (let [v (m a)
-        is-many ^boolean (:many a-schema)]
+        is-many (many? a-schema)]
     (if-some [[v pv] (if is-many
                        (set-diff pv v)
                        (when (not= v pv)
@@ -308,7 +325,7 @@
 
 (defn resolve-attr-refs [[db m :as state] a v ^Schema a-schema]
   (let [[db newv]
-        (if ^boolean (:many a-schema)
+        (if (many? a-schema)
           (reduce
            (fn [[db vs :as state] v]
              (let [v-resolved (handle-lookup-ref db v)]
@@ -337,7 +354,7 @@
           [db m] (reduce-kv (fn [state a v]
                               (let [a-schema (db-schema a default-schema)]
                                 (-> state
-                                    (cond-> ^boolean (:ref a-schema)
+                                    (cond-> (ref? a-schema)
                                             (resolve-attr-refs a v a-schema))
                                     (add-attr-index e a (get pm a) a-schema))))
                             [db m]
@@ -436,9 +453,9 @@
 
 (defn compile-a-schema [db-schemas a a-schema]
   (if (or (= :db/ident a) (not= "db" (namespace a)))
-    (let [a-schema (compile-a-schema* a-schema)]
+    (let [^Schema a-schema (compile-a-schema* a-schema)]
       (-> (assoc db-schemas a a-schema)
-          (update :db/uniques (if ^boolean (:unique a-schema) (fnil conj #{}) disj) a)))
+          (update :db/uniques (if (unique? a-schema) (fnil conj #{}) disj) a)))
     (assoc db-schemas a a-schema)))
 
 (defn compile-db-schema [schema]
@@ -455,9 +472,9 @@
                                                               :ae schema/ae
                                                               :ave schema/ave)))))
         a-schema ^Schema (schema a)
-        many? ^boolean (:many a-schema)
+        is-many (many? a-schema)
         {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]
-    (-> (reduce-kv (if (and many? (= per :value))
+    (-> (reduce-kv (if (and is-many (= per :value))
                      (fn [db e m]
                        (reduce (fn [db v] (f db e a v nil true false)) db (m a)))
                      (fn [db e m]
@@ -471,9 +488,9 @@
 (defn merge-schema!
   "Merge additional schema options into a db. Does not update indexes for existing data.
    Any attribute present in `schema` will replace existing schema for that attribute."
-  [db schema]
-  (swap! db update :schema (fn [old-schema]
-                             (reduce-kv compile-a-schema old-schema schema))))
+  [conn schema]
+  (swap! conn update :schema (fn [old-schema]
+                               (reduce-kv compile-a-schema old-schema schema))))
 
 (defn create-conn
   "Create a new db, with optional schema, which should be a mapping of attribute keys to

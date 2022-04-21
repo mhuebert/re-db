@@ -115,12 +115,12 @@
 
 (defn keys-when [m vpred]
   (reduce-kv (fn [m a v]
-               (cond-> m ^boolean (vpred v) (conj a)))
+               (cond-> m (vpred v) (conj a)))
              #{}
              m))
 
-(defn- many-a? [db-schema] (keys-when db-schema #(:many ^db/Schema %)))
-(defn- ref-a? [db-schema] (keys-when db-schema #(:ref ^db/Schema %)))
+(defn- many-a? [db-schema] (keys-when db-schema db/many?))
+(defn- ref-a? [db-schema] (keys-when db-schema db/ref?))
 
 (defn invalidate-readers!
   ;; given a re-db transaction, invalidates readers based on

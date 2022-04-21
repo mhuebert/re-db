@@ -5,7 +5,8 @@
             [re-db.api :as api]
             [re-db.schema :as schema]
             [re-db.util :as util]
-            [re-db.test-helpers :refer [throws]]))
+            [re-db.test-helpers :refer [throws]]
+            [re-db.core :as db]))
 
 (defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
@@ -477,3 +478,24 @@
       (api/transact! [{:system/id s :system/notifications #{[:system/id n]}}])
       (api/transact! [{:notification/kind :sms :system/id n}])
       (is (= 1 (count (:system/notifications (api/entity [:system/id s]))))))))
+
+(deftest merge-schema
+  (let [conn (db/create-conn)]
+    (db/merge-schema! conn {:my/unique schema/unique-id
+                            :my/ref schema/ref})
+    (db/transact! conn [{:my/unique 1
+                         :my/ref {:my/unique 2 :my/name "Mr. Unique"}
+                         :my/other {:my/unique 3}}])
+    (is (= read/Entity
+           (-> (read/entity conn [:my/unique 1])
+               :my/ref
+               type)))
+
+    (is (= "Mr. Unique"
+           (-> (read/entity conn [:my/unique 1])
+               :my/ref
+               :my/name)))
+
+    (is (map?
+           (-> (read/entity conn [:my/unique 1])
+               :my/other)))))
