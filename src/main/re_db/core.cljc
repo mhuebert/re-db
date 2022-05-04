@@ -461,11 +461,14 @@
   (let [{:as db
          :keys [schema]} (update db :schema
                                  (fn [db-schema]
-                                   (compile-a-schema db-schema a
-                                                     (merge (:schema-map (get db-schema a))
-                                                            (case indexk
-                                                              :ae schema/ae
-                                                              :ave schema/ave)))))
+                                   (let [changes (case indexk
+                                                   :ae schema/ae
+                                                   :ave schema/ave)]
+                                     (-> db-schema
+                                         (compile-a-schema a
+                                                           (merge (:schema-map (get db-schema a))
+                                                                  changes))
+                                         (update :db/runtime-changes conj {a changes})))))
         a-schema ^Schema (get schema a)
         is-many (many? a-schema)
         {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]

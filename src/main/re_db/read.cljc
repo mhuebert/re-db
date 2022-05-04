@@ -74,15 +74,6 @@
 ;; higher-level index lookups that resolve based on schema
 ;; and provide non-indexed backoffs
 
-(def warned (volatile! #{}))
-(defn warn! [index a]
-  (when-not (@warned [index a])
-    (vswap! warned conj [index a])
-    (#?(:cljs js/console.warn
-        :clj prn) (str "Missing " index " on " a ". "
-                       (case index :ave schema/ave
-                                   :ae schema/ae)))))
-
 (defn av_
   "Returns entity-ids for entities where attribute (a) equals value (v)"
   [conn [a v]]
@@ -91,19 +82,17 @@
         v (cond->> v (db/ref? a-schema) (resolve-e conn))]
     (if (db/ave? a-schema)
       (read-index! conn :ave a v)
-      (do
-        (warn! :ave a)
-        (if auto-index?
-          (do
-            (swap! conn db/add-missing-index a :ave)
-            (recur conn [a v]))
-          (->> (:eav db)
-               (reduce-kv
-                (fn [out e m]
-                  (cond-> out
-                          (= (m a) v)
-                          (conj e)))
-                #{})))))))
+      (if auto-index?
+        (do
+          (swap! conn db/add-missing-index a :ave)
+          (recur conn [a v]))
+        (->> (:eav db)
+             (reduce-kv
+              (fn [out e m]
+                (cond-> out
+                        (= (m a) v)
+                        (conj e)))
+              #{}))))))
 
 (defn _a_
   "Returns [e v] pairs for entities containing attribute (a).
@@ -113,17 +102,15 @@
         a-schema (db/get-schema db a)]
     (if (db/ae? a-schema)
       (read-index! conn :ae a)
-      (do
-        (warn! :ae a)
-        (if auto-index?
-          (do
-            (swap! conn db/add-missing-index a :ae)
-            (recur conn a))
-          (->> (:eav db)
-               (reduce-kv
-                (fn [out e m] (cond-> out
-                                      (some? (m a)) (conj e)))
-                #{})))))))
+      (if auto-index?
+        (do
+          (swap! conn db/add-missing-index a :ae)
+          (recur conn a))
+        (->> (:eav db)
+             (reduce-kv
+              (fn [out e m] (cond-> out
+                                    (some? (m a)) (conj e)))
+              #{}))))))
 
 (declare entity)
 

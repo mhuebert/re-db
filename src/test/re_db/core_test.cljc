@@ -510,4 +510,6 @@
     (db/merge-schema! conn {:my/ref schema/ref})
     (is (db/ref? (db/get-schema @conn :my/ref)))
     (swap! conn db/add-missing-index :my/ref :ae)
-    (is (db/ref? (db/get-schema @conn :my/ref)))))
+    (is (db/ref? (db/get-schema @conn :my/ref)))
+    (is (some #{{:my/ref schema/ae}}
+              (-> @conn :schema :db/runtime-changes)))))
