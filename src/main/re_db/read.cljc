@@ -253,24 +253,25 @@
      (read-index! conn :eav (-resolve-e! this conn e)))
    ILookup
    (-lookup [this a]
-     (let [e (-resolve-e! this conn e)
-           is-reverse (reverse-attr? a)
-           a (cond-> a is-reverse forward-attr)
-           db @conn
-           a-schema (db/get-schema db a)
-           is-ref (db/ref? a-schema)]
-
-       (if is-reverse
-         (do
-           (assert is-ref)
-           (mapv #(entity conn %) (read-index! conn :vae e a)))
-         (let [v (read-index! conn :eav e a)
-               is-many (db/many? a-schema)]
-           (if is-ref
-             (if is-many
-               (mapv #(entity conn %) v)
-               (some->> v (entity conn)))
-             v)))))
+     (-resolve-e! this conn e)
+     (if (= :db/id a)
+       e
+       (let [is-reverse (reverse-attr? a)
+             a (cond-> a is-reverse forward-attr)
+             db @conn
+             a-schema (db/get-schema db a)
+             is-ref (db/ref? a-schema)]
+         (if is-reverse
+           (do
+             (assert is-ref)
+             (mapv #(entity conn %) (read-index! conn :vae e a)))
+           (let [v (read-index! conn :eav e a)
+                 is-many (db/many? a-schema)]
+             (if is-ref
+               (if is-many
+                 (mapv #(entity conn %) v)
+                 (some->> v (entity conn)))
+               v))))))
    (-lookup [this a not-found]
      (if-some [val (core/get this a)]
        val

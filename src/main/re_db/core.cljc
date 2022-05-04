@@ -297,15 +297,14 @@
                                    a v)))
           :else m)))
 
-(defn- add-attr-index [[db m :as state] e a pv ^Schema a-schema]
-  (let [v (m a)
-        is-many (many? a-schema)]
+(defn- add-attr-index [db e a v pv ^Schema a-schema]
+  (let [is-many (many? a-schema)]
     (if-some [[v pv] (if is-many
                        (set-diff pv v)
                        (when (not= v pv)
                          [v pv]))]
-      [(index db a-schema e a v pv) m]
-      state)))
+      (index db a-schema e a v pv)
+      db)))
 
 (declare add-map)
 
@@ -315,43 +314,47 @@
         {(v 0) (v 1)})
     v))
 
-(defn resolve-attr-refs [[db m :as state] a v ^Schema a-schema]
-  (let [[db newv]
-        (if (many? a-schema)
-          (reduce
-           (fn [[db vs :as state] v]
-             (let [v-resolved (handle-lookup-ref db v)]
-               (if (map? v-resolved)
-                 (let [sub-entity (resolve-map-e db v-resolved)]
-                   [(add-map db sub-entity)
-                    (set-replace vs v (:db/id sub-entity))])
-                 state)))
-           [db v]
-           v)
-          (let [v-resolved (handle-lookup-ref db v)]
-            (if (map? v-resolved)
-              (let [sub-entity (resolve-map-e db v-resolved)]
-                [(add-map db sub-entity)
-                 (:db/id sub-entity)])
-              [db v-resolved])))]
-    (if (identical? v newv)
-      state
-      [db (assoc m a newv)])))
+(defn handle-nested-entities [db v ^Schema a-schema]
+  (if (many? a-schema)
+    (reduce
+     (fn [[db vs :as state] v]
+       (let [v-resolved (handle-lookup-ref db v)]
+         (if (map? v-resolved)
+           (let [sub-entity (resolve-map-e db v-resolved)]
+             [(add-map db sub-entity)
+              (set-replace vs v (:db/id sub-entity))])
+           state)))
+     [db v]
+     v)
+    (let [v-resolved (handle-lookup-ref db v)]
+      (if (map? v-resolved)
+        (let [sub-entity (resolve-map-e db v-resolved)]
+          [(add-map db sub-entity)
+           (:db/id sub-entity)])
+        [db v-resolved]))))
 
 (defn- add-map
   [db m]
   (let [{:as m e :db/id} (resolve-map-e db m)]
-    (let [pm (get-entity db e)
+    (let [prev-m (get-entity db e)
           db-schema (:schema db)
-          [db m] (reduce-kv (fn [state a v]
-                              (let [a-schema (db-schema a default-schema)]
-                                (-> state
-                                    (cond-> (ref? a-schema)
-                                            (resolve-attr-refs a v a-schema))
-                                    (add-attr-index e a (get pm a) a-schema))))
-                            [db m]
-                            m)]
-      (fast/update! db :eav assoc! e (cond->> m pm (merge pm))))))
+          [db new-m] (reduce-kv (fn [[db new-m] a v]
+                                  (let [a-schema (db-schema a default-schema)
+                                        ;; if ref attribute, handle inline/nested entities
+                                        [db new-v] (if (ref? a-schema)
+                                                     (handle-nested-entities db v a-schema)
+                                                     [db v])
+                                        ;; update indexes
+                                        db (add-attr-index db e a new-v (get prev-m a) a-schema)
+                                        value-present (if (many? a-schema)
+                                                        (seq new-v)
+                                                        (some? new-v))]
+                                    [db (if value-present
+                                          (assoc new-m a new-v)
+                                          (dissoc new-m a))]))
+                                [db (or prev-m m)]
+                                m)]
+      (fast/update! db :eav assoc! e new-m))))
 
 (defn- commit-tx [db tx]
   (if (vector? tx)

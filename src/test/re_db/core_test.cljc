@@ -8,49 +8,6 @@
             [re-db.test-helpers :refer [throws]]
             [re-db.core :as db]))
 
-(defn ->clj [x] #?(:cljs (js->clj x) :clj x))
-
-(defn db= [& dbs]
-  (apply = (map #(dissoc % :tx) dbs)))
-
-(deftest datom-tx
-
-  (let [schema {:authors {:db/valueType :db.type/ref
-                          :db/cardinality :db.cardinality/many}
-                :pet {:db/valueType :db.type/ref}}
-        tx [{:db/id "fred"
-             :name "Fred"
-             :pet {:db/id "fido" :name "Fido"}}
-            {:db/id "mary"
-             :name "Mary"}
-            {:db/id "1" :authors #{"fred" "mary"}}
-            ;[:db/add "1" :authors #{"fred" "mary"}]
-            [:db/add "1" :name "One"]]
-        conn (d/create-conn schema)
-        tx-report (d/transact! conn tx)]
-
-    (is (db= @conn
-             @(doto (d/create-conn schema)
-                (d/transact! [[:db/datoms (:datoms tx-report)]])))
-        :db/datoms)
-
-    (is (db= @(d/create-conn schema)
-             (let [conn (d/create-conn schema)
-                   {:keys [datoms]} (d/transact! conn tx)]
-               (d/transact! conn [[:db/datoms-reverse datoms]])
-               @conn)
-             @(doto (d/create-conn schema)
-                (d/transact! [[:db/datoms (:datoms tx-report)]
-                              [:db/datoms-reverse (:datoms tx-report)]])))
-        :db/datoms-reverse)
-
-    ;(read/touch db (read/get db "fred"))
-    (is (= {:db/id "fred"
-            :name "Fred"
-            :_authors #{"1"}
-            :pet "fido"} (read/touch (read/entity conn "fred")))
-        "refs with cardinality-many")))
-
 (deftest upserts
   (let [db (doto (d/create-conn {:email {:db/unique :db.unique/identity}
                                  :friend {:db/valueType :db.type/ref}
@@ -99,6 +56,51 @@
 
 
     ))
+
+(defn ->clj [x] #?(:cljs (js->clj x) :clj x))
+
+(defn db= [& dbs]
+  (apply = (map #(dissoc % :tx) dbs)))
+
+(deftest datom-tx
+
+  (let [schema {:authors {:db/valueType :db.type/ref
+                          :db/cardinality :db.cardinality/many}
+                :pet {:db/valueType :db.type/ref}}
+        tx [{:db/id "fred"
+             :name "Fred"
+             :pet {:db/id "fido" :name "Fido"}}
+            {:db/id "mary"
+             :name "Mary"}
+            {:db/id "1" :authors #{"fred" "mary"}}
+            ;[:db/add "1" :authors #{"fred" "mary"}]
+            [:db/add "1" :name "One"]]
+        conn (d/create-conn schema)
+        tx-report (d/transact! conn tx)]
+
+    (is (db= @conn
+             @(doto (d/create-conn schema)
+                (d/transact! [[:db/datoms (:datoms tx-report)]])))
+        :db/datoms)
+
+    (is (db= @(d/create-conn schema)
+             (let [conn (d/create-conn schema)
+                   {:keys [datoms]} (d/transact! conn tx)]
+               (d/transact! conn [[:db/datoms-reverse datoms]])
+               @conn)
+             @(doto (d/create-conn schema)
+                (d/transact! [[:db/datoms (:datoms tx-report)]
+                              [:db/datoms-reverse (:datoms tx-report)]])))
+        :db/datoms-reverse)
+
+    ;(read/touch db (read/get db "fred"))
+    (is (= {:db/id "fred"
+            :name "Fred"
+            :_authors #{"1"}
+            :pet "fido"} (read/touch (read/entity conn "fred")))
+        "refs with cardinality-many")))
+
+
 
 (deftest lookup-refs
   (let [db (doto (d/create-conn {:email {:db/unique :db.unique/identity}
@@ -198,6 +200,9 @@
 
     (is (empty? (read/ids-where conn [[:dog "herman"]]))
         "Setting a value to nil is equivalent to retracting it")
+
+    (is (not (contains? @(read/entity conn "me") :dog))
+        "Nil in a map removes ")
 
     #_(is (= :error (try (d/transact! conn [[:db/add "fred" :db/id "some-other-id"]])
                          nil
