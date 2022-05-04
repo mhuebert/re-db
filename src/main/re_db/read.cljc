@@ -254,8 +254,8 @@
    ILookup
    (-lookup [this a]
      (-resolve-e! this conn e)
-     (if (= :db/id a)
-       e
+     (case a
+       :db/id e
        (let [is-reverse (reverse-attr? a)
              a (cond-> a is-reverse forward-attr)
              db @conn
@@ -305,7 +305,7 @@
           (read-index! conn :vae id)))))))
 
 (defn entity [conn id]
-  (Entity. conn (resolve-e conn id) false nil))
+  (Entity. conn (or (resolve-e conn id) id) false nil))
 
 (defn listen-conn [conn]
   #?(:cljs (doto conn (db/listen! ::read re-db.reagent/invalidate-readers!))
