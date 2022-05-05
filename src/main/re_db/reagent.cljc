@@ -1,9 +1,8 @@
 (ns re-db.reagent
-  (:require #?@(:cljs [[reagent.ratom :as ratom]])
-            [applied-science.js-interop :as j]
+  (:require [applied-science.js-interop :as j]
             [re-db.core :as db]
             [re-db.fast :as fast]
-            [re-db.util :as util])
+            [re-db.reactive :as r])
   #?(:cljs (:require-macros re-db.reagent)))
 
 (defmacro read-index! [conn index & args]
@@ -13,88 +12,16 @@
       `(~'re-db.reagent/cached-index-read ~conn ~e ~a ~v (fn [] ~expr))
       expr)))
 
-#?(:clj (def ^:dynamic *ratom-context* nil))
+(defn captured-patterns []
+  (->> @r/*captured-derefs*
+       (into #{} (map (comp :pattern meta)))))
 
-(defn ratom-context [] #?(:cljs ratom/*ratom-context* :clj *ratom-context*))
+(defn make-reader [conn e a v read-fn]
+  (r/make-reaction read-fn
+                   :on-dispose #?(:cljs (swap! conn update-in [:cached-readers e a] dissoc v))
 
-(defprotocol IReaction
-  (recompute! [reader])
-  (invalidate! [reader tx]))
-
-;; modified from reagent.ratom/RAtom
-(defprotocol ICaptureWatchers
-  (capture! [context watcher]))
-
-(util/support-clj-protocols
-  (deftype Reader [!watchers
-                   !on-unwatched
-                   e a v
-                   f
-                   !value
-                   !tx]
-    IReaction
-    (recompute! [this]
-      (vreset! !value (f)))
-    (invalidate! [this next-tx]
-     ;; only trigger! once per transaction
-      (when-not (== next-tx @!tx)
-        (vreset! !tx next-tx)
-        (let [newval (recompute! this)]
-          (reduce-kv (fn [_ k f] (f k this #?(:cljs js/undefined :clj nil) newval) nil) nil @!watchers))))
-    IWatchable
-    #?(:cljs
-       (-notify-watches [this old new] (throw (js/Error. "-notify-watches Unsupported"))))
-    (-add-watch [this key f]
-      (vswap! !watchers assoc key f))
-    (-remove-watch [this key]
-      (vswap! !watchers dissoc key)
-      (when (empty? @!watchers)
-        (@!on-unwatched this)))
-    IReset
-    (-reset! [this newval] (vreset! !value newval))
-    IDeref
-    (-deref [this] @!value)
-    ICaptureWatchers
-    (capture! [context watcher]
-      (prn ::reader-does-not-capture-readers))))
-
-#?(:cljs
-   (extend-protocol ICaptureWatchers
-     object
-     (capture! [^ratom/Reaction this watchable]
-       (j/!update this .-captured
-                  (fn [^array c]
-                    (if c
-                      (j/push! c watchable)
-                      (array watchable)))))))
-
-#?(:cljs
-   ;; just for debugging
-   (defn captured-patterns []
-
-     ;; reagent internals
-     (->> (j/get (ratom-context) .-captured)
-          (reduce (fn [patterns ^Reader i]
-                    (cond-> patterns
-                            (instance? Reader i)
-                            (conj [(.-e i) (.-a i) (.-v i)])))
-                  #{}))))
-
-(defn make-reader [conn e a v read-fn value]
-  (->Reader (volatile! {})
-            (volatile!
-             (fn [^Reader reader]
-               #?(:cljs
-                  (js/setTimeout
-                   #(when (empty? @(.-!watchers reader))
-                      (swap! conn update-in [:cached-readers e a] dissoc v))
-                   100))))
-            e
-            a
-            v
-            read-fn
-            (volatile! value)
-            (volatile! nil)))
+                   ;; only in dev?
+                   :meta {:pattern [e a v]}))
 
 (defn cached-index-read [conn e a v read-fn]
   ;; evaluates & returns read-fn, caching the value,
@@ -104,13 +31,10 @@
   ;; there can only be one reader per e-a-v pattern,
   ;; it is reused among consumers and cleaned up when
   ;; no longer observed.
-  (if-some [context (ratom-context)]
-    (let [reader (or (fast/get-some-in @conn [:cached-readers e a v])
-                     (let [reader (make-reader conn e a v read-fn (read-fn))]
-                       (swap! conn assoc-in [:cached-readers e a v] reader)
-                       reader))]
-      (do (capture! context reader)
-          @reader))
+  (if (r/owner)
+    @(or (fast/get-some-in @conn [:cached-readers e a v])
+         (doto (make-reader conn e a v read-fn)
+           (->> (swap! conn assoc-in [:cached-readers e a v]))))
     (read-fn)))
 
 (defn keys-when [m vpred]
@@ -129,15 +53,16 @@
           :keys [datoms]
           {:as db-after :keys [cached-readers schema]} :db-after}]
   (when cached-readers
-    (let [tx (:tx db-after)
-          many? (many-a? schema)
+    (let [many? (many-a? schema)
           ref? (ref-a? schema)
-          found! (fn [^Reader reader]
-                   (some-> reader (invalidate! tx)))
+          !found (volatile! #{})
+          found! #(some->> % (vswap! !found conj))
           trigger-patterns! (j/fn [^js [e a v pv :as datom]]
 
                               ;; triggers patterns for datom, with "early termination"
                               ;; for paths that don't lead to any invalidators.
+
+                              ;; TODO - dissoc-in found-readers reduce repetitive lookups
 
                               (when-let [e (cached-readers e)]
                                 ;; e__
@@ -165,4 +90,5 @@
                                         (found! (_a pv))))
                                     ;; _a_
                                     (found! (_a nil))))))]
-      (doseq [datom datoms] (trigger-patterns! datom)))))
+      (doseq [datom datoms] (trigger-patterns! datom))
+      (doseq [reader @!found] (r/invalidate! reader)))))

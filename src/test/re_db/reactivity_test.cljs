@@ -7,17 +7,29 @@
             [re-db.reagent :refer [read-index! captured-patterns]]
             [re-db.reagent.local-state :refer [local-state]]
             [re-db.reagent.context :as context]
+            [re-db.reactive :as r]
             [re-db.schema :as schema]
             [reagent.core :as reagent :refer [track!]]
             [reagent.dom :as rdom]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [reagent.ratom :as ratom]
+            re-db.integrations.reagent)
   (:require-macros [re-db.test-helpers :refer [throws]]))
 
 (def dom-root (or (js/document.getElementById "rtest")
                   (let [el (-> (js/document.createElement "div")
-                                   (j/!set :id "rtest"))]
-                        (js/document.body.appendChild el)
-                        el)))
+                               (j/!set :id "rtest"))]
+                    (js/document.body.appendChild el)
+                    el)))
+
+(deftest reagent-compat
+  (let [a (r/atom 0)
+        r (ratom/make-reaction (fn [] @a) :auto-run true)]
+    (is (= @r 0))
+    (swap! a inc)
+    (is (= @r 1))
+    (swap! a inc)
+    (is (= @r 2))))
 
 (deftest reagent-state
   (api/with-conn {}
@@ -43,16 +55,16 @@
   (async done
     (let [conn (api/create-conn {})
           component (fn []
-                             (context/bind-conn conn
-                               [:div {:ref (fn [el]
-                                             (when el
-                                               (js/setTimeout
-                                                (fn []
-                                                  (is (identical? (context/element-conn el) conn)
-                                                      "Conn is bound via dom node ancestry")
-                                                  (prn 1)
-                                                  (done))
-                                                100)))}]))]
+                      (context/bind-conn conn
+                                         [:div {:ref (fn [el]
+                                                       (when el
+                                                         (js/setTimeout
+                                                          (fn []
+                                                            (is (identical? (context/element-conn el) conn)
+                                                                "Conn is bound via dom node ancestry")
+                                                            (prn 1)
+                                                            (done))
+                                                          100)))}]))]
       (rdom/render [component] dom-root))))
 
 (deftest reagent-bind-context
@@ -67,10 +79,10 @@
                         (done)
                         [:div])})]
       (rdom/render (context/bind-conn conn
-                     (do
-                       (is (= conn (re-db.api/conn))
-                           "Conn is bound via dynamic var")
-                       [component])) dom-root))))
+                                      (do
+                                        (is (= conn (re-db.api/conn))
+                                            "Conn is bound via dynamic var")
+                                        [component])) dom-root))))
 
 (defonce rx (atom nil))
 
@@ -83,9 +95,9 @@
 (api/with-conn {}
 
   (start (api/bound-fn []
-                       (prn :name/first (api/get :matt :name/first))
-                       (prn :name/last (api/get :matt :name/last))
-                       (prn :pets (api/get :matt :pets))))
+           (prn :name/first (api/get :matt :name/first))
+           (prn :name/last (api/get :matt :name/last))
+           (prn :pets (api/get :matt :pets))))
 
   (api/transact! [{:db/id :matt
                    :name/first "Matt"
@@ -97,97 +109,90 @@
 (def eval-count (atom 0))
 
 (deftest listen
-  (api/with-conn {:x schema/ref}
-    (let [log (atom [])]
-      (reagent/track! #(do (read-index! (api/conn) :eav 1)
-                           (swap! log conj 1)))
-      (reagent/track! #(do (read-index! (api/conn) :eav 2 :a)
-                           (swap! log conj 2)))
-      (reagent/track! #(do (read-index! (api/conn) :vae 99)
-                           (swap! log conj 3)))
+  (r/session
+   (api/with-conn {:x schema/ref}
+     (let [log (atom [])]
+       (r/reaction! (read-index! (api/conn) :eav 1)
+                    (swap! log conj 1))
+       (r/reaction! (read-index! (api/conn) :eav 2 :a)
+                    (swap! log conj 2))
+       (r/reaction! (read-index! (api/conn) :vae 99)
+                    (swap! log conj 3))
 
 
-      (api/transact! [[:db/add 1 :name "a"]])
-      (reagent/flush)
-      (is (= @log [1 2 3 1]))
+       (api/transact! [[:db/add 1 :name "a"]])
+       (is (= @log [1 2 3 1]))
 
-      (api/transact! [[:db/add 2 :b "b"]])
-      (reagent/flush)
-      (is (= @log [1 2 3 1]))
+       (api/transact! [[:db/add 2 :b "b"]])
+       (is (= @log [1 2 3 1]))
 
-      (api/transact! [[:db/add 2 :a "a"]])
-      (reagent/flush)
-      (is (= @log [1 2 3 1 2]))
+       (api/transact! [[:db/add 2 :a "a"]])
+       (is (= @log [1 2 3 1 2]))
 
-      (api/transact! [[:db/add 3 :x 99]])
-      (reagent/flush)
-      (is (= @log [1 2 3 1 2 3]))
-
-      )))
+       (api/transact! [[:db/add 3 :x 99]])
+       (is (= @log [1 2 3 1 2 3]))))))
 
 (deftest lookup-patterns
-  (api/with-conn {:a/id {:db/unique :db.unique/identity}
-                  :b/id {:db/unique :db.unique/identity}}
-    (testing
-     (let [get-patterns (fn [f]
-                          (let [res (atom nil)
-                                rx (reagent/track! (fn [] (f) (reset! res (captured-patterns))))]
-                            (reagent/flush)
-                            (reagent/dispose! rx)
-                            @res))]
+    (api/with-conn {:a/id {:db/unique :db.unique/identity}
+                    :b/id {:db/unique :db.unique/identity}}
+      (testing
+       (let [get-patterns (fn [f]
+                            (let [res (atom nil)
+                                  rx (r/reaction! (f) (reset! res (captured-patterns)))]
+                              (reagent/flush)
+                              (reagent/dispose! rx)
+                              @res))]
 
-       (are [f patterns]
-         (= (get-patterns f) patterns)
+         (are [f patterns]
+           (= (get-patterns f) patterns)
 
-         #(api/get 1)
-         #{[1 nil nil]}
+           #(api/get 1)
+           #{[1 nil nil]}
 
-         #(api/get [:a/id 1])
-         #{[nil :a/id 1]}
+           #(api/get [:a/id 1])
+           #{[nil :a/id 1]}
 
-         #(api/get [:a/id nil])
-         #{}
+           #(api/get [:a/id nil])
+           #{}
 
-         #(api/get [:a/id [:b/id 1]])
-         #{[nil :b/id 1]}
+           #(api/get [:a/id [:b/id 1]])
+           #{[nil :b/id 1]}
 
-         #(api/transact! [{:db/id "b" :b/id 1}])
-         #{}
+           #(api/transact! [{:db/id "b" :b/id 1}])
+           #{}
 
-         #(api/get [:a/id [:b/id 1]])
-         #{[nil :a/id "b"]
-           [nil :b/id 1]}))))
+           #(api/get [:a/id [:b/id 1]])
+           #{[nil :a/id "b"]
+             [nil :b/id 1]}))))
 
-  (testing "lookup ref pattern"
+    (testing "lookup ref pattern"
 
-    (api/with-conn {}
-      (throws (api/get [:person/children "peter"])
-              "Lookup ref must be on unique attribute"))
+      (api/with-conn {}
+        (throws (api/get [:person/children "peter"])
+                "Lookup ref must be on unique attribute"))
 
-    (api/with-conn {:person/children schema/unique-value}
+      (api/with-conn {:person/children schema/unique-value}
 
-      (throws (api/transact! [[:db/add "mary" :person/children #{"peter"}]
-                              [:db/add "sally" :person/children #{"peter"}]])
-              "Enforced uniqueness in cardinality/many")
+        (throws (api/transact! [[:db/add "mary" :person/children #{"peter"}]
+                                [:db/add "sally" :person/children #{"peter"}]])
+                "Enforced uniqueness in cardinality/many")
 
-      (is (nil? (api/get [:person/children "peter"]))
-          "Lookup ref returns nil when attr is unique but no data found"))
+        (is (nil? (api/get [:person/children "peter"]))
+            "Lookup ref returns nil when attr is unique but no data found"))
 
-    (api/with-conn {:person/children (merge schema/many
-                                            schema/unique-value)}
+      (api/with-conn {:person/children (merge schema/many
+                                              schema/unique-value)}
 
-      (api/transact! [{:db/id "peter" :name "Peter"}])
+        (api/transact! [{:db/id "peter" :name "Peter"}])
 
-      (let [log (atom 0)]
-        (reagent/track!
-         (api/bound-fn []
-                       (api/get [:person/children "peter"])
-                       (swap! log inc)))
-        (reagent/flush)
-        (is (= 1 @log))
-        (api/transact! [[:db/add "mary" :person/children #{"peter"}]])
-        (reagent/flush)
-        (is (= 2 @log))))))
+        (let [log (atom 0)]
+          @(r/make-reaction
+            (api/bound-fn []
+              (api/get [:person/children "peter"])
+              (swap! log inc)))
+          (is (= 1 @log))
+          (api/transact! [[:db/add "mary" :person/children #{"peter"}]])
+          (is (= 2 @log))))))
 
 
 (deftest read-from-reaction

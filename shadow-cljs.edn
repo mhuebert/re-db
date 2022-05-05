@@ -1,4 +1,4 @@
-{:deps {:aliases [:bench :clerk :dev :test]}
+{:deps {:aliases [:bench :clerk :datomic :test]}
  :dev-http {8008 "public"}
  :builds
  {:test

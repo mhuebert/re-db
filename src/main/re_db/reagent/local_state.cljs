@@ -3,11 +3,10 @@
             [re-db.core :as db]
             [reagent.ratom :as ratom]
             [re-db.api :as api]
-            [re-db.read :as read]
             [re-db.reagent :refer [read-index!]]
             [reagent.core :as reagent]
-            [reagent.impl.component :refer [*current-component* component-name]])
-  (:require-macros [re-db.reagent.local-state :as macros]))
+            [re-db.reactive :as r])
+  (:require-macros re-db.reagent.local-state))
 
 ;; an entity-atom always causes a dependency on the "whole entity"
 
@@ -54,5 +53,5 @@
            key :singleton
            conn ::api/conn}}]
   (let [e (or id {location key})]
-    (ratom/add-on-dispose! ratom/*ratom-context* #(some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]])))
+    (ratom/add-on-dispose! ratom/*ratom-context* (fn [_] (some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]]))))
     (EAtom. conn e default false)))

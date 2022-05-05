@@ -67,7 +67,7 @@
 (defmacro defmemo-1 [name fsym]
   (if (:ns &env)
     `(let [cache# (volatile! {})]
-       (defn ~name [x#]
+       (defn ~(with-meta name {:tag 'function}) [x#]
          (if-some [res# (@cache# x#)]
            res#
            (let [res# (~fsym x#)]

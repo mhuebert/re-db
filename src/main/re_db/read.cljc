@@ -3,8 +3,7 @@
   (:require [re-db.core :as db]
             [re-db.fast :as fast]
             [re-db.reagent :as re-db.reagent :refer [read-index!]]
-            [re-db.util :as util :refer [guard]]
-            [re-db.schema :as schema]
+            [re-db.util :as util]
             #?(:cljs [reagent.core :as reagent])
             [clojure.core :as core]
             [clojure.set :as set]))
@@ -57,20 +56,6 @@
   ([conn e attr not-found]
    (core/get (peek conn e) attr not-found)))
 
-;; attribute reversal
-
-(defn reverse-attr? [a]
-  (= \_ (.charAt (name a) 0)))
-(defn reverse-attr* [attr]
-  (keyword (namespace attr) (str "_" (name attr))))
-
-(fast/defmemo-1 reverse-attr reverse-attr*)
-
-(defn forward-attr* [attr]
-  (keyword (namespace attr) (subs (name attr) 1)))
-
-(fast/defmemo-1 forward-attr forward-attr*)
-
 ;; higher-level index lookups that resolve based on schema
 ;; and provide non-indexed backoffs
 
@@ -119,7 +104,7 @@
   ([conn {v :db/id :as m}]
    (reduce-kv
     (fn [m a e]
-      (assoc m (reverse-attr a) e))
+      (assoc m (util/reverse-attr a) e))
     m
     ;; TODO - support this pattern
     (read-index! conn :vae v))))
@@ -135,8 +120,8 @@
              recursions (if (= 0 recurse) false recurse)
              _ (assert (or (contains? #{false :...} recurse) (number? recurse))
                        (str "Recursion parameter must be a number or :..., not " recurse))
-             is-reverse? (reverse-attr? a)
-             forward-a (cond-> a is-reverse? forward-attr)
+             is-reverse? (util/reverse-attr? a)
+             forward-a (cond-> a is-reverse? util/forward-attr)
              ^db/Schema a-schema (db/get-schema db forward-a)
              is-many (db/many? a-schema)
              ;; ids of related entities
@@ -243,8 +228,8 @@
      (-resolve-e! this conn e)
      (case a
        :db/id e
-       (let [is-reverse (reverse-attr? a)
-             a (cond-> a is-reverse forward-attr)
+       (let [is-reverse (util/reverse-attr? a)
+             a (cond-> a is-reverse util/forward-attr)
              db @conn
              a-schema (db/get-schema db a)
              is-ref (db/ref? a-schema)]
@@ -275,7 +260,7 @@
              db @conn]
          (let [with-reverse-refs
                (reduce-kv
-                (fn [m a e] (assoc m (reverse-attr a) (mapv #(entity conn %) e)))
+                (fn [m a e] (assoc m (util/reverse-attr a) (mapv #(entity conn %) e)))
                 m
                 (read-index! conn :vae (:db/id m)))]
            (reduce-kv (fn [m a v]
@@ -287,7 +272,7 @@
                             m))) with-reverse-refs m)))
        (let [{:keys [db/id] :as m} @entity*]
          (reduce-kv
-          (fn [m a e] (assoc m (reverse-attr a) e))
+          (fn [m a e] (assoc m (util/reverse-attr a) e))
           m
           (read-index! conn :vae id)))))))
 
