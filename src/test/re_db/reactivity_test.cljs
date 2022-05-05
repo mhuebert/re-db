@@ -37,7 +37,8 @@
           counter (atom 0)
           conn (api/conn)
           component (fn [{:keys [app/id]}]
-                      (let [!state (local-state :conn conn
+                      (let [!state (local-state ratom/*ratom-context*
+                                                :conn conn
                                                 :default {:i (swap! counter inc)}
                                                 :key id)]
                         (swap! !state assoc :id-cap (str/capitalize id))

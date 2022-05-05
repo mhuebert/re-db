@@ -83,7 +83,6 @@
      (handle-new-patterns! ~conn r/*owner* new-patterns#)
      value#))
 
-
 (defmacro once
   "Evaluates body with `db` bound, but without logging patterns (non-reactive)"
   [db & body]

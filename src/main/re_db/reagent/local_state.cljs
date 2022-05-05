@@ -1,11 +1,10 @@
 (ns re-db.reagent.local-state
   (:require [applied-science.js-interop :as j]
             [re-db.core :as db]
-            [reagent.ratom :as ratom]
             [re-db.api :as api]
-            [re-db.reagent :refer [read-index!]]
-            [reagent.core :as reagent]
-            [re-db.reactive :as r])
+            [re-db.read :as read]
+            [re-db.reactive :as r]
+            [re-db.util :as util])
   (:require-macros re-db.reagent.local-state))
 
 ;; an entity-atom always causes a dependency on the "whole entity"
@@ -13,15 +12,12 @@
 (defn- resolve-conn [conn]
   (if (keyword? conn) (api/conn) conn))
 
-(deftype EAtom [conn e default ^:mutable ^:volatile-mutable modified?]
+(deftype EAtom [conn e default]
   IDeref
   (-deref [this]
-    (if ^boolean modified?
-      (read-index! (resolve-conn conn) :eav ::local-state e)
-      default))
+    (util/some-or (read/get (resolve-conn conn) ::local-state e) default))
   IReset
   (-reset! [this new-value]
-    (set! modified? true)
     (db/transact! (resolve-conn conn) [[:db/add ::local-state e new-value]]))
   ISwap
   (-swap! [this f] (reset! this (f @this)))
@@ -31,27 +27,20 @@
 
 (defn snapshot
   "Read value of EAtom from a db snapshot (point-in-time)"
-  [!state db]
-  (get (db/get-entity db ::local-state) (.-e !state)))
+  [e-atom db]
+  (get (db/get-entity db ::local-state) (.-e e-atom)))
 
 ;; a string key where we'll memoize the cursor per-component-instance
 (def ratom-cache-key (str ::local-state))
-
-;; memoize result of `initial-val-fn` on current ratom context
-(defn ratom-memo [component key initial-val-fn]
-  (let [!cache (j/get component ratom-cache-key (doto (volatile! {})
-                                                  (->> (j/!set component ratom-cache-key))))]
-    (or (@!cache key)
-        (doto (initial-val-fn) (->> (vswap! !cache assoc key))))))
 
 (defn local-state*
   "Return a local-state cursor for a Reagent component.
     :key      - to differentiate instances of this component
     :default  - initial value"
-  [& {:keys [key default component location conn id]
-      :or {component (reagent/current-component)
-           key :singleton
-           conn ::api/conn}}]
+  [owner & {:keys [key default location conn id]
+            :or {key :singleton
+                 conn :re-db.api/conn}}]
   (let [e (or id {location key})]
-    (ratom/add-on-dispose! ratom/*ratom-context* (fn [_] (some-> (resolve-conn conn) (db/transact! [[:db/retract ::local-state e]]))))
-    (EAtom. conn e default false)))
+    (r/add-on-dispose! owner (fn [_] (some-> (resolve-conn conn)
+                                             (db/transact! [[:db/retract ::local-state e]]))))
+    (EAtom. conn e default)))

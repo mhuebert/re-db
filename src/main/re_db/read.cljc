@@ -40,7 +40,7 @@
    (get conn e attr nil))
   ([conn e attr not-found]
    (if-some [id (resolve-e conn e)]
-     (or (read-index! conn :eav id attr) not-found)
+     (util/some-or (read-index! conn :eav id attr) not-found)
      not-found)))
 
 ;; non-reactive alternative
