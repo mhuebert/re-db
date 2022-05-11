@@ -1,94 +1,83 @@
 (ns re-db.api
-  (:refer-clojure :exclude [get get-in contains? select-keys namespace clone bound-fn])
-  (:require [re-db.core :as d]
-            [re-db.read :as read]
-            [re-db.macros :as m])
+  (:refer-clojure :exclude [get get-in contains? select-keys namespace bound-fn])
+  (:require [re-db.in-memory :as d]
+            [re-db.protocols :as rp]
+            [re-db.patterns :as patterns :refer [*conn*]]
+            [re-db.pull :as pull]
+            [re-db.entity :as entity]
+            [re-db.query :as query]
+            [re-db.where :as where]
+            [re-db.macros :as m :refer [defpartial]]
+            [re-db.util :as util])
   #?(:cljs (:require-macros re-db.api)))
 
-(defmacro with-conn
-  "Evaluates body with *current-conn* bound to `conn`, which may be a connection or a schema"
-  [conn & body]
-  `(binding [~'re-db.api/*current-conn* (~'re-db.api/->conn ~conn)]
-     ~@body))
+(defn listen-conn [conn]
+  (doto conn
+    (d/listen! ::read (fn [conn report] (patterns/invalidate-report-datoms! conn report rp/doto-triples)))))
 
-(defmacro branch
-  "Evaluates body with *current-conn* bound to a fork of `conn`. Returns a transaction."
+(def create-conn (comp listen-conn d/create-conn))
+
+(defmacro with-conn
+  "Evaluates body with *conn* bound to `conn`, which may be a connection or a schema"
   [conn & body]
-  (let [[conn body] (if (or (symbol? conn) (map? conn))
-                      [conn body]
-                      [('re-db.api/conn) (cons conn body)])]
-    `(binding [~'re-db.api/*current-conn* (~'re-db.api/clone ~conn)
-               ~'re-db.core/*branch-tx-log* (atom [])]
-       (let [db-before# @~'re-db.api/*current-conn*
-             val# (do ~@body)
-             txs# @~'re-db.core/*branch-tx-log*]
-         (with-meta {:db-before db-before#
-                     :db-after @~'re-db.api/*current-conn*
-                     :datoms (into [] (mapcat :datoms) txs#)}
-                    {:value val#})))))
+  `(patterns/with-conn ~conn ~@body))
 
 (defmacro bound-fn
   "Define an anonymous function where *conn* is bound at definition-time"
   [& body]
   `(let [f# (~'fn ~@body)
-         conn# (~'re-db.api/conn)]
+         conn# *conn*]
      (fn [& args#]
-       (binding [~'re-db.api/*current-conn* conn#]
+       (binding [*conn* conn#]
          (apply f# args#)))))
 
-(defonce ^:dynamic *current-conn* (read/create-conn {}))
+(defn entity [id] (entity/entity id))
 
-(defn conn [] *current-conn*)
+(defn get
+  "Read entity or attribute reactively"
+  ([e]
+   (some-> (patterns/resolve-e e) patterns/eav))
+  ([e a]
+   (some-> (patterns/resolve-e e) (patterns/eav a)))
+  ([e a not-found]
+   (util/some-or (get e a) not-found)))
 
-(def create-conn read/create-conn)
+(defn where [& clauses] (where/where clauses))
 
-(defn ->conn
-  "Accepts a conn or a schema, returns conn"
-  [conn-or-schema]
-  (if (map? conn-or-schema)
-    (read/create-conn conn-or-schema)
-    conn-or-schema))
+(m/defpartial pull {:f pull/pull}
+  ([pull-expr])
+  ([entity pull-expr]))
 
-(defn clone
-  "Creates a copy of conn (without listeners)"
-  [conn]
-  (read/listen-conn (atom (dissoc @conn :cached-readers))))
-
-(m/defpartial entity {:f '(read/entity (conn) _)}
-  [id])
-
-(m/defpartial get {:f '(read/get (conn) _)}
-  ([id])
-  ([id attr])
-  ([id attr not-found]))
-
-(m/defpartial ids-where {:f '(read/ids-where (conn) _)}
-  [qs])
-
-(m/defpartial where {:f '(read/where (conn) _)}
-  [qs])
-
-(m/defpartial touch {:f '(read/touch _)}
-  ([entity])
-  ([entity entity-refs?]))
-
-(m/defpartial pull {:f '(read/pull (conn) _)}
-  [id pull])
-
-(m/defpartial transact! {:f '(d/transact! (conn) _)}
+(m/defpartial transact! {:f (d/transact! *conn* _)}
   ([txs])
   ([txs opts]))
 
-(m/defpartial listen {:f '(read/listen (conn) _)}
-  [callback])
-
-(def merge-schema! (partial d/merge-schema! (conn)))
+(m/defpartial merge-schema! {:f '(d/merge-schema! *conn* _)}
+  [schema])
 
 (defn bind
   "Binds a conn for evaluation of function `f`"
   ([f]
-   (bind (conn) f))
+   (bind *conn* f))
   ([conn f]
    (fn [& args]
-     (binding [*current-conn* conn]
+     (binding [*conn* conn]
        (apply f args)))))
+
+(defmacro branch
+  "Evaluates body with *conn* bound to a fork of `conn`. Returns a transaction."
+  [conn & body]
+  (let [[conn body] (if (or (symbol? conn) (map? conn))
+                      [conn body]
+                      ['re-db.patterns/*conn* (cons conn body)])]
+    `(binding [*conn* (patterns/clone ~conn)
+               ~'re-db.in-memory/*branch-tx-log* (atom [])]
+       (let [db-before# @*conn*
+             val# (do ~@body)
+             txs# @~'re-db.in-memory/*branch-tx-log*]
+         (with-meta {:db-before db-before#
+                     :db-after @*conn*
+                     :datoms (into [] (mapcat :datoms) txs#)}
+                    {:value val#})))))
+
+(defn conn [] *conn*)

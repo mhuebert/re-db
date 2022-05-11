@@ -1,5 +1,5 @@
 (ns re-db.util
-  (:refer-clojure :exclude [random-uuid])
+  (:refer-clojure :exclude [random-uuid boolean])
   (:require [clojure.set :as set]
             [applied-science.js-interop :as j]
             [clojure.string :as str]
@@ -148,3 +148,37 @@
              `(if-some [v# ~(first forms)]
                 v#
                 ~out)))))
+
+;; copied from https://github.com/clojure/core.incubator/blob/4f31a7e176fcf4cc2be65589be113fc082243f5b/src/main/clojure/clojure/core/incubator.clj#L63
+(defn dissoc-in
+  "Dissociates an entry from a nested associative structure returning a new
+  nested structure. keys is a sequence of keys. Any empty maps that result
+  will not be present in the new structure."
+  [m [k & ks :as keys]]
+  (if ks
+    (if-let [nextmap (get m k)]
+      (let [newmap (dissoc-in nextmap ks)]
+        (if (seq newmap)
+          (assoc m k newmap)
+          (dissoc m k)))
+      m)
+    (dissoc m k)))
+
+;; modified from https://github.com/clojure/core.incubator/blob/4f31a7e176fcf4cc2be65589be113fc082243f5b/src/main/clojure/clojure/core/incubator.clj#L63
+(defn disj-in
+  "Removes value from set at path. Any empty sets or maps that result
+  will not be present in the new structure."
+  [m [k & ks :as path] v]
+  (if ks
+    (if-let [nextmap (get m k)]
+      (let [newmap (disj-in nextmap ks v)]
+        (if (seq newmap)
+          (assoc m k newmap)
+          (dissoc m k)))
+      m)
+    (let [new-set (disj (get m k) v)]
+      (if (seq new-set)
+        (assoc m k new-set)
+        (dissoc m k)))))
+
+(defmacro bool [form] (vary-meta form assoc :tag 'bool))

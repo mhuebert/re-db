@@ -1,11 +1,11 @@
-(ns re-db.reagent.local-state
+(ns re-db.in-memory.local-state
   (:require [applied-science.js-interop :as j]
-            [re-db.core :as db]
+            [re-db.in-memory :as db]
             [re-db.api :as api]
-            [re-db.read :as read]
             [re-db.reactive :as r]
+            [re-db.patterns :as patterns]
             [re-db.util :as util])
-  (:require-macros re-db.reagent.local-state))
+  (:require-macros re-db.in-memory.local-state))
 
 ;; an entity-atom always causes a dependency on the "whole entity"
 
@@ -15,7 +15,8 @@
 (deftype EAtom [conn e default]
   IDeref
   (-deref [this]
-    (util/some-or (read/get (resolve-conn conn) ::local-state e) default))
+    (let [conn (resolve-conn conn)]
+      (util/some-or (patterns/eav conn @conn ::local-state e) default)))
   IReset
   (-reset! [this new-value]
     (db/transact! (resolve-conn conn) [[:db/add ::local-state e new-value]]))

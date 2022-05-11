@@ -1,19 +1,18 @@
 (ns re-db.reactivity-test
   (:require [applied-science.js-interop :as j]
             [cljs.test :refer-macros [deftest is are testing async]]
-            [re-db.api :as api]
-            [re-db.core :as db]
-            [re-db.read :as read :refer [create-conn]]
-            [re-db.reagent :refer [read-index! captured-patterns]]
-            [re-db.reagent.local-state :refer [local-state]]
-            [re-db.reagent.context :as context]
+            [re-db.api :as api :refer [create-conn]]
+            [re-db.in-memory :as db]
+            [re-db.in-memory.local-state :refer [local-state]]
+            [re-db.integrations.reagent.context :as context]
             [re-db.reactive :as r]
             [re-db.schema :as schema]
             [reagent.core :as reagent :refer [track!]]
             [reagent.dom :as rdom]
             [clojure.string :as str]
             [reagent.ratom :as ratom]
-            re-db.integrations.reagent)
+            re-db.integrations.reagent
+            [re-db.patterns :as patterns])
   (:require-macros [re-db.test-helpers :refer [throws]]))
 
 (def dom-root (or (js/document.getElementById "rtest")
@@ -112,14 +111,14 @@
 (deftest listen
   (r/session
    (api/with-conn {:x schema/ref}
-     (let [log (atom [])]
-       (r/reaction! (read-index! (api/conn) :eav 1)
+     (let [log (atom [])
+           conn (api/conn)]
+       (r/reaction! (patterns/depend-on-triple! conn 1 nil nil)
                     (swap! log conj 1))
-       (r/reaction! (read-index! (api/conn) :eav 2 :a)
+       (r/reaction! (patterns/depend-on-triple! conn 2 :a nil)
                     (swap! log conj 2))
-       (r/reaction! (read-index! (api/conn) :vae 99)
+       (r/reaction! (patterns/depend-on-triple! conn nil nil 99)
                     (swap! log conj 3))
-
 
        (api/transact! [[:db/add 1 :name "a"]])
        (is (= @log [1 2 3 1]))
@@ -139,7 +138,7 @@
       (testing
        (let [get-patterns (fn [f]
                             (let [res (atom nil)
-                                  rx (r/reaction! (f) (reset! res (captured-patterns)))]
+                                  rx (r/reaction! (f) (reset! res (r/captured-patterns)))]
                               (reagent/flush)
                               (reagent/dispose! rx)
                               @res))]
@@ -211,37 +210,39 @@
 
 (comment
  (deftest pattern-listeners
-   (let [conn (read/create-conn {:person/children {:db/cardinality :db.cardinality/many
-                                                   :db/unique :db.unique/identity}})
-         tx-log (atom [])
-         _ (db/listen! conn ::pattern-listeners #(swap! tx-log conj (:datoms %2)))]
-     (testing "entity pattern"
-       (db/transact! conn [{:db/id "mary"
-                            :name "Mary"}
-                           [:db/add "mary"
-                            :person/children #{"john"}]
-                           {:db/id "john"
-                            :name "John"}])
+   (api/with-conn (patterns/reactive-conn
+                   {:person/children {:db/cardinality :db.cardinality/many
+                                      :db/unique :db.unique/identity}})
+     (let [conn (api/conn)
+           tx-log (atom [])
+           _ (db/listen! conn ::pattern-listeners #(swap! tx-log conj (:datoms %2)))]
+       (testing "entity pattern"
+         (db/transact! conn [{:db/id "mary"
+                              :name "Mary"}
+                             [:db/add "mary"
+                              :person/children #{"john"}]
+                             {:db/id "john"
+                              :name "John"}])
 
-       (reagent/flush)
-
-       (is (= "Mary" (read/get conn [:person/children "john"] :name))
-           "Get attribute via lookup ref")
-
-       (let [entity-call (atom 0)
-             attr-call (atom 0)]
-         (reagent/track! #(do (read/get conn "mary")
-                              (swap! entity-call inc)))
-         (reagent/track! #(do (read/get conn "mary" :name)
-                              (swap! attr-call inc)))
-         (is (= 1 @entity-call @attr-call))
-         (db/transact! conn [[:db/add "mary" :name "MMMary"]])
          (reagent/flush)
-         (is (= 2 @entity-call @attr-call))
-         (db/transact! conn [[:db/add "mary" :age 38]])
-         (reagent/flush)
-         (is (= [3 2] [@entity-call @attr-call]))
-         "Entity listener called when attribute changes")))))
+
+         (is (= "Mary" (api/get [:person/children "john"] :name))
+             "Get attribute via lookup ref")
+
+         (let [entity-call (atom 0)
+               attr-call (atom 0)]
+           (reagent/track! #(do (api/get "mary")
+                                (swap! entity-call inc)))
+           (reagent/track! #(do (api/get "mary" :name)
+                                (swap! attr-call inc)))
+           (is (= 1 @entity-call @attr-call))
+           (db/transact! conn [[:db/add "mary" :name "MMMary"]])
+           (reagent/flush)
+           (is (= 2 @entity-call @attr-call))
+           (db/transact! conn [[:db/add "mary" :age 38]])
+           (reagent/flush)
+           (is (= [3 2] [@entity-call @attr-call]))
+           "Entity listener called when attribute changes"))))))
 
 
 

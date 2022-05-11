@@ -1,6 +1,5 @@
 (ns re-db.history-test
   (:require [clojure.test :refer [is are deftest testing]]
-            [re-db.core :as db]
             [re-db.api :as d]
             [re-db.history :as history]
             [re-db.schema :as schema]

@@ -1,8 +1,8 @@
 (ns re-db.sync.server
   (:require [cognitect.transit :as transit]
-            [re-db.reactive.xform :as xf]
+            [re-db.xform :as xf]
             [re-db.subscriptions :as s]
-            re-db.reactive.query)
+            re-db.query)
   (:import re_db.reactive.query.Entity))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

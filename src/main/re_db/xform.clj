@@ -1,4 +1,4 @@
-(ns re-db.reactive.xform
+(ns re-db.xform
   (:refer-clojure :exclude [map into])
   (:require [re-db.reactive :as r]))
 

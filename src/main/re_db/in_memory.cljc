@@ -1,22 +1,23 @@
-(ns re-db.core
+(ns re-db.in-memory
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.util :refer [guard set-replace set-diff]]
-            [re-db.schema :as schema]))
+            [re-db.util :as u :refer [guard set-replace set-diff]]
+            [re-db.schema :as schema]
+            [re-db.protocols :as rp]))
 
 (def index-all-ave? false)
 (def index-all-ae? false)
+(def auto-index? true)
 
 (defrecord Schema [ave many unique ref ae index-fn schema-map])
 
-;; accessor fns, ugly definitions because ^boolean hints are inconsistent
-;; across clj / cljs
-(defn #?(:cljs ^boolean unique? :clj unique?) [^Schema s] (.-unique s))
-(defn #?(:cljs ^boolean many? :clj many?) [^Schema s] (.-many s))
-(defn #?(:cljs ^boolean ref? :clj ref?) [^Schema s] (.-ref s))
-(defn #?(:cljs ^boolean ave? :clj ave?) [^Schema s] (.-ave s))
-(defn #?(:cljs ^boolean ae? :clj ae?) [^Schema s] (.-ae s))
+;; accessors with boolean type hint via u/bool
+(defn unique? [^Schema s] (u/bool (.-unique s)))
+(defn many? [^Schema s] (u/bool (.-many s)))
+(defn ref? [^Schema s] (u/bool (.-ref s)))
+(defn ave? [^Schema s] (u/bool (.-ave s)))
+(defn ae? [^Schema s] (u/bool (.-ae s)))
 
 (comment
  (#?(:cljs js/console.info
@@ -503,3 +504,77 @@
           :vae {}
           :ave {}
           :schema (compile-db-schema schema)})))
+
+(defn doto-triples [f {:keys [datoms db-after]}]
+  (let [many? (memoize (fn [a] (many? (get-schema db-after a))))]
+    (doseq [[e a v pv] datoms]
+      (if (many? a)
+        (do (doseq [v v] (f e a v))
+            (doseq [pv pv] (f e a pv)))
+        (do (when (some? v) (f e a v))
+            (when (some? pv) (f e a pv)))))))
+
+(defn- db-ave
+  "Returns entity-ids for entities where attribute (a) equals value (v)"
+  ([db a v]
+   (db-ave db a v (ave? (get-schema db a))))
+  ([db a v indexed?]
+   #_#_when-let [v (cond->> v (ref? a-schema) (resolve-e db))] ;; rp/ave must be called with a resolved value
+   (if indexed?
+     (fast/gets db :ave a v)
+     (->> (:eav db)
+          (reduce-kv
+           (fn [out e m]
+             (cond-> out
+                     (= (m a) v)
+                     (conj e)))
+           #{})))))
+
+(defn- conn-ave
+  "Returns entity-ids for entities where attribute (a) equals value (v)"
+  [conn a v]
+  (let [a-schema (get-schema @conn a)]
+    (when (and auto-index? (not (ave? a-schema)))
+      (swap! conn add-missing-index a :ave))
+    (db-ave @conn a v true)))
+
+(extend-type #?(:clj clojure.lang.Atom :cljs cljs.core.Atom)
+  rp/ITriple
+  (db [conn] @conn)
+  (eav [conn e a] (fast/gets @conn :eav e a))
+  (ave [conn a v] (conn-ave conn a v))
+  (vae [conn v] (fast/gets @conn :vae v))
+  (ae [conn a] (fast/gets @conn :ae a))
+  (internal-e [conn e] e)
+  (get-schema [conn a] (get-schema @conn a))
+  (ref?
+    ([conn a] (ref? (get-schema @conn a)))
+    ([conn a schema] (ref? schema)))
+  (unique?
+    ([conn a] (unique? (get-schema @conn a)))
+    ([conn a schema] (unique? schema)))
+  (many?
+    ([conn a] (many? (get-schema @conn a)))
+    ([conn a schema] (many? schema)))
+  (doto-triples [conn handle-triple report] (doto-triples handle-triple report)))
+
+(extend-type #?(:clj java.lang.Object :cljs object)
+  rp/ITriple
+  (db [-db] -db)
+  (eav [db e a] (fast/gets db :eav e a))
+  (ave [db a v] (db-ave db a v))
+  (vae [db v] (fast/gets db :vae v))
+  (ae [db a] (fast/gets db :ae a))
+  (internal-e [db e] e)
+  (get-schema [db a] (get-schema db a))
+  (ref?
+    ([db a] (ref? (get-schema db a)))
+    ([db a schema] (ref? schema)))
+  (unique?
+    ([db a] (unique? (get-schema db a)))
+    ([db a schema] (unique? schema)))
+  (many?
+    ([db a] (many? (get-schema db a)))
+    ([db a schema] (many? schema)))
+  (doto-triples [this handle-triple report] (doto-triples handle-triple report)))
+

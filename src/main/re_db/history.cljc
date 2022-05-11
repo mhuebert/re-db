@@ -1,5 +1,5 @@
 (ns re-db.history
-  (:require [re-db.core :as db]))
+  (:require [re-db.in-memory :as db]))
 
 (defn last-tx [history] (-> history :log first :tx))
 (defn current-tx [history] (:tx @(:conn history)))

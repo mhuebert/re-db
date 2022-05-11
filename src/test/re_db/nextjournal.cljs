@@ -1,6 +1,6 @@
 (ns re-db.nextjournal
-  (:require [re-db.core :as d]
-            [re-db.read :as read]))
+  (:require [re-db.in-memory :as d]
+            [re-db.entity :refer [entity]]))
 
 (def conn
   (d/create-conn {:article/profile {:db/valueType :db.type/ref}
@@ -30,7 +30,7 @@
                     :person/name "P2"}])
 
 (= "P1"
-   (->> (read/entity conn "g2")
+   (->> (entity conn "g2")
         :group/member
         first
         deref
@@ -38,7 +38,7 @@
 
 (d/transact! conn [{:person/name "hello" :person/address "foo 123" :nextjournal/id :someid}])
 
-(:person/address (read/entity conn [:nextjournal/id :someid]))
+(:person/address (entity conn [:nextjournal/id :someid]))
 
 (d/transact! conn [[:db/retract [:nextjournal/id :someid] :person/address "foo 123"]])
 (d/transact! conn [[:db/add [:nextjournal/id :someid] :person/address "Some Nice Address"]])

@@ -1,4 +1,4 @@
-(ns re-db.reactive.hooks
+(ns re-db.hooks
   (:require [re-db.util :as util]
             [re-db.reactive :as r]))
 

@@ -1,4 +1,4 @@
-(ns re-db.reagent.local-state
+(ns re-db.in-memory.local-state
   (:require [clojure.string :as str]))
 
 (defn code-location [form]
@@ -6,5 +6,5 @@
        (str/join ":")))
 
 (defmacro local-state [owner & {:as opts}]
-  `(~'re-db.reagent.local-state/local-state* ~owner
+  `(~'re-db.in-memory.local-state/local-state* ~owner
     ~@(mapcat identity (assoc opts :location (code-location &form)))))

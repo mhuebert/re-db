@@ -1,10 +1,12 @@
-(ns re-db.reagent.context
+(ns re-db.integrations.reagent.context
   (:require ["react" :as react]
             [applied-science.js-interop :as j]
+            [re-db.in-memory :as rm]
+            [re-db.patterns :as patterns]
             [re-db.api :as api]
             [reagent.core :as reagent]
             [reagent.impl.component :as rcomponent])
-  (:require-macros re-db.reagent.context))
+  (:require-macros re-db.integrations.reagent.context))
 
 ;; dynamic binding in a javascript world...
 ;; objective: bind & then find a "global-ish" re-db database
@@ -38,7 +40,7 @@
 ;; monkey-patch the api/conn lookup to check the current component & currently-handled window.event
 (set! api/conn
       (fn []
-        (or api/*current-conn*
+        (or (api/conn)
             (component-conn)
             (some-> js/window.event
                     .-target
@@ -46,7 +48,7 @@
 
 (defn bind-conn
   [conn body]
-  (reagent/with-let [conn (api/->conn conn)
+  (reagent/with-let [conn (patterns/->conn conn)
                      ref-fn #(some-> % (j/!set context-key conn))]
     (react/createElement (.-Provider conn-context)
                          #js{:value conn}

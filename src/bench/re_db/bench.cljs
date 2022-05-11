@@ -1,7 +1,7 @@
 (ns re-db.bench
   (:refer-clojure :exclude [cat])
   (:require [applied-science.js-interop :as j]
-            [re-db.core :as rd]
+            [re-db.in-memory :as rd]
             [re-db.read :as read]
             [datascript.core :as d]
             [taoensso.encore :as enc]

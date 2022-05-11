@@ -1,9 +1,9 @@
 (ns re-db.sync-notebook
   (:require [datomic.api :as d]
             [nextjournal.clerk :as-alias clerk]
-            [re-db.reactive.query :as q]
+            [re-db.query :as q]
             [re-db.reactive :as r]
-            [re-db.reactive.hooks :as hooks]))
+            [re-db.hooks :as hooks]))
 
 ^{::clerk/visibility :fold}
 (do

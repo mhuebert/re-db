@@ -1,7 +1,7 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [-peek peek atom])
   (:require [re-db.util :as util]
-            [re-db.reactive.macros :as r]
+            [re-db.macros :as r]
             #?(:cljs [applied-science.js-interop :as j]))
   #?(:cljs (:require-macros re-db.reactive)))
 
@@ -72,6 +72,10 @@
 
 (def empty-derefs #{})
 
+(defn captured-patterns []
+  (->> @*captured-derefs*
+       (into #{} (map (comp :pattern meta)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Peek - for reading a reactive value without triggering a dependency
 
@@ -83,7 +87,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Hooks - for composable side-effects within reactions (modeled on React hooks).
-;; See `re-db.reactive.hooks` for API.
+;; See `re-db.hooks` for API.
 
 (defprotocol IHook
   (get-hooks [this])
@@ -125,6 +129,9 @@
 
 (util/support-clj-protocols
    (deftype RAtom [^:volatile-mutable state ^:volatile-mutable watches ^:volatile-mutable dispose-fns meta]
+     ICompute
+     (invalidate! [this]
+       (notify-watches this -1 state watches))
      IMeta
      (-meta [this] meta)
      IDispose
@@ -195,8 +202,8 @@
     (-set-function! [this new-f] (set! f new-f))
     (invalidate! [this]
       (let [new-val (r/with-owner this
-                                  (r/support-hooks!
-                                   (r/capture-derefs!
+                                  (r/with-hook-support!
+                                   (r/with-deref-capture!
                                     (f))))]
         (when (not= (peek ratom) new-val)
           (reset! ratom new-val))
@@ -261,10 +268,10 @@
 
 ;; macro passthrough
 (defmacro with-owner [& args] `(r/with-owner ~@args))
-(defmacro capture-derefs! [& args] `(r/capture-derefs! ~@args))
+(defmacro capture-derefs! [& args] `(r/with-deref-capture! ~@args))
 (defmacro without-deref-capture [& args] `(r/without-deref-capture ~@args))
-(defmacro support-hooks! [& args] `(r/support-hooks! ~@args))
+(defmacro support-hooks! [& args] `(r/with-hook-support! ~@args))
 (defmacro reaction [& args] `(r/reaction ~@args))
 (defmacro reaction! [& args] `(r/reaction! ~@args))
 (defmacro with-session [& args] `(r/with-session ~@args))
-(defmacro session [& args] `(r/session ~@args))
+(defmacro session [& body] `(r/session ~@body))
