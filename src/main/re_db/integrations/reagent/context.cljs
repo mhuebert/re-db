@@ -38,9 +38,10 @@
   ([component] (some-> component (j/get :context))))
 
 ;; monkey-patch the api/conn lookup to check the current component & currently-handled window.event
+(defonce original-conn-impl api/conn)
 (set! api/conn
       (fn []
-        (or (api/conn)
+        (or (original-conn-impl)
             (component-conn)
             (some-> js/window.event
                     .-target

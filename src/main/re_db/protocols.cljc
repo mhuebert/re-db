@@ -4,7 +4,7 @@
   (db [this])
   (eav [this e a])
   (ave [this a v])
-  (vae [this v])
+  (vae [this v a])
   (ae [this a])
   (internal-e [this e])
   (as-map [this e])
@@ -13,3 +13,5 @@
   (unique? [this a] [this a schema])
   (many? [this a] [this a schema])
   (doto-triples [this handle-triple report]))
+
+(defn get-db [conn the-db] (or the-db (db conn)))

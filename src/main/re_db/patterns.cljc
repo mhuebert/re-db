@@ -82,11 +82,12 @@
 (defn resolve-lookup-ref
   ([e] (resolve-lookup-ref *conn* (current-db) e))
   ([conn db [a v :as e]]
+   (assert (rp/unique? conn a) "Lookup ref attribute must be unique")
    (if (vector? v) ;; nested lookup ref
      (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
      (when v
        (depend-on-triple! conn nil a v)
-       (rp/internal-e db e)))))
+       (first (rp/ave db a v))))))
 
 (defn resolve-e
   ([e] (resolve-e *conn* (current-db) e))

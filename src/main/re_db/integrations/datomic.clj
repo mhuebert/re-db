@@ -131,7 +131,7 @@
                    :where [?e ?a ?v]
                    :in $ ?a ?v]
                  db a v))
-  (vae [db v])
+  (vae [db v a])
   (ae [db a])
   (internal-e [db e] (:db/id (d/entity db e)))
   (e-map [db e] (d/touch (d/entity db e)))
@@ -151,7 +151,7 @@
   (db [conn] (d/db conn))
   (eav [conn e a] (rp/eav (rp/db conn) e a))
   (ave [conn a v] (rp/ave (rp/db conn) a v))
-  (vae [conn v])
+  (vae [conn v a])
   (ae [conn a])
   (e [conn e] (rp/internal-e (rp/db conn) e))
   (e-map [conn e] (rp/as-map (rp/db conn) e))

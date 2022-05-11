@@ -6,7 +6,7 @@
 
 (defn- pull*
   ([entity pullv] (pull* entity pullv #{}))
-  ([the-entity pullv found]
+  ([^Entity the-entity pullv found]
    (when the-entity
      (reduce-kv
       (fn pull [m i pullexpr]
@@ -28,7 +28,7 @@
                                                           identity))]))
                                    [a a identity])
                 forward-a (cond-> a (util/reverse-attr? a) util/forward-attr)
-                db (.-db the-entity)
+                db (rp/get-db (.-conn the-entity) (.-db the-entity))
                 a-schema (rp/get-schema db forward-a)
                 v (val-fn (get the-entity a))]
             (assoc m alias
@@ -77,8 +77,4 @@
   ;; - if an attribute is not present, `nil` is provided
   ([pull-expr] (fn [entity] (pull (->entity entity) pull-expr)))
   ([entity pull-expr]
-   (if (sequential? entity)
-     (into (empty entity)
-           (map #(pull* (->entity %) pull-expr))
-           entity)
-     (pull* (->entity entity) pull-expr))))
+   (pull* (->entity entity) pull-expr)))

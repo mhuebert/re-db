@@ -11,64 +11,12 @@
             [re-db.test-helpers :refer [throws]]
             [re-db.in-memory :as db]))
 
-(deftest upserts
-  (let [conn (doto (d/create-conn {:email {:db/unique :db.unique/identity}
-                                 :friend {:db/valueType :db.type/ref}
-                                 :pets {:db/valueType :db.type/ref
-                                        :db/cardinality :db.cardinality/many}
-                                 :pet/collar-nr {:db/unique :db.unique/identity}})
-             (d/transact! [{:db/id "fred"
-                            :email "fred@example.com"
-                            :friend {:email "matt@example.com"}
-                            :pets #{{:pet/collar-nr 1}
-                                    {:pet/collar-nr 2}}}
-                           {:email "matt@example.com"}
-                           {:email "matt@example.com"
-                            :name "Matt"}
-                           {:pet/collar-nr 1
-                            :pet/name "pookie"}
-                           {:pet/collar-nr 2
-                            :pet/name "fido"}
-                           {:db/id [:email "peter@example.com"]
-                            :name "Peter"}
-                           {:email "peter@example.com"
-                            :age 32}]))]
-    (is (= (-> conn
-               (entity "fred")
-               :friend
-               :db/id)
-           (-> conn
-               (entity [:email "matt@example.com"])
-               :db/id)))
-    (is (= "Matt"
-           (-> conn
-               (entity "fred")
-               :friend
-               :name)))
-
-    (is (= #{"pookie" "fido"}
-           (->> (entity conn "fred")
-                :pets
-                (map :pet/name)
-                set)))
-
-    (is (= ["Peter" 32]
-           (->> (entity conn [:email "peter@example.com"])
-                ((juxt :name :age)))))
-
-
-
-    ))
-
-(defn ->clj [x] #?(:cljs (js->clj x) :clj x))
+(defn ids [entities] (util/guard (into (empty entities) (map :db/id) entities) seq))
 
 (defn db= [& dbs]
   (apply = (map #(dissoc % :tx) dbs)))
 
-(defn ids [entities] (into #{} (map :db/id) entities))
-
 (deftest datom-tx
-
   (let [schema {:authors {:db/valueType :db.type/ref
                           :db/cardinality :db.cardinality/many}
                 :pet {:db/valueType :db.type/ref}}
@@ -82,30 +30,77 @@
             [:db/add "1" :name "One"]]
         conn (d/create-conn schema)
         tx-report (d/transact! conn tx)]
+    (api/with-conn conn
 
-    (is (db= @conn
-             @(doto (d/create-conn schema)
-                (d/transact! [[:db/datoms (:datoms tx-report)]])))
-        :db/datoms)
+      (is (db= @conn
+               @(doto (d/create-conn schema)
+                  (d/transact! [[:db/datoms (:datoms tx-report)]])))
+          :db/datoms)
 
-    (is (db= @(d/create-conn schema)
-             (let [conn (d/create-conn schema)
-                   {:keys [datoms]} (d/transact! conn tx)]
-               (d/transact! conn [[:db/datoms-reverse datoms]])
-               @conn)
-             @(doto (d/create-conn schema)
-                (d/transact! [[:db/datoms (:datoms tx-report)]
-                              [:db/datoms-reverse (:datoms tx-report)]])))
-        :db/datoms-reverse)
+      (is (db= @(d/create-conn schema)
+               (let [conn (d/create-conn schema)
+                     {:keys [datoms]} (d/transact! conn tx)]
+                 (d/transact! conn [[:db/datoms-reverse datoms]])
+                 @conn)
+               @(doto (d/create-conn schema)
+                  (d/transact! [[:db/datoms (:datoms tx-report)]
+                                [:db/datoms-reverse (:datoms tx-report)]])))
+          :db/datoms-reverse)
 
+      (is (= {:db/id "fred"
+              :name "Fred"
+              :_authors #{"1"}
+              :pet "fido"} (-> (pull "fred" '[* :_authors])
+                               (update :_authors ids)))
+          "refs with cardinality-many"))))
 
-    (is (= {:db/id "fred"
-            :name "Fred"
-            :_authors #{"1"}
-            :pet "fido"} (pull (entity conn "fred") [* :_authors]))
-        "refs with cardinality-many")))
+(deftest upserts
+  (api/with-conn (doto (d/create-conn {:email {:db/unique :db.unique/identity}
+                                       :friend {:db/valueType :db.type/ref}
+                                       :pets {:db/valueType :db.type/ref
+                                              :db/cardinality :db.cardinality/many}
+                                       :pet/collar-nr {:db/unique :db.unique/identity}})
+                   (d/transact! [{:db/id "fred"
+                                  :email "fred@example.com"
+                                  :friend {:email "matt@example.com"}
+                                  :pets #{{:pet/collar-nr 1}
+                                          {:pet/collar-nr 2}}}
+                                 {:email "matt@example.com"}
+                                 {:email "matt@example.com"
+                                  :name "Matt"}
+                                 {:pet/collar-nr 1
+                                  :pet/name "pookie"}
+                                 {:pet/collar-nr 2
+                                  :pet/name "fido"}
+                                 {:db/id [:email "peter@example.com"]
+                                  :name "Peter"}
+                                 {:email "peter@example.com"
+                                  :age 32}]))
+    (is (= {:email "matt@example.com"}
+           (pull [:email "matt@example.com"] [:email])))
+    (is (= (-> (entity "fred")
+               :friend
+               :db/id)
+           (-> (entity [:email "matt@example.com"])
+               :db/id)))
+    (is (= "Matt"
+           (-> (entity "fred")
+               :friend
+               :name)))
 
+    (is (= #{"pookie" "fido"}
+           (->> (entity "fred")
+                :pets
+                (map :pet/name)
+                set)))
 
+    (is (= ["Peter" 32]
+           (->> (entity [:email "peter@example.com"])
+                ((juxt :name :age)))))
+
+    ))
+
+(defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
 (deftest lookup-refs
   (api/with-conn (doto (d/create-conn {:email {:db/unique :db.unique/identity}
@@ -116,27 +111,27 @@
                                  {:email "matt@example.com"
                                   :friend [:email "fred@example.com"]}
                                  {:db/id "herman"
-                                  :friend {:email "peter@example.com"}}])))
-  (is (= (api/get "fred")
-         (api/get [:email "fred@example.com"]))
-      "Can substitute unique attr for id (à la 'lookup refs')")
-  (is (= "matt@example.com"
-         (-> (entity "fred")
-             :friend
-             :email))
-      "Lookup ref as ref")
-  (is (= (-> (entity "fred")
-             :friend
-             :db/id)
-         (-> (entity [:email "matt@example.com"])
-             :db/id))
-      "transact a map with no id, only a unique attribute")
-  (is (= "peter@example.com"
-         (-> (entity "herman") :friend :email)))
-  (is (= "fred"
-         (-> (entity [:email "matt@example.com"])
-             :friend
-             :db/id))))
+                                  :friend {:email "peter@example.com"}}]))
+    (is (= (api/get "fred")
+           (api/get [:email "fred@example.com"]))
+        "Can substitute unique attr for id (à la 'lookup refs')")
+    (is (= "matt@example.com"
+           (-> (entity "fred")
+               :friend
+               :email))
+        "Lookup ref as ref")
+    (is (= (-> (entity "fred")
+               :friend
+               :db/id)
+           (-> (entity [:email "matt@example.com"])
+               :db/id))
+        "transact a map with no id, only a unique attribute")
+    (is (= "peter@example.com"
+           (-> (entity "herman") :friend :email)))
+    (is (= "fred"
+           (-> (entity [:email "matt@example.com"])
+               :friend
+               :db/id)))))
 
 (deftest basic
   (api/with-conn {:dog {:db/index true}}
@@ -225,17 +220,17 @@
 
 
 (deftest refs
-  (let [db (doto (d/create-conn {:owner (merge schema/ref
-                                               schema/unique-value)})
-             (d/transact! [{:db/id "fred"
-                            :name "Fred"}
-                           {:db/id "ball"
-                            :name "Ball"
-                            :owner "fred"}]))]
+  (api/with-conn (doto (d/create-conn {:owner (merge schema/ref
+                                                     schema/unique-value)})
+                   (d/transact! [{:db/id "fred"
+                                  :name "Fred"}
+                                 {:db/id "ball"
+                                  :name "Ball"
+                                  :owner "fred"}]))
     (is (= {:db/id "fred"
             :name "Fred"
             :_owner #{"ball"}}
-           (-> (entity db "fred")
+           (-> (entity "fred")
                (pull '[* :_owner])))
         "touch adds refs to entity"))
 
@@ -359,7 +354,7 @@
         (d/transact! conn [[:db/retract "fred" :children #{"sally"}]])
         (is (= nil (ids (api/where [[:children "sally"]])))
             "index is removed on retraction")
-        (is (= #{"fred"} (api/where [:children "pete"]))
+        (is (= #{"fred"} (ids (api/where [:children "pete"])))
             "index remains for other value")
         (is (= #{"pete"} (api/get "fred" :children))
             "attribute has correct value"))
@@ -443,8 +438,8 @@
 (deftest equality
   (api/with-conn {:email schema/unique-id}
     (api/transact! [{:db/id "a"
-                        :name "b"
-                        :email "c"}])
+                     :name "b"
+                     :email "c"}])
     (let [e1 (entity "a")
           e2 (entity "a")]
       (is (identical? @e1 @e2))
@@ -508,8 +503,8 @@
                :my/name)))
 
     (is (map?
-           (-> (entity conn [:my/unique 1])
-               :my/other)))))
+         (-> (entity conn [:my/unique 1])
+             :my/other)))))
 
 (deftest add-missing-attribute
   (let [conn (db/create-conn)]
