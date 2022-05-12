@@ -15,22 +15,23 @@
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
                                (first pullexpr))
-                [a alias val-fn] (if (list? a)
-                                   (let [{:as opts
-                                          :keys [default limit]
-                                          alias :as
-                                          :or {alias a}} (apply hash-map (rest a))
-                                         a (first a)]
-                                     (if (:db/id opts)
-                                       [a :db/id #(vector a %)]
-                                       [a alias (comp #(if limit (take limit %) %)
-                                                      (or (when default #(util/some-or % default))
-                                                          identity))]))
-                                   [a a identity])
+                [a alias val-fn opts] (if (list? a)
+                                        (let [{:as opts
+                                               :keys [default limit]
+                                               alias :as
+                                               :or {alias (first a)}} (apply hash-map (rest a))
+                                              a (first a)]
+                                          (if (:db/id opts)
+                                            [a :db/id #(vector a %) opts]
+                                            [a alias (comp #(if limit (take limit %) %)
+                                                           (or (when default #(util/some-or % default))
+                                                               identity)) opts]))
+                                        [a a identity])
                 forward-a (cond-> a (util/reverse-attr? a) util/forward-attr)
                 db (rp/get-db (.-conn the-entity) (.-db the-entity))
                 a-schema (rp/get-schema db forward-a)
                 v (val-fn (get the-entity a))]
+
             (assoc m alias
                      (cond (not (rp/ref? db a a-schema)) v
 

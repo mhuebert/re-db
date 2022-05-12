@@ -538,14 +538,29 @@
       (swap! conn add-missing-index a :ave))
     (db-ave @conn a v true)))
 
+(defn db-ae
+  ([db a] (db-ae db a (ae? (get-schema db a))))
+  ([db a indexed?]
+   (if indexed?
+     (fast/gets db :ae a)
+     (reduce-kv (fn [out e ent] (if (contains? ent a)
+                                  (conj out e)
+                                  out)) [] (:eav db)))))
+
+(defn- conn-ae [conn a]
+  (let [a-schema (get-schema @conn a)]
+    (when (and auto-index? (not (ae? a-schema)))
+      (swap! conn add-missing-index a :ae))
+    (db-ae @conn a true)))
+
 (extend-type #?(:clj clojure.lang.Atom :cljs cljs.core.Atom)
   rp/ITriple
   (db [conn] @conn)
   (as-map [conn e] (fast/gets @conn :eav e))
   (eav [conn e a] (fast/gets @conn :eav e a))
   (ave [conn a v] (conn-ave conn a v))
-  (vae [conn v a] (prn :vae! v a) (fast/gets @conn :vae v a))
-  (ae [conn a] (fast/gets @conn :ae a))
+  (vae [conn v a] (fast/gets @conn :vae v a))
+  (ae [conn a] (conn-ae conn a))
   (internal-e [conn e] e)
   (get-schema [conn a] (get-schema @conn a))
   (ref?
@@ -565,8 +580,8 @@
   (db [-db] -db)
   (eav [db e a] (fast/gets db :eav e a))
   (ave [db a v] (db-ave db a v))
-  (vae [db v a] (prn :vae!2) (fast/gets db :vae v a))
-  (ae [db a] (fast/gets db :ae a))
+  (vae [db v a] (fast/gets db :vae v a))
+  (ae [db a] (db-ae db a))
   (internal-e [db e] e)
   (get-schema [db a] (get-schema db a))
   (ref?

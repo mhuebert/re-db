@@ -77,7 +77,7 @@
   ([a] (ae *conn* (current-db) a))
   ([conn db a]
    (some-> conn (depend-on-triple! nil a nil))
-   (rp/ae db a)))
+   (rp/ae conn a)))
 
 (defn resolve-lookup-ref
   ([e] (resolve-lookup-ref *conn* (current-db) e))

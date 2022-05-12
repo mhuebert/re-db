@@ -23,7 +23,7 @@
      (->> (cond (nil? v) (patterns/ae conn db a)
                 (fn? v) (filter v (patterns/ae conn db a))
                 :else (patterns/ave conn db a v))
-          (into []
+          (into #{}
                 (comp (map entity)
                       ;; additional clauses filter entities from step 1
                       (filter (if (seq clauses)

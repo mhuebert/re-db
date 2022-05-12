@@ -231,7 +231,8 @@
             :name "Fred"
             :_owner #{"ball"}}
            (-> (entity "fred")
-               (pull '[* :_owner])))
+               (pull '[* :_owner])
+               (update :_owner ids)))
         "touch adds refs to entity"))
 
   (api/with-conn (doto (d/create-conn {:authors {:db/valueType :db.type/ref
@@ -249,7 +250,8 @@
     (is (= {:db/id "fred"
             :name "Fred"
             :_authors #{"1"}
-            :pet "fido"} (pull (entity "fred") '[* :_authors]))
+            :pet "fido"} (-> (pull "fred" '[* :_authors])
+                             (update :_authors ids)))
         "refs with cardinality-many")
     (is (= {:db/id "fido"}
            (api/get "fido")))))
@@ -270,15 +272,15 @@
                      :children #{"A.4"}}])
 
     (is (-> (api/pull "A" [:children])
-            :children first :children
+            :children first :children ids
             (= #{"A.1"})))
 
     (is (-> (api/pull "A" [{:children 1}])
-            :children first :children first :children
+            :children first :children first :children ids
             (= #{"A.2"})))
 
-    (is (-> (api/pull "A" [{:children :...}])
-            :children first :children first :children first :children first :children
+    (is (-> (api/pull "A" [:db/id {:children :...}])
+            :children first :children first :children first :children first :children ids
             (= #{"A.4"}))))
 
   (api/with-conn {:child schema/ref}
@@ -286,7 +288,8 @@
                      :name "A"
                      :child {:db/id "B"
                              :name "B-name"}}])
-    (is (-> (api/pull "A" [:child])
+    (is (-> (api/pull "A" [:db/id :name :child])
+            (update :child deref)
             ;; error - not navigating to :child
             (= {:db/id "A"
                 :name "A"
@@ -294,11 +297,12 @@
                         :name "B-name"}})))
 
     (is (-> (api/entity "A")
-            :child
+            :child :db/id
             string?))
 
     (is (-> (api/entity "A")
             :child
+            :db/id
             (= "B")))))
 
 (deftest custom-db-operations
@@ -343,7 +347,6 @@
 
       (is (= #{"sally" "pete"} (api/get "fred" :children))
           "cardinality/many attribute returned as set")
-
       (is (= #{"fred"}
              (ids (api/where [:children "sally"]))
              (ids (api/where [:children "pete"])))
@@ -352,7 +355,7 @@
 
       (testing "remove value from cardinality/many attribute"
         (d/transact! conn [[:db/retract "fred" :children #{"sally"}]])
-        (is (= nil (ids (api/where [[:children "sally"]])))
+        (is (= nil (ids (api/where [:children "sally"])))
             "index is removed on retraction")
         (is (= #{"fred"} (ids (api/where [:children "pete"])))
             "index remains for other value")
@@ -432,7 +435,8 @@
 
     (is (= #{1 2} (ids (api/where [:person/id]))))
     (is (= #{1.1 2.1} (ids (api/where [:pet/id]))))
-    (is (= #{1 2} (get-in (api/conn) [:ae :person/id])))
+    (is (= #{1 2} (get-in @(api/conn) [:ae :person/id])))
+
     ))
 
 (deftest equality
