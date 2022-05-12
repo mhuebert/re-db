@@ -2,14 +2,16 @@
   (:require [clojure.test :refer [deftest is testing]]
             [re-db.in-memory :as d]
             [re-db.api :as api]
-            [re-db.entity :as entity :refer [entity]]
+            [re-db.entity :as entity :refer [entity #?(:cljs Entity)]]
             [re-db.pull :refer [pull]]
             [re-db.where :refer [where]]
             [re-db.patterns :as patterns]
             [re-db.schema :as schema]
             [re-db.util :as util]
             [re-db.test-helpers :refer [throws]]
-            [re-db.in-memory :as db]))
+            [re-db.in-memory :as db]
+            [re-db.protocols :as rp])
+  #?(:clj (:import [re_db.entity Entity])))
 
 (defn ids [entities] (util/guard (into (empty entities) (map :db/id) entities) seq))
 
@@ -134,21 +136,16 @@
                :db/id)))))
 
 (deftest basic
+
   (api/with-conn {:dog {:db/index true}}
     (let [tx-log (atom [])
           conn (api/conn)]
 
-      #?(:cljs
-         (is (satisfies? cljs.core/IDeref (api/conn))
-             "DB is an atom"))
+      (is (map? @conn) "DB is an atom")
 
       (d/listen! conn ::basic #(swap! tx-log conj (:datoms %2)))
 
       (d/transact! conn [{:db/id "herman"}])
-
-      ;; allow empty entities - can be used as relations
-      #_(is (false? (read/contains? conn "herman"))
-            "Inserting an entity without attributes is no-op")
 
       (d/transact! conn [{:db/id "herman" :occupation "teacher"}])
 
@@ -232,7 +229,8 @@
             :_owner #{"ball"}}
            (-> (entity "fred")
                (pull '[* :_owner])
-               (update :_owner ids)))
+               (update :_owner ids))
+           (entity/touch (entity "fred")))
         "touch adds refs to entity"))
 
   (api/with-conn (doto (d/create-conn {:authors {:db/valueType :db.type/ref
@@ -496,7 +494,7 @@
     (db/transact! conn [{:my/unique 1
                          :my/ref {:my/unique 2 :my/name "Mr. Unique"}
                          :my/other {:my/unique 3}}])
-    (is (= entity/Entity
+    (is (= Entity
            (-> (entity conn [:my/unique 1])
                :my/ref
                type)))

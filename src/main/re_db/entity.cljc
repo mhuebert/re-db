@@ -25,7 +25,7 @@
     IHash
     (-hash [this]
       (resolve-e! conn (rp/get-db conn db) e e-resolved?)
-      (hash [e (rp/as-map (rp/get-db conn db) e)]))
+      (hash [e (rp/eav (rp/get-db conn db) e)]))
 
     IEquiv
     (-equiv [this other]
@@ -58,7 +58,7 @@
     IDeref
     (-deref [this]
       (patterns/depend-on-triple! e nil nil)
-      (rp/as-map (rp/get-db conn db) e))
+      (rp/eav (rp/get-db conn db) e))
     ISeqable
     (-seq [this] (seq @this))))
 
@@ -72,3 +72,14 @@
                                             (rp/eav conn e a)))) nil)))
   ([conn e] (entity conn nil e)) ;; conn is specified - use it for db-value, late-bound
   ([e] (entity *conn* nil e))) ;; nothing is specified - use current *conn*
+
+(defn touch
+  ([entity] (touch *conn* nil entity))
+  ([conn entity] (touch conn nil entity))
+  ([conn db entity]
+   (let [db (rp/get-db conn db)
+         e (:db/id entity)]
+     (patterns/depend-on-triple! nil nil e)
+     (reduce-kv (fn [m a vs] (assoc m (u/reverse-attr a) vs))
+                @entity
+                (rp/vae db e)))))

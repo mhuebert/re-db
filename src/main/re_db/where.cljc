@@ -11,12 +11,13 @@
         ;; arbitrary function
         (fn? v) (fn [entity] (v (get entity a)))
         ;; refs - resolve `v` lookup-refs & compare to :db/id of the thing
-        (rp/ref? (current-db) a) (fn [entity] (= (patterns/resolve-v conn db a v) (:db/id (get entity a))))
+        (rp/ref? db a) (fn [entity] (= (patterns/resolve-v conn db a v) (:db/id (get entity a))))
         :else (fn [entity] (= (get entity a) v))))))
 
 (defn where
-  ([clauses] (where *conn* (current-db) clauses))
+  ([clauses] (where *conn* (current-db *conn*) clauses))
   ([conn db clauses]
+   (assert db)
    ;; first clause reads from db
    (let [[clause & clauses] clauses
          [a v] (if (keyword? clause) [clause nil] clause)]

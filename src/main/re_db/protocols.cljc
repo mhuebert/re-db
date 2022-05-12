@@ -2,12 +2,11 @@
 
 (defprotocol ITriple
   (db [this])
-  (eav [this e a])
+  (eav [this e a] [this e])
   (ave [this a v])
-  (vae [this v a])
+  (vae [this v] [this v a])
   (ae [this a])
   (internal-e [this e])
-  (as-map [this e])
   (get-schema [this a])
   (ref? [this a] [this a schema])
   (unique? [this a] [this a schema])

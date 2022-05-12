@@ -123,13 +123,17 @@
 (defn reverse-attr? [a]
   (= \_ (.charAt (name a) 0)))
 
-(defn reverse-attr* [attr]
-  (keyword (namespace attr) (str "_" (name attr))))
+(defn reverse-attr* [a]
+  (if (reverse-attr? a)
+    a
+    (keyword (namespace a) (str "_" (name a)))))
 
 (fast/defmemo-1 reverse-attr reverse-attr*)
 
-(defn forward-attr* [attr]
-  (keyword (namespace attr) (subs (name attr) 1)))
+(defn forward-attr* [a]
+  (if (reverse-attr? a)
+    (keyword (namespace a) (subs (name a) 1))
+    a))
 
 (fast/defmemo-1 forward-attr forward-attr*)
 

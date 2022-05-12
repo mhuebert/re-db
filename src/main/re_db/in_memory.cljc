@@ -556,10 +556,13 @@
 (extend-type #?(:clj clojure.lang.Atom :cljs cljs.core.Atom)
   rp/ITriple
   (db [conn] @conn)
-  (as-map [conn e] (fast/gets @conn :eav e))
-  (eav [conn e a] (fast/gets @conn :eav e a))
+  (eav
+    ([conn e] (fast/gets @conn :eav e))
+    ([conn e a] (fast/gets @conn :eav e a)))
   (ave [conn a v] (conn-ave conn a v))
-  (vae [conn v a] (fast/gets @conn :vae v a))
+  (vae
+    ([conn v] (fast/gets @conn :vae v))
+    ([conn v a] (fast/gets @conn :vae v a)))
   (ae [conn a] (conn-ae conn a))
   (internal-e [conn e] e)
   (get-schema [conn a] (get-schema @conn a))
@@ -574,13 +577,16 @@
     ([conn a schema] (many? schema)))
   (doto-triples [conn handle-triple report] (doto-triples handle-triple report)))
 
-(extend-type default
+(extend-type #?(:cljs default :clj java.lang.Object)
   rp/ITriple
-  (as-map [db e] (fast/gets db :eav e))
   (db [-db] -db)
-  (eav [db e a] (fast/gets db :eav e a))
+  (eav
+    ([db e] (fast/gets db :eav e))
+    ([db e a] (fast/gets db :eav e a)))
   (ave [db a v] (db-ave db a v))
-  (vae [db v a] (fast/gets db :vae v a))
+  (vae
+    ([db v] (fast/gets db :vae v))
+    ([db v a] (fast/gets db :vae v a)))
   (ae [db a] (db-ae db a))
   (internal-e [db e] e)
   (get-schema [db a] (get-schema db a))

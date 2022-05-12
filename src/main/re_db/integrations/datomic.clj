@@ -2,7 +2,8 @@
   (:require [clojure.core.async :as a]
             [datomic.api :as d]
             [re-db.patterns :as patterns]
-            [re-db.protocols :as rp])
+            [re-db.protocols :as rp]
+            [re-db.util :as util])
   (:import [datomic.peer LocalConnection]
            [datomic.db Db]))
 
@@ -106,35 +107,46 @@
   (when-let [stop (get-in @!conn-state [conn :stop])]
     (stop)))
 
-(defn ea [db e a]
-  (get (d/entity db e) a))
+(defn -eav
+  ([db e a]
+   (get (d/entity db e) a))
+  ([db e]
+   (d/touch (d/entity db e))))
 
-(defn a [db a]
+(defn -ae [db a]
   (d/q
    '[:find [?e ...]
      :where [?e ?a]
      :in $ ?a]
    db a))
 
-(defn av [db a v]
+(defn -ave [db a v]
   (d/q
    '[:find [?e ...]
      :where [?e ?a ?v]
      :in $ ?a ?v]
    db a v))
 
+(defn -vae
+  ([db v]
+   (prn :vae! (->> (d/datoms db :vaet v)
+                   (reduce (fn [out [e a]] (update out (util/reverse-attr a) (fnil conj #{}) e)) {})))
+   (->> (d/datoms db :vaet v)
+        (reduce (fn [out [e a]] (update out (util/reverse-attr a) (fnil conj #{}) e)) {})))
+  ([db v a]
+   (get (d/entity db v) (util/reverse-attr a))))
+
 (extend-type Db
   rp/ITriple
-  (eav [db e a] (get (d/entity db e) a))
-  (ave [db a v] (d/q
-                 '[:find [?e ...]
-                   :where [?e ?a ?v]
-                   :in $ ?a ?v]
-                 db a v))
-  (vae [db v a])
-  (ae [db a])
-  (internal-e [db e] (:db/id (d/entity db e)))
-  (e-map [db e] (d/touch (d/entity db e)))
+  (eav
+    ([db e a] (-eav db e a))
+    ([db e] (-eav db e)))
+  (ave [db a v] (-ave db a v))
+  (vae
+    ([db v a] (-vae db v a))
+    ([db v] (-vae db v)))
+  (ae [db a] (-ae db a))
+  (internal-e [db e] (d/entid db e))
   (get-schema [db a] (d/entity db a))
   (ref?
     ([this a] (rp/ref? this a (rp/get-schema this a)))
@@ -149,12 +161,14 @@
 (extend-type LocalConnection
   rp/ITriple
   (db [conn] (d/db conn))
-  (eav [conn e a] (rp/eav (rp/db conn) e a))
-  (ave [conn a v] (rp/ave (rp/db conn) a v))
-  (vae [conn v a])
-  (ae [conn a])
-  (e [conn e] (rp/internal-e (rp/db conn) e))
-  (e-map [conn e] (rp/as-map (rp/db conn) e))
+  (eav
+    ([conn e] (-eav (rp/db conn) e))
+    ([conn e a] (-eav (rp/db conn) e a)))
+  (ave [conn a v] (-ave (rp/db conn) a v))
+  (vae
+    ([conn v] (-vae (rp/db conn) v))
+    ([conn v a] (-vae (rp/db conn) v a)))
+  (ae [conn a] (-ae (rp/db conn) a))
   (get-schema [conn a] (rp/get-schema (rp/db conn) a))
   (ref?
     ([this a] (rp/ref? (rp/db this) a))

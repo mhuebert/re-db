@@ -1,36 +1,36 @@
 (ns re-db.macros
-  (:require [re-db.reactive :as-alias r])
+  #_(:require [re-db.reactive :as-alias r]) ;; TODO when cursive fixes bug https://github.com/cursive-ide/cursive/issues/2690
   #?(:cljs (:require-macros re-db.macros)))
 
 (defmacro set-swap! [sym f & args]
   `(set! ~sym (~f ~sym ~@args)))
 
 (defmacro with-owner [owner & body]
-  `(binding [r/*owner* ~owner] ~@body))
+  `(binding [re-db.reactive/*owner* ~owner] ~@body))
 
 (defmacro with-deref-capture! [& body]
-  `(binding [r/*captured-derefs* (volatile! r/empty-derefs)]
+  `(binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/empty-derefs)]
      (let [val# (do ~@body)
-           new-derefs# @r/*captured-derefs*]
-       (r/handle-new-derefs! r/*owner* new-derefs#)
+           new-derefs# @re-db.reactive/*captured-derefs*]
+       (re-db.reactive/handle-new-derefs! re-db.reactive/*owner* new-derefs#)
        val#)))
 
 (defmacro without-deref-capture [& body]
-  `(binding [r/*captured-derefs* nil] ~@body))
+  `(binding [re-db.reactive/*captured-derefs* nil] ~@body))
 
 (defmacro with-hook-support! [& body]
-  `(binding [r/*hook-i* (volatile! -1)]
+  `(binding [re-db.reactive/*hook-i* (volatile! -1)]
      ~@body))
 
 (defmacro reaction
   "Returns a derefable reactive source based on body. Re-evaluates body when any dependencies (captured derefs) change. Lazy."
   [& body]
-  `(r/make-reaction (fn [] ~@body)))
+  `(re-db.reactive/make-reaction (fn [] ~@body)))
 
 (defmacro reaction!
   "Eager version of reaction"
   [& body]
-  `(doto (r/make-reaction (fn [] ~@body)) r/invalidate!))
+  `(doto (re-db.reactive/make-reaction (fn [] ~@body)) re-db.reactive/invalidate!))
 
 ;; for dev - only adds derefs
 (defmacro with-session
@@ -38,21 +38,21 @@
   [session & body]
   `(let [session# ~session]
      (with-owner session#
-       (binding [r/*captured-derefs* (volatile! r/empty-derefs)]
+       (binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/empty-derefs)]
          (let [val# (do ~@body)
-               new-derefs# @r/*captured-derefs*]
+               new-derefs# @re-db.reactive/*captured-derefs*]
            (doseq [producer# new-derefs#] (add-watch producer# session# (fn [& args#])))
-           (r/set-derefs! session# (into (r/get-derefs session#) new-derefs#))
+           (re-db.reactive/set-derefs! session# (into (re-db.reactive/get-derefs session#) new-derefs#))
            val#)))))
 
 (defmacro session
   "[] - returns a session.
    [& body] - Evaluates body in a reactive session which is immediately disposed"
-  ([] `(~'r/make-session))
+  ([] `(~'re-db.reactive/make-session))
   ([& body]
-   `(let [s# (r/make-session)
+   `(let [s# (re-db.reactive/make-session)
           v# (with-session s# ~@body)]
-      (r/dispose! s#)
+      (re-db.reactive/dispose! s#)
       v#)))
 
 

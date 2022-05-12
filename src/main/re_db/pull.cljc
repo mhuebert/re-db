@@ -43,7 +43,7 @@
                            (let [recursions (if (= 0 map-expr) false map-expr)
                                  entities (when v
                                             (if recursions
-                                              (let [found (conj found (.-e the-entity))
+                                              (let [found (conj found (:db/id the-entity))
                                                     pullv (if (number? recursions)
                                                             ;; decrement recurse parameter
                                                             (update-in pullv [i forward-a] dec)

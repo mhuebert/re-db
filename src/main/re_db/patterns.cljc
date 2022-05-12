@@ -42,13 +42,13 @@
 (def reactive-conn (comp listen-patterns rm/create-conn))
 
 (def ^:dynamic *conn* (reactive-conn)) ;; if present, reads can subscribe to changes
-(def ^:dynamic *db*) ;; point-in-time db value
+(def ^:dynamic *db* nil) ;; point-in-time db value
 
 (defn current-conn [] *conn*)
 (defn current-db
   "*db* pins down the value of db, for as-of queries. If not present, we deref the current connection."
-  []
-  (or *db* (rp/db *conn*)))
+  [conn]
+  (rp/get-db conn *db*))
 
 (defn clone
   "Creates a copy of conn (without existing listeners)"
@@ -74,14 +74,16 @@
        triple))))
 
 (defn ae
-  ([a] (ae *conn* (current-db) a))
+  ([a] (ae *conn* (current-db *conn*) a))
   ([conn db a]
+   (assert db)
    (some-> conn (depend-on-triple! nil a nil))
-   (rp/ae conn a)))
+   (rp/ae db a)))
 
 (defn resolve-lookup-ref
-  ([e] (resolve-lookup-ref *conn* (current-db) e))
+  ([e] (resolve-lookup-ref *conn* (current-db *conn*) e))
   ([conn db [a v :as e]]
+   (assert db)
    (assert (rp/unique? conn a) "Lookup ref attribute must be unique")
    (if (vector? v) ;; nested lookup ref
      (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
@@ -90,41 +92,47 @@
        (first (rp/ave db a v))))))
 
 (defn resolve-e
-  ([e] (resolve-e *conn* (current-db) e))
+  ([e] (resolve-e *conn* (current-db *conn*) e))
   ([conn db e]
+   (assert db)
    (if (vector? e)
      (resolve-lookup-ref conn db e)
      (:db/id e e))))
 
 (defn resolve-v
-  ([a v] (resolve-v *conn* (current-db) a v))
+  ([a v] (resolve-v *conn* (current-db *conn*) a v))
   ([conn db a v]
+   (assert db)
    (cond->> v
             (and v (rp/ref? db a))
             (resolve-e conn db))))
 
 (defn eav
-  ([e] (eav *conn* (current-db) e))
-  ([e a] (eav *conn* (current-db) e a))
+  ([e] (eav *conn* (current-db *conn*) e))
+  ([e a] (eav *conn* (current-db *conn*) e a))
   ([conn db e]
+   (assert db)
    (when-let [id (resolve-e conn db e)]
      (depend-on-triple! conn id nil nil)
-     (rp/as-map db id)))
+     (rp/eav db id)))
   ([conn db e a]
+   (assert db)
    (some-> conn (depend-on-triple! e a nil))
    (rp/eav db e a)))
 
 (defn ave
   "Returns entity-ids for entities where attribute (a) equals value (v)"
-  ([a v] (ave *conn* (current-db) a v))
+  ([a v] (ave *conn* (current-db *conn*) a v))
   ([conn db a v]
+   (assert db)
    (when-let [v (resolve-v conn db a v)]
      (some-> conn (depend-on-triple! nil a v))
      (rp/ave db a v))))
 
 (defn resolve-pattern
-  ([e a v] (resolve-pattern *conn* (current-db) e a v))
+  ([e a v] (resolve-pattern *conn* (current-db *conn*) e a v))
   ([conn db e a v]
+   (assert db)
    [(when e (resolve-e conn db e))
     (when a (rp/internal-e db a))
     (when v (resolve-v conn db a v))]))

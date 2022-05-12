@@ -81,3 +81,6 @@
                     {:value val#})))))
 
 (defn conn [] *conn*)
+
+(defpartial touch {:f '(entity/touch *conn* _)}
+  [entity])
