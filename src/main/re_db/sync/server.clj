@@ -2,8 +2,7 @@
   (:require [cognitect.transit :as transit]
             [re-db.xform :as xf]
             [re-db.subscriptions :as s]
-            re-db.query)
-  (:import re_db.reactive.query.Entity))
+            re-db.query))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity references over the wire
