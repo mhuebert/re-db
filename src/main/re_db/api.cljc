@@ -1,6 +1,6 @@
 (ns re-db.api
   (:refer-clojure :exclude [get get-in contains? select-keys namespace bound-fn])
-  (:require [re-db.in-memory :as d]
+  (:require [re-db.in-memory :as mem]
             [re-db.protocols :as rp]
             [re-db.patterns :as patterns :refer [*conn*]]
             [re-db.pull :as pull]
@@ -13,9 +13,9 @@
 
 (defn listen-conn [conn]
   (doto conn
-    (d/listen! ::read (fn [conn report] (patterns/invalidate-report-datoms! conn report rp/doto-triples)))))
+    (mem/listen! ::read (fn [conn report] (patterns/invalidate-report-datoms! conn report rp/doto-triples)))))
 
-(def create-conn (comp listen-conn d/create-conn))
+(def create-conn (comp listen-conn mem/create-conn))
 
 (defmacro with-conn
   "Evaluates body with *conn* bound to `conn`, which may be a connection or a schema"
@@ -52,7 +52,7 @@
   ([txs])
   ([txs opts]))
 
-(m/defpartial merge-schema! {:f '(d/merge-schema! *conn* _)}
+(m/defpartial merge-schema! {:f '(rp/merge-schema *conn* _)}
   [schema])
 
 (defn bind

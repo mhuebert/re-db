@@ -602,5 +602,6 @@
   (doto-triples [this handle-triple report] (doto-triples handle-triple report))
   (transact
    ([this txs] (transact! this txs))
-   ([this txs opts] (transact! this txs opts))))
+   ([this txs opts] (transact! this txs opts)))
+  (merge-schema [this schema] (merge-schema! this schema)))
 

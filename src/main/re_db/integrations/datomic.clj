@@ -181,4 +181,6 @@
     ([this a schema] (rp/many? (rp/db this) a schema)))
   (transact
     ([this txs] (d/transact this txs))
-    ([this txs opts] (d/transact this txs opts))))
+    ([this txs opts] (d/transact this txs opts)))
+  (merge-schema [this schema]
+   (d/transact (mapv (fn [[ident m]] (assoc m :db/ident ident)) schema))))

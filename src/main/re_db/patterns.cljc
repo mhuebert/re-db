@@ -41,8 +41,8 @@
 
 (def reactive-conn (comp listen-patterns rm/create-conn))
 
-(def ^:dynamic *conn* (reactive-conn)) ;; if present, reads can subscribe to changes
-(def ^:dynamic *db* nil) ;; point-in-time db value
+(defonce ^:dynamic *conn* (reactive-conn)) ;; if present, reads can subscribe to changes
+(defonce ^:dynamic *db* nil) ;; point-in-time db value
 
 (defn current-conn [] *conn*)
 (defn current-db

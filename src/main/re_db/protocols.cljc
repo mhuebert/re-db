@@ -12,6 +12,7 @@
   (unique? [this a] [this a schema])
   (many? [this a] [this a schema])
   (doto-triples [this handle-triple report])
-  (transact [this txs] [this txs options]))
+  (transact [this txs] [this txs options])
+  (merge-schema [this schema]))
 
 (defn get-db [conn the-db] (or the-db (db conn)))
