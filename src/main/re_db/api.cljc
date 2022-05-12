@@ -42,7 +42,7 @@
   ([e a not-found]
    (util/some-or (get e a) not-found)))
 
-(defn where [& clauses] (where/where clauses))
+(defn where [clauses] (where/where clauses))
 
 (m/defpartial pull {:f pull/pull}
   ([pull-expr])

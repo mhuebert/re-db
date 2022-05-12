@@ -162,12 +162,12 @@
       (is (= "teacher" (api/get "herman" :occupation))
           "api/get an attribute of an entity")
 
-      (is (= 1 (count (api/where [:occupation "teacher"])))
+      (is (= 1 (count (api/where [[:occupation "teacher"]])))
           "Query on non-indexed attr")
 
       (d/transact! conn [{:db/id "fred" :occupation "teacher"}])
 
-      (is (= 2 (count (api/where [:occupation "teacher"])))
+      (is (= 2 (count (api/where [[:occupation "teacher"]])))
           "Verify d/insert! and query on non-indexed field")
 
       (d/transact! conn [[:db/retract "herman" :occupation]])
@@ -179,7 +179,7 @@
              (->clj (last @tx-log)))
           "retraction datom")
 
-      (is (= 1 (count (api/where [:occupation "teacher"])))
+      (is (= 1 (count (api/where [[:occupation "teacher"]])))
           "Retract non-indexed field")
 
       (d/transact! conn [[:db/retract "herman" :db/id]])
@@ -195,7 +195,7 @@
       (d/transact! conn [{:db/id "me"
                           :dog nil}])
 
-      (is (empty? (api/where [:dog "herman"]))
+      (is (empty? (api/where [[:dog "herman"]]))
           "Setting a value to nil is equivalent to retracting it")
 
       (is (not (contains? @(entity conn "me") :dog))
@@ -346,16 +346,16 @@
       (is (= #{"sally" "pete"} (api/get "fred" :children))
           "cardinality/many attribute returned as set")
       (is (= #{"fred"}
-             (ids (api/where [:children "sally"]))
-             (ids (api/where [:children "pete"])))
+             (ids (api/where [[:children "sally"]]))
+             (ids (api/where [[:children "pete"]])))
           "look up via cardinality/many index")
 
 
       (testing "remove value from cardinality/many attribute"
         (d/transact! conn [[:db/retract "fred" :children #{"sally"}]])
-        (is (= nil (ids (api/where [:children "sally"])))
+        (is (= nil (ids (api/where [[:children "sally"]])))
             "index is removed on retraction")
-        (is (= #{"fred"} (ids (api/where [:children "pete"])))
+        (is (= #{"fred"} (ids (api/where [[:children "pete"]])))
             "index remains for other value")
         (is (= #{"pete"} (api/get "fred" :children))
             "attribute has correct value"))
