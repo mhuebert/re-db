@@ -599,5 +599,8 @@
   (many?
     ([db a] (many? (get-schema db a)))
     ([db a schema] (many? schema)))
-  (doto-triples [this handle-triple report] (doto-triples handle-triple report)))
+  (doto-triples [this handle-triple report] (doto-triples handle-triple report))
+  (transact
+   ([this txs] (transact! this txs))
+   ([this txs opts] (transact! this txs opts))))
 

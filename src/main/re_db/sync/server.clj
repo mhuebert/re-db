@@ -1,8 +1,7 @@
 (ns re-db.sync.server
   (:require [cognitect.transit :as transit]
             [re-db.xform :as xf]
-            [re-db.subscriptions :as s]
-            re-db.query))
+            [re-db.subscriptions :as s]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity references over the wire

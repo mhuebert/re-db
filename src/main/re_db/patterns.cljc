@@ -58,7 +58,7 @@
 (defn make-listener [conn e a v]
   (r/->RAtom nil
              {}
-             [#(swap! !ratoms util/dissoc-in [conn e a v])]
+             [(fn [_] (swap! !ratoms util/dissoc-in [conn e a v]))]
              {:pattern [e a v]}))
 
 (declare resolve-pattern)

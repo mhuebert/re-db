@@ -178,4 +178,7 @@
     ([this a schema] (rp/unique? (rp/db this) a schema)))
   (many?
     ([this a] (rp/many? (rp/db this) a))
-    ([this a schema] (rp/many? (rp/db this) a schema))))
+    ([this a schema] (rp/many? (rp/db this) a schema)))
+  (transact
+    ([this txs] (d/transact this txs))
+    ([this txs opts] (d/transact this txs opts))))
