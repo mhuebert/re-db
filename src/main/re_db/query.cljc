@@ -61,6 +61,7 @@
                        r/empty-derefs
                        r/empty-hooks)]
     (r/add-on-dispose! state (fn [_] (r/dispose-derefs! query)))
+    (r/invalidate! query)
     query))
 
 (defn register
