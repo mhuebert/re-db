@@ -550,12 +550,16 @@
       (swap! conn add-missing-index a :ae))
     (db-ae @conn a true)))
 
+(defn db-eav
+  ([db e] (assoc (fast/gets db :eav e) :db/id e))
+  ([db e a] (fast/gets db :eav e a)))
+
 (extend-type #?(:clj clojure.lang.Atom :cljs cljs.core.Atom)
   rp/ITriple
   (db [conn] @conn)
   (eav
-    ([conn e] (fast/gets @conn :eav e))
-    ([conn e a] (fast/gets @conn :eav e a)))
+    ([conn e] (db-eav @conn e))
+    ([conn e a] (db-eav @conn e a)))
   (ave [conn a v] (conn-ave conn a v))
   (vae
     ([conn v] (fast/gets @conn :vae v))
@@ -581,8 +585,8 @@
   rp/ITriple
   (db [-db] -db)
   (eav
-    ([db e] (fast/gets db :eav e))
-    ([db e a] (fast/gets db :eav e a)))
+    ([db e] (db-eav db e))
+    ([db e a] (db-eav db e a)))
   (ave [db a v] (db-ave db a v))
   (vae
     ([db v] (fast/gets db :vae v))

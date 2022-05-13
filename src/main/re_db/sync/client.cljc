@@ -12,8 +12,9 @@
 (defn set-send-fn! [f] (reset! !send-fn f))
 
 ;; for instantiating entities
-(def read-handlers {"re-db/entity" (transit/read-handler (fn [e]
-                                                           (d/entity (.fromArray PersistentVector e true))))})
+(def read-handlers {"re-db/entity" (transit/read-handler
+                                    (fn [e]
+                                      (d/entity (.fromArray PersistentVector e true))))})
 
 (defn transact-txs [txs]
   (d/transact! txs))
