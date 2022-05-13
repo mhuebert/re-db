@@ -57,8 +57,10 @@
       (if-some [v (get o k)] v nf))
     IDeref
     (-deref [this]
-      (patterns/depend-on-triple! e nil nil)
-      (rp/eav (rp/get-db conn db) e))
+      (when-let [e (resolve-e! conn (rp/get-db conn db) e e-resolved?)]
+        (patterns/depend-on-triple! e nil nil)
+        (some-> (rp/eav (rp/get-db conn db) e)
+                (assoc :db/id e))))
     ISeqable
     (-seq [this] (seq @this))))
 

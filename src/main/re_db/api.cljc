@@ -36,7 +36,9 @@
 (defn get
   "Read entity or attribute reactively"
   ([e]
-   (some-> (patterns/resolve-e e) patterns/eav))
+   (when-let [e (patterns/resolve-e e)]
+     (some-> (patterns/eav e)
+             (assoc :db/id e))))
   ([e a]
    (some-> (patterns/resolve-e e) (patterns/eav a)))
   ([e a not-found]

@@ -229,9 +229,6 @@
 (defn- add
   [db [_ e a v]]
   (let [a-schema (get-schema db a)
-        db (if (contains? (:eav db) e)
-             db
-             (fast/update! db :eav assoc! e {:db/id e}))
         m (get-entity db e)
         pv (get m a)
         v (cond-> v (ref? a-schema) (resolve-e db))]
@@ -339,6 +336,7 @@
   (let [{:as m e :db/id} (resolve-map-e db m)]
     (let [prev-m (get-entity db e)
           db-schema (:schema db)
+          m (dissoc m :db/id)
           [db new-m] (reduce-kv (fn [[db new-m] a v]
                                   (let [a-schema (db-schema a default-schema)
                                         ;; if ref attribute, handle inline/nested entities
@@ -364,8 +362,7 @@
         :db/add (let [e (tx 1)]
                   (if-let [resolved-e (resolve-e e db)]
                     (add db (assoc tx 1 resolved-e))
-                    (do
-                      ;; id cannot be resolved - upsert lookup ref
+                    (do ;; id cannot be resolved - upsert lookup ref
                       (assert (vector? e) "db/id missing")
                       (add-map db {(e 0) (e 1)
                                    (tx 2) (tx 3)}))))
@@ -575,7 +572,10 @@
   (many?
     ([conn a] (many? (get-schema @conn a)))
     ([conn a schema] (many? schema)))
-  (doto-triples [conn handle-triple report] (doto-triples handle-triple report)))
+  (doto-triples [conn handle-triple report] (doto-triples handle-triple report))
+  (transact
+    ([conn txs] (transact! conn txs))
+    ([conn txs opts] (transact! conn txs opts))))
 
 (extend-type #?(:cljs default :clj java.lang.Object)
   rp/ITriple
@@ -601,7 +601,7 @@
     ([db a schema] (many? schema)))
   (doto-triples [this handle-triple report] (doto-triples handle-triple report))
   (transact
-   ([this txs] (transact! this txs))
-   ([this txs opts] (transact! this txs opts)))
+    ([this txs] (transact! this txs))
+    ([this txs opts] (transact! this txs opts)))
   (merge-schema [this schema] (merge-schema! this schema)))
 

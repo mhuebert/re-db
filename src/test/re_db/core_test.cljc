@@ -18,42 +18,57 @@
 (defn db= [& dbs]
   (apply = (map #(dissoc % :tx) dbs)))
 
-(deftest datom-tx
-  (let [schema {:authors {:db/valueType :db.type/ref
-                          :db/cardinality :db.cardinality/many}
-                :pet {:db/valueType :db.type/ref}}
-        tx [{:db/id "fred"
-             :name "Fred"
-             :pet {:db/id "fido" :name "Fido"}}
-            {:db/id "mary"
-             :name "Mary"}
-            {:db/id "1" :authors #{"fred" "mary"}}
-            ;[:db/add "1" :authors #{"fred" "mary"}]
-            [:db/add "1" :name "One"]]
-        conn (d/create-conn schema)
-        tx-report (d/transact! conn tx)]
-    (api/with-conn conn
+(def pets-schema {:person/pet schema/ref
+                  :pet/name schema/unique-id
+                  :person/friends (merge schema/ref
+                                         schema/many)})
+(def pets-tx [{:db/id "mary"
+               :person/name "Mary"
+               :person/pet [:pet/name "safran"] ;; upsert via lookup ref
+               :person/friends #{"fred"
+                                 "sally"
+                                 "william"}}
+              {:db/id "fred"
+               :person/name "Fred"
+               :person/pet {:db/id "fido" :pet/name "Fido"} ;; upsert via map
+               :person/friends #{"mary"}}
 
-      (is (db= @conn
-               @(doto (d/create-conn schema)
-                  (d/transact! [[:db/datoms (:datoms tx-report)]])))
+              [:db/add "billy" :pet/name "Billy"]
+              [:db/add "whisper" :pet/name "Whisper"]
+
+              {:db/id "william"
+               :person/name "William"
+               :person/pets #{"billy"}}
+              {:db/id "sally"
+               :person/name "Sally"
+               :person/pets #{"whisper"}}])
+
+
+(deftest datom-tx
+  (let [conn (d/create-conn pets-schema)
+        tx-report (d/transact! conn pets-tx)]
+    (api/with-conn conn
+      (prn (:datoms tx-report))
+      (is (= (dissoc @conn :schema :tx)
+             (dissoc @(doto (d/create-conn pets-schema)
+                        (d/transact! [[:db/datoms (:datoms tx-report)]])) :schema :tx))
           :db/datoms)
 
-      (is (db= @(d/create-conn schema)
-               (let [conn (d/create-conn schema)
-                     {:keys [datoms]} (d/transact! conn tx)]
-                 (d/transact! conn [[:db/datoms-reverse datoms]])
-                 @conn)
-               @(doto (d/create-conn schema)
-                  (d/transact! [[:db/datoms (:datoms tx-report)]
-                                [:db/datoms-reverse (:datoms tx-report)]])))
+      (is (= (dissoc @(d/create-conn pets-schema) :tx :schema)
+             (dissoc (let [conn (d/create-conn pets-schema)
+                           {:keys [datoms]} (d/transact! conn pets-tx)]
+                       (d/transact! conn [[:db/datoms-reverse datoms]])
+                       @conn) :tx :schema)
+             (dissoc @(doto (d/create-conn pets-schema)
+                        (d/transact! [[:db/datoms (:datoms tx-report)]
+                                      [:db/datoms-reverse (:datoms tx-report)]])) :tx :schema))
           :db/datoms-reverse)
 
-      (is (= {:db/id "fred"
+      #_(is (= {:db/id "fred"
               :name "Fred"
-              :_authors #{"1"}
-              :pet "fido"} (-> (pull "fred" '[* :_authors])
-                               (update :_authors ids)))
+              :_pets #{"1"}
+              :pet "fido"} (-> (pull "fred" '[* :_pets])
+                               (update :_pets ids)))
           "refs with cardinality-many"))))
 
 (deftest upserts
@@ -182,7 +197,6 @@
       (is (= 1 (count (api/where [[:occupation "teacher"]])))
           "Retract non-indexed field")
 
-      (d/transact! conn [[:db/retract "herman" :db/id]])
       (is (nil? (api/get "herman"))
           "Entity with no attributes is removed")
 
@@ -444,7 +458,7 @@
                      :email "c"}])
     (let [e1 (entity "a")
           e2 (entity "a")]
-      (is (identical? @e1 @e2))
+      (is (not (identical? @e1 @e2)))
       (is (= e1 e2))
       (is (= (hash e1) (hash e2))))
 
