@@ -111,7 +111,7 @@
   ([db e a]
    (get (d/entity db e) a))
   ([db e]
-   (d/touch (d/entity db e))))
+   (into {} (d/touch (d/entity db e)))))
 
 (defn -ae [db a]
   (d/q
