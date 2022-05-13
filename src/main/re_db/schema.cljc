@@ -2,6 +2,7 @@
   (:refer-clojure :exclude [ref]))
 
 ;; schema
+(def one {:db/cardinality :db.cardinality/one})
 (def many {:db/cardinality :db.cardinality/many})
 (def ref {:db/valueType :db.type/ref})
 (def unique-id {:db/unique :db.unique/identity})

@@ -1,4 +1,4 @@
-(ns re-db.core-test
+(ns re-db.in-memory-test
   (:require [clojure.test :refer [deftest is testing]]
             [re-db.in-memory :as d]
             [re-db.api :as api]
@@ -18,8 +18,15 @@
 (defn db= [& dbs]
   (apply = (map #(dissoc % :tx) dbs)))
 
-(def pets-schema {:person/pet schema/ref
-                  :pet/name schema/unique-id
+(def pets-schema {:person/pet (merge schema/ref
+                                     schema/one)
+                  :pet/name (merge schema/unique-id
+                                   schema/one
+                                   {:db/valueType :db.type/string})
+                  :person/name (merge
+                                schema/one
+                                schema/unique-id
+                                {:db/valueType :db.type/string})
                   :person/friends (merge schema/ref
                                          schema/many)})
 (def pets-tx [{:db/id "mary"

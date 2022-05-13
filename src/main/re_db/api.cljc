@@ -48,7 +48,7 @@
 
 (m/defpartial pull {:f pull/pull}
   ([pull-expr])
-  ([entity pull-expr]))
+  ([id pull-expr]))
 
 (m/defpartial transact! {:f (rp/transact *conn* _)}
   ([txs])
