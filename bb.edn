@@ -1,4 +1,5 @@
 {:tasks {dev (do (shell "yarn install")
-                 (shell "yarn shadow-cljs -A:datomic:test:clerk watch test"))
+                 (shell "yarn shadow-cljs -A:datomic:datahike:test:clerk start")
+                 (shell "yarn shadow-cljs watch test"))
          server (shell "yarn shadow-cljs -A:datomic:test:clerk server")
          bench (shell "yarn shadow-cljs release bench")}}

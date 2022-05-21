@@ -13,7 +13,7 @@
 
 (defn listen-conn [conn]
   (doto conn
-    (mem/listen! ::read (fn [conn report] (patterns/invalidate-report-datoms! conn report rp/doto-triples)))))
+    (mem/listen! ::read (fn [conn report] (patterns/handle-report! conn report)))))
 
 (def create-conn (comp listen-conn mem/create-conn))
 
@@ -50,11 +50,11 @@
   ([pull-expr])
   ([id pull-expr]))
 
-(m/defpartial transact! {:f (rp/transact *conn* _)}
+(m/defpartial transact! {:f (rp/transact (rp/db *conn*) *conn* _)}
   ([txs])
   ([txs opts]))
 
-(m/defpartial merge-schema! {:f '(rp/merge-schema *conn* _)}
+(m/defpartial merge-schema! {:f '(rp/merge-schema (rp/db *conn*) *conn* _)}
   [schema])
 
 (defn bind
@@ -83,6 +83,4 @@
                     {:value val#})))))
 
 (defn conn [] *conn*)
-
-(defpartial touch {:f '(entity/touch *conn* _)}
-  [entity])
+(defn touch [entity] @entity)

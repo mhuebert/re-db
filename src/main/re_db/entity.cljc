@@ -24,8 +24,9 @@
         (Entity. conn db e e-resolved? get-v new-meta)))
     IHash
     (-hash [this]
-      (resolve-e! conn (rp/get-db conn db) e e-resolved?)
-      (hash [e (rp/eav (rp/get-db conn db) e)]))
+      (let [db (rp/get-db conn db)]
+        (resolve-e! conn db e e-resolved?)
+        (hash [e (rp/eav db e)])))
 
     IEquiv
     (-equiv [this other]
@@ -35,52 +36,47 @@
            (= (:db/id this) (:db/id other))))
     ILookup
     (-lookup [o a]
-      (resolve-e! conn (rp/get-db conn db) e e-resolved?)
-      (case a
-        :db/id e
-        (let [is-reverse (u/reverse-attr? a)
-              _ (if is-reverse
-                  (patterns/depend-on-triple! nil a e)  ;; [_ a v]
-                  (patterns/depend-on-triple! e a nil)) ;; [e a _]
-              a (cond-> a is-reverse u/forward-attr)
-              a-schema (rp/get-schema (rp/get-db conn db) a)
-              is-ref (rp/ref? conn a a-schema)
-              v (get-v a is-reverse)]
-          (if is-reverse
-            (into #{} (map #(entity conn db %)) v)
-            (if is-ref
-              (if (rp/many? (rp/get-db conn db) a a-schema)
-                (into #{} (map #(entity conn db %)) v)
-                (entity conn db v))
-              v)))))
+      (let [db (rp/get-db conn db)]
+        (resolve-e! conn db e e-resolved?)
+        (case a
+          :db/id e
+          (let [is-reverse (u/reverse-attr? a)
+                _ (if is-reverse
+                    (patterns/depend-on-triple! nil a e) ;; [_ a v]
+                    (patterns/depend-on-triple! e a nil)) ;; [e a _]
+                a (cond-> a is-reverse u/forward-attr)
+                a-schema (rp/get-schema db a)
+                is-ref (rp/ref? db a a-schema)
+                v (get-v a is-reverse)]
+            (if is-reverse
+              (into #{} (map #(entity conn db %)) v)
+              (if is-ref
+                (if (rp/many? db a a-schema)
+                  (into #{} (map #(entity conn db %)) v)
+                  (entity conn db v))
+                v))))))
     (-lookup [o k nf]
       (if-some [v (get o k)] v nf))
     IDeref
     (-deref [this]
-      (when-let [e (resolve-e! conn (rp/get-db conn db) e e-resolved?)]
-        (patterns/depend-on-triple! e nil nil)
-        (rp/eav (rp/get-db conn db) e)))
+      (let [db (rp/get-db conn db)]
+        (when-let [e (resolve-e! conn db e e-resolved?)]
+          (patterns/depend-on-triple! e nil nil)
+          (rp/eav db e))))
     ISeqable
     (-seq [this] (seq @this))))
 
 (defn entity
   ([conn db e]
    (let [e (:db/id e e)
-         e (or (patterns/resolve-e conn (rp/get-db conn db) e) e)]
+         db (rp/get-db conn db)
+         e (or (patterns/resolve-e conn db e) e)]
      (->Entity conn db e false (memoize (fn [a is-reverse]
                                           (if is-reverse
-                                            (rp/vae conn e a)
-                                            (rp/eav conn e a)))) nil)))
+                                            (rp/ave db a e)
+                                            (rp/eav db e a)))) nil)))
   ([conn e] (entity conn nil e)) ;; conn is specified - use it for db-value, late-bound
   ([e] (entity *conn* nil e))) ;; nothing is specified - use current *conn*
 
-(defn touch
-  ([entity] (touch *conn* nil entity))
-  ([conn entity] (touch conn nil entity))
-  ([conn db entity]
-   (let [db (rp/get-db conn db)
-         e (:db/id entity)]
-     (patterns/depend-on-triple! nil nil e)
-     (reduce-kv (fn [m a vs] (assoc m (u/reverse-attr a) vs))
-                @entity
-                (rp/vae db e)))))
+;; difference from others: no isComponent
+(defn touch [entity] @entity)

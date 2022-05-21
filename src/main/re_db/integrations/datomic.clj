@@ -94,7 +94,7 @@
          (try
            (while @!continue
              (let [report (a/<! tx-chan)]
-               (#'patterns/invalidate-report-datoms! conn report datomic-doto-triples!)
+               (#'patterns/handle-report! conn report datomic-doto-triples!)
                (handle-lock conn report)))
            (catch Exception e (println :error-handling-tx-report e))))
        (swap! !conn-state update conn assoc
@@ -127,60 +127,31 @@
      :in $ ?a ?v]
    db a v))
 
-(defn -vae
-  ([db v]
-   (prn :vae! (->> (d/datoms db :vaet v)
-                   (reduce (fn [out [e a]] (update out (util/reverse-attr a) (fnil conj #{}) e)) {})))
-   (->> (d/datoms db :vaet v)
-        (reduce (fn [out [e a]] (update out (util/reverse-attr a) (fnil conj #{}) e)) {})))
-  ([db v a]
-   (get (d/entity db v) (util/reverse-attr a))))
-
 (extend-type Db
   rp/ITriple
   (eav
     ([db e a] (-eav db e a))
     ([db e] (-eav db e)))
   (ave [db a v] (-ave db a v))
-  (vae
-    ([db v a] (-vae db v a))
-    ([db v] (-vae db v)))
   (ae [db a] (-ae db a))
   (internal-e [db e] (d/entid db e))
   (get-schema [db a] (d/entity db a))
   (ref?
-    ([this a] (rp/ref? this a (rp/get-schema this a)))
-    ([this a schema] (= :db.type/ref (:db/valueType schema))))
+    ([db a] (rp/ref? db a (rp/get-schema db a)))
+    ([db a schema] (= :db.type/ref (:db/valueType schema))))
   (unique?
-    ([this a] (rp/unique? this a (rp/get-schema this a)))
-    ([this a schema] (:db/unique schema)))
+    ([db a] (rp/unique? db a (rp/get-schema db a)))
+    ([db a schema] (:db/unique schema)))
   (many?
-    ([this a] (rp/many? this a (rp/get-schema this a)))
-    ([this a schema] (= :db.cardinality/many (:db/cardinality schema)))))
+    ([db a] (rp/many? db a (rp/get-schema db a)))
+    ([db a schema] (= :db.cardinality/many (:db/cardinality schema))))
+  (transact
+    ([db conn txs] (d/transact conn txs))
+    ([db conn txs opts] (d/transact conn txs opts)))
+  (merge-schema [db conn schema]
+    (d/transact conn (mapv (fn [[ident m]] (assoc m :db/ident ident)) schema)))
+  (doto-report-triples [db f report] (datomic-doto-triples! f report)))
 
 (extend-type LocalConnection
-  rp/ITriple
-  (db [conn] (d/db conn))
-  (eav
-    ([conn e] (-eav (rp/db conn) e))
-    ([conn e a] (-eav (rp/db conn) e a)))
-  (ave [conn a v] (-ave (rp/db conn) a v))
-  (vae
-    ([conn v] (-vae (rp/db conn) v))
-    ([conn v a] (-vae (rp/db conn) v a)))
-  (ae [conn a] (-ae (rp/db conn) a))
-  (get-schema [conn a] (rp/get-schema (rp/db conn) a))
-  (ref?
-    ([this a] (rp/ref? (rp/db this) a))
-    ([this a schema] (rp/ref? (rp/db this) a schema)))
-  (unique?
-    ([this a] (rp/unique? (rp/db this) a))
-    ([this a schema] (rp/unique? (rp/db this) a schema)))
-  (many?
-    ([this a] (rp/many? (rp/db this) a))
-    ([this a schema] (rp/many? (rp/db this) a schema)))
-  (transact
-    ([this txs] (d/transact this txs))
-    ([this txs opts] (d/transact this txs opts)))
-  (merge-schema [this schema]
-   (d/transact (mapv (fn [[ident m]] (assoc m :db/ident ident)) schema))))
+  rp/IConn
+  (db [conn] (d/db conn)))

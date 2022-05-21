@@ -4,42 +4,43 @@
             [re-db.fast :as fast]
             [re-db.util :as util]
             [re-db.protocols :as rp]
-            [re-db.in-memory :as rm])
+            [re-db.in-memory :as mem])
   #?(:cljs (:require-macros re-db.patterns)))
 
 (defonce !listeners (atom {}))
 (def !ratoms !listeners)
 
-(defn invalidate-report-datoms!
+(defn handle-report!
   ;; given a re-db transaction, invalidates readers based on
   ;; patterns found in transacted datoms.
-  [conn report doto-triples]
+  [conn report]
   (when-let [listeners (@!listeners conn)]
     (let [result (volatile! #{})
-          collect! #(some->> % (vswap! result conj ))
-          _ (doto-triples (fn [e a v]
-                            ;; triggers patterns for datom, with "early termination"
-                            ;; for paths that don't lead to any invalidators.
-                            (when-some [e (listeners e)]
-                              (collect! (fast/gets-some e nil nil)) ;; e__
-                              (collect! (fast/gets-some e a nil))) ;; ea_
-                            (when-some [_ (listeners nil)]
-                              (when-some [__ (_ nil)]
-                                (collect! (__ v))) ;; __v (used for refs)
-                              (when-some [_a (_ a)]
-                                (collect! (_a v)) ;; _av
-                                (collect! (_a nil))))) ;; _a_
-                          report)
+          collect! #(some->> % (vswap! result conj))
+          _ (rp/doto-report-triples
+             (rp/db conn)
+             (fn [e a v]
+               ;; triggers patterns for datom, with "early termination"
+               ;; for paths that don't lead to any invalidators.
+               (when-some [e (listeners e)]
+                 (collect! (fast/gets-some e nil nil)) ;; e__
+                 (collect! (fast/gets-some e a nil))) ;; ea_
+               (when-some [_ (listeners nil)]
+                 (when-some [__ (_ nil)]
+                   (collect! (__ v))) ;; __v (used for refs)
+                 (when-some [_a (_ a)]
+                   (collect! (_a v)) ;; _av
+                   (collect! (_a nil))))) ;; _a_
+             report)
           listeners @result]
       #_(prn :invalidating (mapv (comp :pattern meta) listeners))
       (doseq [listener listeners] (r/invalidate! listener)))))
 
 (defn listen-patterns [conn]
   (doto conn
-    (rm/listen! ::patterns (fn [conn report]
-                             (invalidate-report-datoms! conn report rm/doto-triples)))))
+    (mem/listen! ::patterns handle-report!)))
 
-(def reactive-conn (comp listen-patterns rm/create-conn))
+(def reactive-conn (comp listen-patterns mem/create-conn))
 
 (defonce ^:dynamic *conn* (reactive-conn)) ;; if present, reads can subscribe to changes
 (defonce ^:dynamic *db* nil) ;; point-in-time db value
@@ -84,7 +85,7 @@
   ([e] (resolve-lookup-ref *conn* (current-db *conn*) e))
   ([conn db [a v :as e]]
    (assert db)
-   (assert (rp/unique? conn a) "Lookup ref attribute must be unique")
+   (assert (rp/unique? db a) "Lookup ref attribute must be unique")
    (if (vector? v) ;; nested lookup ref
      (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
      (when v

@@ -1,33 +1,48 @@
 (ns re-db.sync-notebook
-  (:require [datomic.api :as d]
-            [nextjournal.clerk :as-alias clerk]
+  (:require [datomic.api :as dm]
+            [re-db.integrations.datomic]
+            [datahike.api :as dh]
+            [re-db.integrations.datahike]
+            [re-db.api :as re]
             [re-db.query :as q]
             [re-db.reactive :as r]
+            [re-db.patterns :as patterns]
             [re-db.hooks :as hooks]))
 
-^{::clerk/visibility :fold}
-(do
-  (def conn (d/connect (doto "datomic:mem://foo5" d/create-database)))
+(def dm-conn (dm/connect (doto "datomic:mem://foo5" dm/create-database)))
+(def dh-cfg {:store {:backend :file :path "/tmp/example"}})
+(def dh-conn (do
+               #_(defonce _dh-db (dh/create-database dh-cfg))
+               (dh/connect dh-cfg)))
 
-  (defn transact! [txs] @(d/transact conn txs))
+;; TODO
+;; "listen" to dm-conn and dh-conn
 
-  (defn db [] (d/db conn))
 
-  (defn schema-ident
-    "Helper function for setting up schema"
-    [[attr type cardinality & {:as params}]]
-    (merge {:db/ident attr
-            :db/valueType (keyword "db.type" (name type))
-            :db/cardinality (keyword "db.cardinality" (name cardinality))}
-           params))
+(defn transact! [txs]
+  (->> @(dm/transact dm-conn txs)
+       (patterns/handle-report! dm-conn))
+  (->> (dh/transact dh-conn txs)
+       (patterns/handle-report! dh-conn)))
 
-  (transact! (map schema-ident [[:movie/title "string" :one {:db/unique :db.unique/identity}]
-                                [:movie/genre "string" :one]
-                                [:movie/release-year "long" :one]
-                                [:movie/emotions "ref" :many]
-                                [:emotion/name "string" :one {:db/unique :db.unique/identity}]
-                                [:movie/dominant-emotion "ref" :one {:db/unique :db.unique/identity}]
-                                [:movie/opposite-emotion "ref" :one {:db/unique :db.unique/identity}]])))
+(defn dm-db [] (dm/db dm-conn))
+(defn dh-db [] @dh-conn)
+
+(defn schema-ident
+  "Helper function for setting up schema"
+  [[attr type cardinality & {:as params}]]
+  (merge {:db/ident attr
+          :db/valueType (keyword "db.type" (name type))
+          :db/cardinality (keyword "db.cardinality" (name cardinality))}
+         params))
+
+(transact! (map schema-ident [[:movie/title "string" :one {:db/unique :db.unique/identity}]
+                              [:movie/genre "string" :one]
+                              [:movie/release-year "long" :one]
+                              [:movie/emotions "ref" :many]
+                              [:emotion/name "string" :one {:db/unique :db.unique/identity}]
+                              [:movie/dominant-emotion "ref" :one {:db/unique :db.unique/identity}]
+                              [:movie/opposite-emotion "ref" :one {:db/unique :db.unique/identity}]]))
 
 ;; add some emotion entities...
 
@@ -36,7 +51,8 @@
                        "happy"
                        "angry"
                        "excited"
-                       "tense"]]
+                       "tense"
+                       "whatever"]]
              {:emotion/name name}))
 
 ;; add some movies...
@@ -65,7 +81,7 @@
 
 (q/register :emo-movies
   (fn [emo-name]
-    (->> (q/entity [:emotion/name emo-name])
+    (->> (re/entity [:emotion/name emo-name])
          :movie/_emotions
          (mapv :movie/title))))
 
@@ -78,37 +94,45 @@
    @(query [:emo-movies "happy"])))
 
 
-(def sad (q/query conn [:emo-movies "sad"]))
+(def dm-sad (q/query dm-conn [:emo-movies "sad"]))
+(def dh-sad (q/query dh-conn [:emo-movies "sad"]))
 (transact! [[:db/add
              [:movie/title "Commando"]
              :movie/emotions
              [:emotion/name "sad"]]])
-(prn :current-sad-value @sad)
-(r/dispose! sad)
 
-(def happy (q/query conn [:emo-movies "happy"]))
-happy ;; a Query instance
-@happy ;; the value
+(prn :current-sad-value @dm-sad)
+(prn :current-sad-value @dh-sad)
+(r/dispose! dh-sad)
+(r/dispose! dm-sad)
+
+(def dm-happy (q/query dm-conn [:emo-movies "happy"]))
+(def dh-happy (q/query dh-conn [:emo-movies "happy"]))
 
 ;; watching our query, printing the value
-(add-watch happy :prn (fn [_ _ _ new] (prn :happy-watch new)))
-(def happy-rx (r/reaction! (prn :happy-reaction @happy)))
+(add-watch dm-happy :prn (fn [_ _ _ new] (prn :dm-happy-watch new)))
+(add-watch dh-happy :prn (fn [_ _ _ new] (prn :dh-happy-watch new)))
+
+(def dm-happy-rx (r/reaction! (prn :dm-happy-reaction @dm-happy)))
+(def dh-happy-rx (r/reaction! (prn :dh-happy-reaction @dh-happy)))
 
 ;; modify the query result-set, observe results:
 (do (transact! [[:db/add
                  [:movie/title "Repo Man"]
                  :movie/emotions
                  [:emotion/name "happy"]]])
-    @happy)
+    [@dm-happy
+     @dh-happy])
 
 (do (transact! [[:db/retract
                  [:movie/title "Repo Man"]
                  :movie/emotions
                  [:emotion/name "happy"]]])
-    @happy)
+    [@dm-happy
+     @dh-happy])
 
-(r/dispose! happy-rx)
-(r/dispose! happy)
+(doseq [rx [dm-happy dh-happy dm-happy-rx dh-happy-rx]]
+  (r/dispose! rx))
 
 (prn :no-more-printing)
 (transact! [[:db/add
@@ -117,7 +141,7 @@ happy ;; a Query instance
              [:emotion/name "happy"]]])
 
 ;; pull api
-(q/once (db)
+(q/once (dm-db)
         (-> (q/entity [:movie/title "Repo Man"])
             (q/pull [:movie/title
                      {:movie/emotions [:emotion/name]}
@@ -125,17 +149,17 @@ happy ;; a Query instance
                      :movie/opposite-emotion])))
 
 ;; aliases
-(q/once (db)
+(q/once (dm-db)
         (-> (q/entity [:movie/title "Repo Man"])
             (q/pull '[(:movie/title :as :title)
                       {(:movie/emotions :as :emos) [(:emotion/name :as :name)]}])))
 
 ;; :id option - use as lookup ref
-(q/once (db)
+(q/once (dm-db)
         (-> (q/entity [:movie/title "Repo Man"])
             (q/pull '[(:movie/title :db/id true)])))
 
-(q/once (db)
+(q/once (dm-db)
         (-> (q/entity [:movie/title "Repo Man"])
             (q/pull '[*
                       {:movie/dominant-emotion [*]}
@@ -143,26 +167,26 @@ happy ;; a Query instance
 
 ;; logged lookups
 
-(q/once (db)
+(q/once (dm-db)
         (q/av_ :movie/title "Repo Man"))
 
-(q/once (db)
+(q/once (dm-db)
         (q/_a_ :movie/title))
 
-(q/once (db)
+(q/once (dm-db)
         (q/ea_ [:movie/title "Repo Man"] :movie/dominant-emotion))
 
-(q/capture-patterns (db)
+(q/capture-patterns (dm-db)
                     (q/av_ :movie/title "Repo Man"))
 
 ;; filtering api
-(q/once (db)
+(q/once (dm-db)
         (q/where ;; the first clause selects a group of entities
          [:movie/title "Repo Man"]
          ;; subsequent clauses filter the initial set of entities
          [:movie/dominant-emotion [:emotion/name "sad"]]))
 
-(q/inspect-patterns (db)
+(q/inspect-patterns (dm-db)
                     (->> (q/where [:movie/release-year 1985])
                          (mapv deref)
                          #_(q/pull [:movie/release-year :movie/title])))
@@ -171,7 +195,7 @@ happy ;; a Query instance
 '(q/pull '[* {:sub/child [:name :birthdate]}])
 
 (let [a (r/atom 0)
-      my-query (q/make-query conn #(doto (* @a 10) prn))]
+      my-query (q/make-query dm-conn #(doto (* @a 10) prn))]
   (swap! a inc)
   (swap! a inc)
   (r/dispose! my-query))

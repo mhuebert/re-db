@@ -92,15 +92,6 @@
      :remove (fn [db e a pv]
                (fast/update-db-index! db [:ave a pv] disj e))}))
 
-(def vae-indexer
-  (constantly
-   {:index :vae
-    :per :value
-    :f (fn [db e a v pv v? pv?]
-         (cond-> db
-                 v? (fast/update-db-index! [:vae v a] conj-set e)
-                 pv? (fast/update-db-index! [:vae pv a] disj e)))}))
-
 (declare get-entity get-schema)
 (defn ae-indexer* [db e a v pv v? pv? is-many]
   (let [exists (or v?
@@ -125,7 +116,6 @@
      ;; one indexer per attribute
      (let [[per-value per-datom] (->> (cond-> []
                                               (ave? a-schema) (conj (ave-indexer a-schema))
-                                              (ref? a-schema) (conj (vae-indexer a-schema))
                                               (ae? a-schema) (conj (ae-indexer a-schema)))
                                       (reduce (fn [out {:keys [per f]}]
                                                 (case per
@@ -498,7 +488,6 @@
   ([schema]
    (atom {:ae {}
           :eav {}
-          :vae {}
           :ave {}
           :schema (compile-db-schema schema)})))
 
@@ -554,43 +543,12 @@
   ([db e] (assoc (fast/gets db :eav e) :db/id e))
   ([db e a] (fast/gets db :eav e a)))
 
-(extend-type #?(:clj clojure.lang.Atom :cljs cljs.core.Atom)
-  rp/ITriple
-  (db [conn] @conn)
-  (eav
-    ([conn e] (db-eav @conn e))
-    ([conn e a] (db-eav @conn e a)))
-  (ave [conn a v] (conn-ave conn a v))
-  (vae
-    ([conn v] (fast/gets @conn :vae v))
-    ([conn v a] (fast/gets @conn :vae v a)))
-  (ae [conn a] (conn-ae conn a))
-  (internal-e [conn e] e)
-  (get-schema [conn a] (get-schema @conn a))
-  (ref?
-    ([conn a] (ref? (get-schema @conn a)))
-    ([conn a schema] (ref? schema)))
-  (unique?
-    ([conn a] (unique? (get-schema @conn a)))
-    ([conn a schema] (unique? schema)))
-  (many?
-    ([conn a] (many? (get-schema @conn a)))
-    ([conn a schema] (many? schema)))
-  (doto-triples [conn handle-triple report] (doto-triples handle-triple report))
-  (transact
-    ([conn txs] (transact! conn txs))
-    ([conn txs opts] (transact! conn txs opts))))
-
 (extend-type #?(:cljs default :clj java.lang.Object)
   rp/ITriple
-  (db [-db] -db)
   (eav
     ([db e] (db-eav db e))
     ([db e a] (db-eav db e a)))
   (ave [db a v] (db-ave db a v))
-  (vae
-    ([db v] (fast/gets db :vae v))
-    ([db v a] (fast/gets db :vae v a)))
   (ae [db a] (db-ae db a))
   (internal-e [db e] e)
   (get-schema [db a] (get-schema db a))
@@ -603,9 +561,9 @@
   (many?
     ([db a] (many? (get-schema db a)))
     ([db a schema] (many? schema)))
-  (doto-triples [this handle-triple report] (doto-triples handle-triple report))
   (transact
-    ([this txs] (transact! this txs))
-    ([this txs opts] (transact! this txs opts)))
-  (merge-schema [this schema] (merge-schema! this schema)))
+    ([db conn txs] (transact! conn txs))
+    ([db conn txs opts] (transact! conn txs opts)))
+  (merge-schema [db conn schema] (merge-schema! conn schema))
+  (doto-report-triples [db f report] (doto-triples f report)))
 

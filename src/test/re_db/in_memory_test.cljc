@@ -250,9 +250,8 @@
             :_owner #{"ball"}}
            (-> (entity "fred")
                (pull '[* :_owner])
-               (update :_owner ids))
-           (entity/touch (entity "fred")))
-        "touch adds refs to entity"))
+               (update :_owner ids)))
+        "reverse refs"))
 
   (api/with-conn (doto (d/create-conn {:authors {:db/valueType :db.type/ref
                                                  :db/cardinality :db.cardinality/many}
