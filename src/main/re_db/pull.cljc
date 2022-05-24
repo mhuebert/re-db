@@ -6,8 +6,11 @@
             [re-db.entity :as entity])
   #?(:clj (:import [re_db.entity Entity])))
 
-(defn wrap-id [id many?] (if many? (mapv (fn [id] {:db/id id}) id)
-                                   {:db/id id}))
+(def ^:dynamic *wrap-ref* (fn [conn db e] {:db/id e}))
+
+(defn wrap-v [v conn db many? f]
+  (if many? (mapv (fn [v] (f conn db v)) v)
+            (f conn db v)))
 
 (defn- pull*
   ([conn db e pullv] (pull* conn db e pullv #{}))
@@ -43,7 +46,7 @@
                         ;; ref without pull-expr
                         (nil? map-expr) (cond-> v
                                                 is-ref
-                                                (wrap-id is-many))
+                                                (wrap-v conn db is-many *wrap-ref*))
 
                         ;; recurse
                         (or (number? map-expr) (#{'... :...} map-expr))
@@ -61,7 +64,7 @@
                                          (if is-many
                                            (into [] (keep do-pull) v)
                                            (do-pull v)))
-                                       (wrap-id v is-many)))]
+                                       (wrap-v v conn db is-many *wrap-ref*)))]
                           refs #_(cond-> refs (not is-many) first))
 
                         ;; cardinality/many
@@ -87,3 +90,8 @@
    (pull *conn* (rp/get-db *conn* *db*) e pull-expr))
   ([conn db e pull-expr]
    (pull* conn db e pull-expr)))
+
+(defn pull-entities
+  [& args]
+  (binding [*wrap-ref* (fn [conn db e] (entity/entity conn db e))]
+    (apply pull args)))

@@ -45,6 +45,10 @@
   ([pull-expr])
   ([id pull-expr]))
 
+(m/defpartial pull-entities {:f '(pull/pull-entities _)}
+  ([pull-expr])
+  ([id pull-expr]))
+
 (m/defpartial transact! {:f '(->> (rp/transact *conn* _)
                                   (patterns/handle-report! *conn*))}
   ([txs])
