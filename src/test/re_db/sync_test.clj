@@ -16,7 +16,9 @@
             [re-db.protocols :as rp]
             [re-db.subscriptions :as subs]
             [clojure.test :as test :refer [is are deftest testing]]
-            [re-db.schema :as schema]))
+            [re-db.schema :as schema]
+            [re-db.entity :as entity]
+            [clojure.string :as str]))
 
 (subs/clear-subscription-cache!)
 (patterns/clear-listeners!)
@@ -201,6 +203,16 @@
            (map :movie/title))
 
       )))
+
+(deftest attribute-resolvers
+  (binding [entity/*attribute-resolvers* {:movie/title-lowercase
+                                          (fn [{:keys [movie/title]}]
+                                            (str/lower-case title))}]
+    (doseq [conn (map :conn databases)]
+      (re/with-conn conn
+        (is (= "the goonies"
+               (-> (re/pull [:movie/title "The Goonies"] [:movie/title-lowercase])
+                   :movie/title-lowercase)))))))
 
 (let [schema {:owner (merge schema/ref
                             schema/unique-value

@@ -4,6 +4,8 @@
             [re-db.util :as u])
   #?(:cljs (:require-macros [re-db.entity :refer [resolve-e!]])))
 
+(defonce ^:dynamic *attribute-resolvers* {})
+
 (defmacro resolve-e! [conn db e-sym e-resolved-sym]
   `(do (when-not ~e-resolved-sym
          (when-some [e# (patterns/resolve-e ~conn ~db ~e-sym)]
@@ -14,29 +16,38 @@
 (declare entity)
 
 (defn get* [conn db e a wrap?]
-  (case a
-    :db/id e
-    (let [is-reverse (u/reverse-attr? a)
-          a (cond-> a is-reverse u/forward-attr)
-          a-schema (rp/get-schema db a)
-          is-ref (rp/ref? db a a-schema)
-          v (if is-reverse
-              (rp/ave db a e)
-              (rp/eav db e a))]
+  (if (= :db/id e)
+    e
+    (if-let [resolver (*attribute-resolvers* a)]
+      (resolver (entity conn db e))
+      (let [is-reverse (u/reverse-attr? a)
+            a (cond-> a is-reverse u/forward-attr)
+            a-schema (rp/get-schema db a)
+            is-ref (rp/ref? db a a-schema)
+            v (if is-reverse
+                (rp/ave db a e)
+                (rp/eav db e a))]
 
-      (if is-reverse
-        (patterns/depend-on-triple! nil a e) ;; [_ a v]
-        (patterns/depend-on-triple! e a nil)) ;; [e a _]
+        (if is-reverse
+          (patterns/depend-on-triple! nil a e) ;; [_ a v]
+          (patterns/depend-on-triple! e a nil)) ;; [e a _]
 
-      (if (and is-ref wrap?)
-        (if (or is-reverse
-                (rp/many? db a a-schema))
-          (mapv #(entity conn db %) v)
-          (entity conn db v))
-        v))))
+        (if (and is-ref wrap?)
+          (if (or is-reverse
+                  (rp/many? db a a-schema))
+            (mapv #(entity conn db %) v)
+            (entity conn db v))
+          v)))))
+
+(defprotocol IEntity
+  (conn [entity])
+  (db [entity]))
 
 (u/support-clj-protocols
   (deftype Entity [conn db ^:volatile-mutable e ^:volatile-mutable e-resolved? meta]
+    IEntity
+    (conn [this] conn)
+    (db [this] db)
     IMeta
     (-meta [this] meta)
     IWithMeta
