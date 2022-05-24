@@ -1,10 +1,10 @@
 (ns re-db.api
   (:refer-clojure :exclude [get get-in contains? select-keys namespace bound-fn])
   (:require [re-db.in-memory :as mem]
-            [re-db.integrations.in-memory]
+            re-db.integrations.in-memory
+            [re-db.macros :as m :refer [defpartial]]
             [re-db.protocols :as rp]
             [re-db.read :as read :refer [*conn*]]
-            [re-db.macros :as m :refer [defpartial]]
             [re-db.util :as util])
   #?(:cljs (:require-macros re-db.api)))
 
