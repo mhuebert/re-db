@@ -195,19 +195,24 @@
 
 (defn- retract-attr
   [db [_ e a v]]
-  (if-some [pv (fast/gets db :eav e a)]
-    (let [a-schema (get-schema db a)]
-      (if (many? a-schema)
-        (if-some [removals (guard (set/intersection v pv) seq)]
-          (-> db
-              (fast/update-db-index! [:eav e a] (fnil set/difference #{}) removals)
-              (index a-schema e a nil removals))
-          db)
+  (let [a-schema (get-schema db a)
+        is-many (many? a-schema)
+        is-ref (ref? a-schema)
+        v (cond-> v is-ref (resolve-e db))]
+    (if-some [pv (fast/gets db :eav e a)]
+      (if is-many
+        (do
+          (assert (not (set? v)) ":db/retract on :db.cardinality/many does not accept a set")
+          (if (contains? pv v)
+            (-> db
+                (fast/update-db-index! [:eav e a] disj v)
+                (index a-schema e a nil #{v}))
+            db))
         (-> db
             (fast/dissoc-db-index! [:eav e a])
             (index a-schema e a nil pv)
-            (clear-empty-ent e))))
-    db))
+            (clear-empty-ent e)))
+      db)))
 
 ;; retracts each attribute in the entity
 (defn- retract-entity [db [_ e]]
@@ -219,15 +224,19 @@
 (defn- add
   [db [_ e a v]]
   (let [a-schema (get-schema db a)
-        m (get-entity db e)
-        pv (get m a)
-        v (cond-> v (ref? a-schema) (resolve-e db))]
-    (if (many? a-schema)
-      (if-some [additions (guard (set/difference v pv) seq)]
-        (-> db
-            (fast/update-db-index! [:eav e a] into-set additions)
-            (index a-schema e a additions nil))
-        db)
+        is-many (many? a-schema)
+        is-ref (ref? a-schema)
+        pm (get-entity db e)
+        pv (get pm a)
+        v (cond-> v is-ref (resolve-e db))]
+    (if is-many
+      (do
+        (assert (not (set? v)) ":db/add on :db.cardinality/many does not accept a set")
+        (if (contains? pv v)
+          db
+          (-> db
+              (fast/update-db-index! [:eav e a] conj-set v)
+              (index a-schema e a #{v} nil))))
       (if (= pv v)
         db
         (-> db
@@ -302,7 +311,7 @@
         {(v 0) (v 1)})
     v))
 
-(defn handle-nested-entities [db v ^Schema a-schema]
+(defn handle-nested-refs [db v ^Schema a-schema]
   (if (many? a-schema)
     (reduce
      (fn [[db vs :as state] v]
@@ -311,7 +320,7 @@
            (let [sub-entity (resolve-map-e db v-resolved)]
              [(add-map db sub-entity)
               (set-replace vs v (:db/id sub-entity))])
-           state)))
+           [db (set-replace vs v v-resolved)])))
      [db v]
      v)
     (let [v-resolved (handle-lookup-ref db v)]
@@ -329,13 +338,16 @@
           m (dissoc m :db/id)
           [db new-m] (reduce-kv (fn [[db new-m] a v]
                                   (let [a-schema (db-schema a default-schema)
+                                        is-ref (ref? a-schema)
+                                        is-many (many? a-schema)
+                                        v (cond-> v is-many set)
                                         ;; if ref attribute, handle inline/nested entities
-                                        [db new-v] (if (ref? a-schema)
-                                                     (handle-nested-entities db v a-schema)
+                                        [db new-v] (if is-ref
+                                                     (handle-nested-refs db v a-schema)
                                                      [db v])
                                         ;; update indexes
                                         db (add-attr-index db e a new-v (get prev-m a) a-schema)
-                                        value-present (if (many? a-schema)
+                                        value-present (if is-many
                                                         (seq new-v)
                                                         (some? new-v))]
                                     [db (if value-present
@@ -491,79 +503,4 @@
           :ave {}
           :schema (compile-db-schema schema)})))
 
-(defn doto-triples [f {:keys [datoms db-after]}]
-  (let [many? (memoize (fn [a] (many? (get-schema db-after a))))]
-    (doseq [[e a v pv] datoms]
-      (if (many? a)
-        (do (doseq [v v] (f e a v))
-            (doseq [pv pv] (f e a pv)))
-        (do (when (some? v) (f e a v))
-            (when (some? pv) (f e a pv)))))))
-
-(defn- db-ave
-  "Returns entity-ids for entities where attribute (a) equals value (v)"
-  ([db a v]
-   (db-ave db a v (ave? (get-schema db a))))
-  ([db a v indexed?]
-   #_#_when-let [v (cond->> v (ref? a-schema) (resolve-e db))] ;; rp/ave must be called with a resolved value
-   (if indexed?
-     (fast/gets db :ave a v)
-     (->> (:eav db)
-          (reduce-kv
-           (fn [out e m]
-             (cond-> out
-                     (= (m a) v)
-                     (conj e)))
-           #{})))))
-
-(defn- conn-ave
-  "Returns entity-ids for entities where attribute (a) equals value (v)"
-  [conn a v]
-  (let [a-schema (get-schema @conn a)]
-    (when (and auto-index? (not (ave? a-schema)))
-      (swap! conn add-missing-index a :ave))
-    (db-ave @conn a v true)))
-
-(defn db-ae
-  ([db a] (db-ae db a (ae? (get-schema db a))))
-  ([db a indexed?]
-   (if indexed?
-     (fast/gets db :ae a)
-     (reduce-kv (fn [out e ent] (if (contains? ent a)
-                                  (conj out e)
-                                  out)) [] (:eav db)))))
-
-(defn- conn-ae [conn a]
-  (let [a-schema (get-schema @conn a)]
-    (when (and auto-index? (not (ae? a-schema)))
-      (swap! conn add-missing-index a :ae))
-    (db-ae @conn a true)))
-
-(defn db-eav
-  ([db e] (assoc (fast/gets db :eav e) :db/id e))
-  ([db e a] (fast/gets db :eav e a)))
-
-(extend-type #?(:cljs default :clj java.lang.Object)
-  rp/ITriple
-  (eav
-    ([db e] (db-eav db e))
-    ([db e a] (db-eav db e a)))
-  (ave [db a v] (db-ave db a v))
-  (ae [db a] (db-ae db a))
-  (internal-e [db e] e)
-  (get-schema [db a] (get-schema db a))
-  (ref?
-    ([db a] (ref? (get-schema db a)))
-    ([db a schema] (ref? schema)))
-  (unique?
-    ([db a] (unique? (get-schema db a)))
-    ([db a schema] (unique? schema)))
-  (many?
-    ([db a] (many? (get-schema db a)))
-    ([db a schema] (many? schema)))
-  (transact
-    ([db conn txs] (transact! conn txs))
-    ([db conn txs opts] (transact! conn txs opts)))
-  (merge-schema [db conn schema] (merge-schema! conn schema))
-  (doto-report-triples [db f report] (doto-triples f report)))
 

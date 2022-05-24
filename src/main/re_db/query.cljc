@@ -75,5 +75,8 @@
     (fn [conn args]
       #(apply f args))))
 
+(defn patterns [q] (->> (r/get-derefs q)
+                        (keep (comp :pattern meta))))
+
 (defn query [conn qvec]
   (subs/subscription [(first qvec) conn (rest qvec)]))

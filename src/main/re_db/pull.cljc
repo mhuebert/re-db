@@ -1,17 +1,22 @@
 (ns re-db.pull
   (:require [re-db.entity :refer [entity #?(:cljs Entity)]]
             [re-db.util :as util]
-            [re-db.protocols :as rp])
+            [re-db.patterns :as patterns :refer [*conn* *db*]]
+            [re-db.protocols :as rp]
+            [re-db.entity :as entity])
   #?(:clj (:import [re_db.entity Entity])))
 
+(defn wrap-id [id many?] (if many? (mapv (fn [id] {:db/id id}) id)
+                                   {:db/id id}))
+
 (defn- pull*
-  ([entity pullv] (pull* entity pullv #{}))
-  ([^Entity the-entity pullv found]
-   (when the-entity
+  ([conn db e pullv] (pull* conn db e pullv #{}))
+  ([conn db e pullv found]
+   (let [e (patterns/resolve-e conn db e)]
      (reduce-kv
       (fn pull [m i pullexpr]
         (if (= '* pullexpr)
-          (merge m @the-entity)
+          (merge m (rp/eav db e))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
                                (first pullexpr))
@@ -27,45 +32,46 @@
                                                            (or (when default #(util/some-or % default))
                                                                identity)) opts]))
                                         [a a identity])
-                forward-a (cond-> a (util/reverse-attr? a) util/forward-attr)
-                db (rp/get-db (.-conn the-entity) (.-db the-entity))
+                is-reverse (util/reverse-attr? a)
+                forward-a (cond-> a is-reverse util/forward-attr)
                 a-schema (rp/get-schema db forward-a)
-                v (val-fn (get the-entity a))]
+                v (val-fn (entity/get* conn db e a false))
+                is-ref (rp/ref? db a a-schema)
+                is-many (or (rp/many? db a a-schema) is-reverse)
+                v (cond (not is-ref) v
 
-            (assoc m alias
-                     (cond (not (rp/ref? db a a-schema)) v
+                        ;; ref without pull-expr
+                        (nil? map-expr) (cond-> v
+                                                is-ref
+                                                (wrap-id is-many))
 
-                           ;; ref without pull-expr
-                           (nil? map-expr) v
+                        ;; recurse
+                        (or (number? map-expr) (#{'... :...} map-expr))
+                        (let [recursions (if (= 0 map-expr) false map-expr)
+                              refs (when v
+                                     (if recursions
+                                       (let [found (conj found e)
+                                             pullv (if (number? recursions)
+                                                     ;; decrement recurse parameter
+                                                     (update-in pullv [i forward-a] dec)
+                                                     pullv)
+                                             do-pull #(if (and (= :... recursions) (found %))
+                                                        %
+                                                        (pull* conn db % pullv found))]
+                                         (if is-many
+                                           (into [] (keep do-pull) v)
+                                           (do-pull v)))
+                                       (wrap-id v is-many)))]
+                          refs #_(cond-> refs (not is-many) first))
 
-                           ;; recurse
-                           (or (number? map-expr) (= :... map-expr))
-                           (let [recursions (if (= 0 map-expr) false map-expr)
-                                 entities (when v
-                                            (if recursions
-                                              (let [found (conj found (:db/id the-entity))
-                                                    pullv (if (number? recursions)
-                                                            ;; decrement recurse parameter
-                                                            (update-in pullv [i forward-a] dec)
-                                                            pullv)]
-                                                (into #{}
-                                                      (keep #(if (and (= :... recursions) (found %))
-                                                               %
-                                                               (some-> (entity db %)
-                                                                       (pull* pullv found))))
-                                                      v))
-                                              v))]
-                             (cond-> entities (not (rp/many? db a a-schema)) first))
+                        ;; cardinality/many
+                        is-many (mapv #(pull* conn db % map-expr) v)
 
-                           ;; cardinality/many
-                           (rp/many? db a a-schema) (into #{} (map #(pull* % map-expr)) v)
-
-                           ;; cardinality/one
-                           :else (pull* v map-expr))))))
-      {}
+                        ;; cardinality/one
+                        :else (pull* conn db v map-expr))]
+            (cond-> m (some? v) (assoc alias v)))))
+      nil
       pullv))))
-
-(defn ->entity [x] (if (instance? Entity x) x (entity x)))
 
 (defn pull
   "Returns entity as map, as well as linked entities specified in `pull`.
@@ -76,6 +82,8 @@
                 {:db/id 3}]}"
   ;; difference from clojure:
   ;; - if an attribute is not present, `nil` is provided
-  ([pull-expr] (fn [entity] (pull (->entity entity) pull-expr)))
-  ([entity pull-expr]
-   (pull* (->entity entity) pull-expr)))
+  ([pull-expr] (fn [e] (pull e pull-expr)))
+  ([e pull-expr]
+   (pull *conn* (rp/get-db *conn* *db*) e pull-expr))
+  ([conn db e pull-expr]
+   (pull* conn db e pull-expr)))

@@ -17,7 +17,10 @@
 
 (defn guard [x f] (when (f x) x))
 
-(defn set-replace [s old new] (-> s (disj old) (conj new)))
+(defn set-replace [s old new]
+  (if (identical? old new)
+    s
+    (-> s (disj old) (conj new))))
 
 (defn replace-toplevel [pmap forms]
   (map (fn [x]

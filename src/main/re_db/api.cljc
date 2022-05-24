@@ -1,6 +1,7 @@
 (ns re-db.api
   (:refer-clojure :exclude [get get-in contains? select-keys namespace bound-fn])
   (:require [re-db.in-memory :as mem]
+            [re-db.integrations.in-memory]
             [re-db.protocols :as rp]
             [re-db.patterns :as patterns :refer [*conn*]]
             [re-db.pull :as pull]
@@ -11,11 +12,7 @@
             [re-db.util :as util])
   #?(:cljs (:require-macros re-db.api)))
 
-(defn listen-conn [conn]
-  (doto conn
-    (mem/listen! ::read (fn [conn report] (patterns/handle-report! conn report)))))
-
-(def create-conn (comp listen-conn mem/create-conn))
+(def create-conn mem/create-conn)
 
 (defmacro with-conn
   "Evaluates body with *conn* bound to `conn`, which may be a connection or a schema"
@@ -36,9 +33,7 @@
 (defn get
   "Read entity or attribute reactively"
   ([e]
-   (when-let [e (patterns/resolve-e e)]
-     (some-> (patterns/eav e)
-             (assoc :db/id e))))
+   (some-> (patterns/resolve-e e) patterns/eav))
   ([e a]
    (some-> (patterns/resolve-e e) (patterns/eav a)))
   ([e a not-found]
@@ -46,15 +41,16 @@
 
 (defn where [clauses] (where/where clauses))
 
-(m/defpartial pull {:f pull/pull}
+(m/defpartial pull {:f '(pull/pull _)}
   ([pull-expr])
   ([id pull-expr]))
 
-(m/defpartial transact! {:f (rp/transact (rp/db *conn*) *conn* _)}
+(m/defpartial transact! {:f '(->> (rp/transact *conn* _)
+                                  (patterns/handle-report! *conn*))}
   ([txs])
   ([txs opts]))
 
-(m/defpartial merge-schema! {:f '(rp/merge-schema (rp/db *conn*) *conn* _)}
+(m/defpartial merge-schema! {:f '(rp/-merge-schema (rp/db *conn*) *conn* _)}
   [schema])
 
 (defn bind

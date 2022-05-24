@@ -133,66 +133,66 @@
        (is (= @log [1 2 3 1 2 3]))))))
 
 (deftest lookup-patterns
-    (api/with-conn {:a/id {:db/unique :db.unique/identity}
-                    :b/id {:db/unique :db.unique/identity}}
-      (testing
-       (let [get-patterns (fn [f]
-                            (let [res (atom nil)
-                                  rx (r/reaction! (f) (reset! res (r/captured-patterns)))]
-                              (reagent/flush)
-                              (reagent/dispose! rx)
-                              @res))]
+  (api/with-conn {:a/id {:db/unique :db.unique/identity}
+                  :b/id {:db/unique :db.unique/identity}}
+    (testing
+     (let [get-patterns (fn [f]
+                          (let [res (atom nil)
+                                rx (r/reaction! (f) (reset! res (r/captured-patterns)))]
+                            (reagent/flush)
+                            (reagent/dispose! rx)
+                            @res))]
 
-         (are [f patterns]
-           (= (get-patterns f) patterns)
+       (are [f patterns]
+         (= (get-patterns f) patterns)
 
-           #(api/get 1)
-           #{[1 nil nil]}
+         #(api/get 1)
+         #{[1 nil nil]}
 
-           #(api/get [:a/id 1])
-           #{[nil :a/id 1]}
+         #(api/get [:a/id 1])
+         #{[nil :a/id 1]}
 
-           #(api/get [:a/id nil])
-           #{}
+         #(api/get [:a/id nil])
+         #{}
 
-           #(api/get [:a/id [:b/id 1]])
-           #{[nil :b/id 1]}
+         #(api/get [:a/id [:b/id 1]])
+         #{[nil :b/id 1]}
 
-           #(api/transact! [{:db/id "b" :b/id 1}])
-           #{}
+         #(api/transact! [{:db/id "b" :b/id 1}])
+         #{}
 
-           #(api/get [:a/id [:b/id 1]])
-           #{[nil :a/id "b"]
-             [nil :b/id 1]}))))
+         #(api/get [:a/id [:b/id 1]])
+         #{[nil :a/id "b"]
+           [nil :b/id 1]}))))
 
-    (testing "lookup ref pattern"
+  (testing "lookup ref pattern"
 
-      (api/with-conn {}
-        (throws (api/get [:person/children "peter"])
-                "Lookup ref must be on unique attribute"))
+    (api/with-conn {}
+      (throws (api/get [:person/children "peter"])
+              "Lookup ref must be on unique attribute"))
 
-      (api/with-conn {:person/children schema/unique-value}
+    (api/with-conn {:person/children schema/unique-value}
 
-        (throws (api/transact! [[:db/add "mary" :person/children #{"peter"}]
-                                [:db/add "sally" :person/children #{"peter"}]])
-                "Enforced uniqueness in cardinality/many")
+      (throws (api/transact! [[:db/add "mary" :person/children "peter"]
+                              [:db/add "sally" :person/children "peter"]])
+              "Enforced uniqueness in cardinality/many")
 
-        (is (nil? (api/get [:person/children "peter"]))
-            "Lookup ref returns nil when attr is unique but no data found"))
+      (is (nil? (api/get [:person/children "peter"]))
+          "Lookup ref returns nil when attr is unique but no data found"))
 
-      (api/with-conn {:person/children (merge schema/many
-                                              schema/unique-value)}
+    (api/with-conn {:person/children (merge schema/many
+                                            schema/unique-value)}
 
-        (api/transact! [{:db/id "peter" :name "Peter"}])
+      (api/transact! [{:db/id "peter" :name "Peter"}])
 
-        (let [log (atom 0)]
-          @(r/make-reaction
-            (api/bound-fn []
-              (api/get [:person/children "peter"])
-              (swap! log inc)))
-          (is (= 1 @log))
-          (api/transact! [[:db/add "mary" :person/children #{"peter"}]])
-          (is (= 2 @log))))))
+      (let [log (atom 0)]
+        @(r/make-reaction
+          (api/bound-fn []
+            (api/get [:person/children "peter"])
+            (swap! log inc)))
+        (is (= 1 @log))
+        (api/transact! [[:db/add "mary" :person/children "peter"]])
+        (is (= 2 @log))))))
 
 
 (deftest read-from-reaction
@@ -210,19 +210,18 @@
 
 (comment
  (deftest pattern-listeners
-   (api/with-conn (patterns/reactive-conn
-                   {:person/children {:db/cardinality :db.cardinality/many
-                                      :db/unique :db.unique/identity}})
+   (api/with-conn {:person/children {:db/cardinality :db.cardinality/many
+                                     :db/unique :db.unique/identity}}
      (let [conn (api/conn)
            tx-log (atom [])
            _ (db/listen! conn ::pattern-listeners #(swap! tx-log conj (:datoms %2)))]
        (testing "entity pattern"
-         (db/transact! conn [{:db/id "mary"
-                              :name "Mary"}
-                             [:db/add "mary"
-                              :person/children #{"john"}]
-                             {:db/id "john"
-                              :name "John"}])
+         (api/transact! [{:db/id "mary"
+                               :name "Mary"}
+                              [:db/add "mary"
+                               :person/children #{"john"}]
+                              {:db/id "john"
+                               :name "John"}])
 
          (reagent/flush)
 
@@ -236,10 +235,10 @@
            (reagent/track! #(do (api/get "mary" :name)
                                 (swap! attr-call inc)))
            (is (= 1 @entity-call @attr-call))
-           (db/transact! conn [[:db/add "mary" :name "MMMary"]])
+           (api/transact! [[:db/add "mary" :name "MMMary"]])
            (reagent/flush)
            (is (= 2 @entity-call @attr-call))
-           (db/transact! conn [[:db/add "mary" :age 38]])
+           (api/transact! [[:db/add "mary" :age 38]])
            (reagent/flush)
            (is (= [3 2] [@entity-call @attr-call]))
            "Entity listener called when attribute changes"))))))

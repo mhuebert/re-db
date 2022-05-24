@@ -41,7 +41,9 @@
    id))
 
 (defn clear-subscription-cache! []
-  (doseq [sub (vals @!subscription-cache)] (dispose! sub)))
+  (try
+    (doseq [sub (vals @!subscription-cache)] (dispose! sub)))
+  (swap! !subscription-cache empty))
 
 (defmacro def
   "Registers a subscription for name, returns subscription constructor function.

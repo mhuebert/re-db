@@ -8,41 +8,38 @@
   #?(:cljs (:require-macros re-db.patterns)))
 
 (defonce !listeners (atom {}))
-(def !ratoms !listeners)
+(defn clear-listeners! [] (swap! !listeners empty))
 
 (defn handle-report!
   ;; given a re-db transaction, invalidates readers based on
   ;; patterns found in transacted datoms.
   [conn report]
-  (when-let [listeners (@!listeners conn)]
-    (let [result (volatile! #{})
-          collect! #(some->> % (vswap! result conj))
-          _ (rp/doto-report-triples
-             (rp/db conn)
-             (fn [e a v]
-               ;; triggers patterns for datom, with "early termination"
-               ;; for paths that don't lead to any invalidators.
-               (when-some [e (listeners e)]
-                 (collect! (fast/gets-some e nil nil)) ;; e__
-                 (collect! (fast/gets-some e a nil))) ;; ea_
-               (when-some [_ (listeners nil)]
-                 (when-some [__ (_ nil)]
-                   (collect! (__ v))) ;; __v (used for refs)
-                 (when-some [_a (_ a)]
-                   (collect! (_a v)) ;; _av
-                   (collect! (_a nil))))) ;; _a_
-             report)
-          listeners @result]
-      #_(prn :invalidating (mapv (comp :pattern meta) listeners))
-      (doseq [listener listeners] (r/invalidate! listener)))))
+  (when report
+    (if-let [listeners (@!listeners conn)]
+      (let [result (volatile! #{})
+            collect! #(some->> % (vswap! result conj))
+            _ (rp/doto-report-triples
+               (rp/db conn)
+               (fn [e a v]
+                 ;; triggers patterns for datom, with "early termination"
+                 ;; for paths that don't lead to any invalidators.
+                 (when-some [e (listeners e)]
+                   (collect! (fast/gets-some e nil nil)) ;; e__
+                   (collect! (fast/gets-some e a nil))) ;; ea_
+                 (when-some [_ (listeners nil)]
+                   (when-some [__ (_ nil)]
+                     (collect! (__ v))) ;; __v (used for refs)
+                   (when-some [_a (_ a)]
+                     (collect! (_a v)) ;; _av
+                     (collect! (_a nil))))) ;; _a_
+               report)
+            invalidated @result]
+        #_(prn :invalidating (mapv (comp :pattern meta) invalidated))
+        (doseq [listener invalidated] (r/invalidate! listener))
+        (assoc report ::handled (count invalidated)))
+      (assoc report ::handled 0))))
 
-(defn listen-patterns [conn]
-  (doto conn
-    (mem/listen! ::patterns handle-report!)))
-
-(def reactive-conn (comp listen-patterns mem/create-conn))
-
-(defonce ^:dynamic *conn* (reactive-conn)) ;; if present, reads can subscribe to changes
+(defonce ^:dynamic *conn* (mem/create-conn)) ;; if present, reads can subscribe to changes
 (defonce ^:dynamic *db* nil) ;; point-in-time db value
 
 (defn current-conn [] *conn*)
@@ -54,12 +51,12 @@
 (defn clone
   "Creates a copy of conn (without existing listeners)"
   [conn]
-  (listen-patterns (atom @conn)))
+  (atom @conn))
 
 (defn make-listener [conn e a v]
   (r/->RAtom nil
              {}
-             [(fn [_] (swap! !ratoms util/dissoc-in [conn e a v]))]
+             [(fn [_] (swap! !listeners util/dissoc-in [conn e a v]))]
              {:pattern [e a v]}))
 
 (declare resolve-pattern)
@@ -69,9 +66,9 @@
   ([conn e a v]
    (when (and conn (r/owner))
      (let [[e a v :as triple] (resolve-pattern conn (rp/db conn) e a v)]
-       @(or (fast/gets-some @!ratoms conn e a v)
+       @(or (fast/gets-some @!listeners conn e a v)
             (doto (make-listener conn e a v)
-              (->> (swap! !ratoms assoc-in [conn e a v]))))
+              (->> (swap! !listeners assoc-in [conn e a v]))))
        triple))))
 
 (defn ae
@@ -134,9 +131,9 @@
   ([e a v] (resolve-pattern *conn* (current-db *conn*) e a v))
   ([conn db e a v]
    (assert db)
-   [(when e (resolve-e conn db e))
-    (when a (rp/internal-e db a))
-    (when v (resolve-v conn db a v))]))
+   [(some->> e (resolve-e conn db))
+    (some->> a (rp/datom-a db))
+    (some->> v (resolve-v conn db a))]))
 
 (defmacro once
   "Evaluates body with `db` bound, but without tracking dependencies"
@@ -147,9 +144,9 @@
   "Accepts a conn or a schema, returns conn"
   [conn-or-schema]
   (if (map? conn-or-schema)
-    (reactive-conn conn-or-schema)
+    (mem/create-conn conn-or-schema)
     conn-or-schema))
 
 (defmacro with-conn
   [conn & body]
-  `(binding [*conn* (->conn ~conn)] ~@body))
+  `(binding [*conn* (->conn ~conn)] (assert *conn*) ~@body))
