@@ -1,6 +1,7 @@
 (ns re-db.in-memory-test
   (:require #?(:clj [datomic.api :as dm])
-            [clojure.test :refer [deftest is testing]]
+            #?(:clj [clojure.test :refer [deftest is testing]]
+               :cljs [cljs.test :refer [deftest is testing]])
             [re-db.in-memory :as mem]
             [re-db.api :as d]
             [re-db.entity :refer [entity #?(:cljs Entity)]]
@@ -156,10 +157,12 @@
         "transact a map with no id, only a unique attribute")
     (is (= "peter@example.com"
            (-> (entity "herman") :friend :email)))
+
     (is (= "fred"
            (-> (entity [:email "matt@example.com"])
                :friend
                :db/id)))))
+
 
 (deftest basic
 

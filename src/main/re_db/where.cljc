@@ -15,7 +15,7 @@
         :else (fn [entity] (= (get entity a) v))))))
 
 (defn where
-  ([clauses] (where *conn* (current-db *conn*) clauses))
+  ([clauses] (where *conn* (current-db) clauses))
   ([conn db clauses]
    (assert db)
    ;; first clause reads from db

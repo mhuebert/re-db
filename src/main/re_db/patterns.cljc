@@ -7,14 +7,26 @@
             [re-db.in-memory :as mem])
   #?(:cljs (:require-macros re-db.patterns)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Listeners
+;;
+;; A reactive signal per [e a v] pattern which invalidates listeners
+
 (defonce !listeners (atom {}))
+
 (defn clear-listeners! [] (swap! !listeners empty))
 
+(defn make-listener [conn e a v]
+  (r/->RAtom nil
+             {}
+             [(fn [_] (swap! !listeners util/dissoc-in [conn e a v]))]
+             {:pattern [e a v]}))
+
+
 (defn handle-report!
-  ;; given a re-db transaction, invalidates readers based on
-  ;; patterns found in transacted datoms.
-  [conn report]
-  (when report
+  "Invalidate readers for a tx-report from conn based on datoms transacted"
+  [conn tx-report]
+  (when tx-report
     (if-let [listeners (@!listeners conn)]
       (let [result (volatile! #{})
             collect! #(some->> % (vswap! result conj))
@@ -32,32 +44,33 @@
                    (when-some [_a (_ a)]
                      (collect! (_a v)) ;; _av
                      (collect! (_a nil))))) ;; _a_
-               report)
+               tx-report)
             invalidated @result]
         #_(prn :invalidating (mapv (comp :pattern meta) invalidated))
         (doseq [listener invalidated] (r/invalidate! listener))
-        (assoc report ::handled (count invalidated)))
-      (assoc report ::handled 0))))
+        (assoc tx-report ::handled (count invalidated)))
+      tx-report)))
 
-(defonce ^:dynamic *conn* (mem/create-conn)) ;; if present, reads can subscribe to changes
-(defonce ^:dynamic *db* nil) ;; point-in-time db value
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Dynamic variables for the current database connection & value
+
+;; reads are tracked per connection (a reference type, the value changes with each transaction)
+(defonce ^:dynamic *conn* (mem/create-conn))
+
+;; the point-in-time value of the conn (db) can optionally be overridden
+(defonce ^:dynamic *db* nil)
 
 (defn current-conn [] *conn*)
+
 (defn current-db
-  "*db* pins down the value of db, for as-of queries. If not present, we deref the current connection."
-  [conn]
-  (rp/get-db conn *db*))
+  ([] (current-db *conn* *db*))
+  ([conn] (current-db conn *db*))
+  ([conn db] (or db (rp/db conn))))
 
 (defn clone
   "Creates a copy of conn (without existing listeners)"
   [conn]
   (atom @conn))
-
-(defn make-listener [conn e a v]
-  (r/->RAtom nil
-             {}
-             [(fn [_] (swap! !listeners util/dissoc-in [conn e a v]))]
-             {:pattern [e a v]}))
 
 (declare resolve-pattern)
 
@@ -74,14 +87,12 @@
 (defn ae
   ([a] (ae *conn* (current-db *conn*) a))
   ([conn db a]
-   (assert db)
    (some-> conn (depend-on-triple! nil a nil))
    (rp/ae db a)))
 
 (defn resolve-lookup-ref
   ([e] (resolve-lookup-ref *conn* (current-db *conn*) e))
   ([conn db [a v :as e]]
-   (assert db)
    (assert (rp/unique? db a) "Lookup ref attribute must be unique")
    (if (vector? v) ;; nested lookup ref
      (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
@@ -92,7 +103,6 @@
 (defn resolve-e
   ([e] (resolve-e *conn* (current-db *conn*) e))
   ([conn db e]
-   (assert db)
    (if (vector? e)
      (resolve-lookup-ref conn db e)
      (:db/id e e))))
@@ -100,7 +110,6 @@
 (defn resolve-v
   ([a v] (resolve-v *conn* (current-db *conn*) a v))
   ([conn db a v]
-   (assert db)
    (cond->> v
             (and v (rp/ref? db a))
             (resolve-e conn db))))
@@ -109,12 +118,10 @@
   ([e] (eav *conn* (current-db *conn*) e))
   ([e a] (eav *conn* (current-db *conn*) e a))
   ([conn db e]
-   (assert db)
    (when-let [id (resolve-e conn db e)]
      (depend-on-triple! conn id nil nil)
      (rp/eav db id)))
   ([conn db e a]
-   (assert db)
    (some-> conn (depend-on-triple! e a nil))
    (rp/eav db e a)))
 
@@ -122,7 +129,6 @@
   "Returns entity-ids for entities where attribute (a) equals value (v)"
   ([a v] (ave *conn* (current-db *conn*) a v))
   ([conn db a v]
-   (assert db)
    (when-let [v (resolve-v conn db a v)]
      (some-> conn (depend-on-triple! nil a v))
      (rp/ave db a v))))
@@ -130,7 +136,6 @@
 (defn resolve-pattern
   ([e a v] (resolve-pattern *conn* (current-db *conn*) e a v))
   ([conn db e a v]
-   (assert db)
    [(some->> e (resolve-e conn db))
     (some->> a (rp/datom-a db))
     (some->> v (resolve-v conn db a))]))

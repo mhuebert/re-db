@@ -87,7 +87,7 @@
   ;; - if an attribute is not present, `nil` is provided
   ([pull-expr] (fn [e] (pull e pull-expr)))
   ([e pull-expr]
-   (pull *conn* (rp/get-db *conn* *db*) e pull-expr))
+   (pull *conn* (patterns/current-db) e pull-expr))
   ([conn db e pull-expr]
    (pull* conn db e pull-expr)))
 

@@ -16,7 +16,7 @@
 (declare entity)
 
 (defn get* [conn db e a wrap?]
-  (if (= :db/id e)
+  (if (= :db/id a)
     e
     (if-let [resolver (*attribute-resolvers* a)]
       (resolver (entity conn db e))
@@ -57,7 +57,7 @@
         (Entity. conn db e e-resolved? new-meta)))
     IHash
     (-hash [this]
-      (let [db (rp/get-db conn db)]
+      (let [db (patterns/current-db conn db)]
         (resolve-e! conn db e e-resolved?)
         (hash [e (rp/eav db e)])))
 
@@ -69,19 +69,19 @@
            (= (:db/id this) (:db/id other))))
     ILookup
     (-lookup [o a]
-      (let [db (rp/get-db conn db)]
+      (let [db (patterns/current-db conn db)]
         (resolve-e! conn db e e-resolved?)
         (get* conn db e a true)))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
-        (let [db (rp/get-db conn db)]
+        (let [db (patterns/current-db conn db)]
           (resolve-e! conn db e e-resolved?)
           (get* conn db e a false))
         (if-some [v (get o a)] v nf)))
     IDeref
     (-deref [this]
-      (let [db (rp/get-db conn db)]
+      (let [db (patterns/current-db conn db)]
         (when-let [e (resolve-e! conn db e e-resolved?)]
           (patterns/depend-on-triple! e nil nil)
           (rp/eav db e))))
@@ -91,11 +91,10 @@
 (defn entity
   ([conn db e]
    (let [e (:db/id e e)
-         db (rp/get-db conn db)
-         e (or (patterns/resolve-e conn db e) e)]
+         e (or (patterns/resolve-e conn (patterns/current-db conn) e) e)]
      (->Entity conn db e false nil)))
-  ([conn e] (entity conn nil e)) ;; conn is specified - use it for db-value, late-bound
-  ([e] (entity *conn* nil e))) ;; nothing is specified - use current *conn*
+  ([conn e] (entity conn nil e))
+  ([e] (entity *conn* nil e)))
 
 ;; difference from others: no isComponent
 (defn touch [entity] @entity)
