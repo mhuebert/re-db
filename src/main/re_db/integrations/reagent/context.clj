@@ -1,5 +1,4 @@
-(ns re-db.integrations.reagent.context
-  (:require [re-db.patterns :as patterns]))
+(ns re-db.integrations.reagent.context)
 
 (defmacro bind-conn [conn body]
   `(let [conn# ~conn]

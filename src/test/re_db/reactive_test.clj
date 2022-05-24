@@ -10,5 +10,3 @@
     (s/register :a (fn [] (r/reaction @a)))
     (swap! a inc)
     (is (= @a @($a) @(s/subscription [:a])))))
-
-

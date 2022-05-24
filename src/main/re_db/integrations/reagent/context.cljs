@@ -1,8 +1,7 @@
 (ns re-db.integrations.reagent.context
   (:require ["react" :as react]
             [applied-science.js-interop :as j]
-            [re-db.in-memory :as rm]
-            [re-db.patterns :as patterns]
+            [re-db.in-memory :as mem]
             [re-db.api :as api]
             [reagent.core :as reagent]
             [reagent.impl.component :as rcomponent])
@@ -49,7 +48,7 @@
 
 (defn bind-conn
   [conn body]
-  (reagent/with-let [conn (patterns/->conn conn)
+  (reagent/with-let [conn (mem/->conn conn)
                      ref-fn #(some-> % (j/!set context-key conn))]
     (react/createElement (.-Provider conn-context)
                          #js{:value conn}

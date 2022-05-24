@@ -10,6 +10,7 @@
 
 (defprotocol ICompute
   (-set-function! [this new-f])
+  (compute [this])
   (invalidate! [this]))
 
 (defn reset-function! [reaction new-f]
@@ -200,11 +201,12 @@
     (set-derefs! [this new-derefs] (set! derefs new-derefs))
     ICompute
     (-set-function! [this new-f] (set! f new-f))
+    (compute [this] (f))
     (invalidate! [this]
       (let [new-val (r/with-owner this
-                                  (r/with-hook-support!
-                                   (r/with-deref-capture!
-                                    (f))))]
+                      (r/with-hook-support!
+                       (r/with-deref-capture!
+                        (f))))]
         (when (not= (peek ratom) new-val)
           (reset! ratom new-val))
         this))))
@@ -268,9 +270,9 @@
 
 ;; macro passthrough
 (defmacro with-owner [& args] `(r/with-owner ~@args))
-(defmacro capture-derefs! [& args] `(r/with-deref-capture! ~@args))
+(defmacro with-deref-capture! [& args] `(r/with-deref-capture! ~@args))
 (defmacro without-deref-capture [& args] `(r/without-deref-capture ~@args))
-(defmacro support-hooks! [& args] `(r/with-hook-support! ~@args))
+(defmacro with-hook-support! [& args] `(r/with-hook-support! ~@args))
 (defmacro reaction [& args] `(r/reaction ~@args))
 (defmacro reaction! [& args] `(r/reaction! ~@args))
 (defmacro with-session [& args] `(r/with-session ~@args))

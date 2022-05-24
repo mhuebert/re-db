@@ -12,7 +12,7 @@
             [clojure.string :as str]
             [reagent.ratom :as ratom]
             re-db.integrations.reagent
-            [re-db.patterns :as patterns])
+            [re-db.read :as read])
   (:require-macros [re-db.test-helpers :refer [throws]]))
 
 (def dom-root (or (js/document.getElementById "rtest")
@@ -113,11 +113,11 @@
    (api/with-conn {:x schema/ref}
      (let [log (atom [])
            conn (api/conn)]
-       (r/reaction! (patterns/depend-on-triple! conn 1 nil nil)
+       (r/reaction! (read/depend-on-triple! conn 1 nil nil)
                     (swap! log conj 1))
-       (r/reaction! (patterns/depend-on-triple! conn 2 :a nil)
+       (r/reaction! (read/depend-on-triple! conn 2 :a nil)
                     (swap! log conj 2))
-       (r/reaction! (patterns/depend-on-triple! conn nil nil 99)
+       (r/reaction! (read/depend-on-triple! conn nil nil 99)
                     (swap! log conj 3))
 
        (api/transact! [[:db/add 1 :name "a"]])
@@ -217,11 +217,11 @@
            _ (db/listen! conn ::pattern-listeners #(swap! tx-log conj (:datoms %2)))]
        (testing "entity pattern"
          (api/transact! [{:db/id "mary"
-                               :name "Mary"}
-                              [:db/add "mary"
-                               :person/children #{"john"}]
-                              {:db/id "john"
-                               :name "John"}])
+                          :name "Mary"}
+                         [:db/add "mary"
+                          :person/children #{"john"}]
+                         {:db/id "john"
+                          :name "John"}])
 
          (reagent/flush)
 

@@ -1,9 +1,8 @@
 (ns re-db.in-memory.local-state
-  (:require [applied-science.js-interop :as j]
-            [re-db.in-memory :as db]
+  (:require [re-db.in-memory :as db]
             [re-db.api :as api]
             [re-db.reactive :as r]
-            [re-db.patterns :as patterns]
+            [re-db.read :as read]
             [re-db.util :as util])
   (:require-macros re-db.in-memory.local-state))
 
@@ -16,7 +15,7 @@
   IDeref
   (-deref [this]
     (let [conn (resolve-conn conn)]
-      (util/some-or (patterns/eav conn @conn ::local-state e) default)))
+      (util/some-or (read/eav conn @conn ::local-state e) default)))
   IReset
   (-reset! [this new-value]
     (db/transact! (resolve-conn conn) [[:db/add ::local-state e new-value]]))

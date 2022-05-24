@@ -1,4 +1,5 @@
 (ns re-db.in-memory
+  (:refer-clojure :exclude [clone])
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
@@ -503,4 +504,14 @@
           :ave {}
           :schema (compile-db-schema schema)})))
 
+(defn clone
+  "Creates a copy of conn"
+  [conn]
+  (atom @conn))
 
+(defn ->conn
+  "Accepts a conn or a schema, returns conn"
+  [conn-or-schema]
+  (if (map? conn-or-schema)
+    (create-conn conn-or-schema)
+    conn-or-schema))

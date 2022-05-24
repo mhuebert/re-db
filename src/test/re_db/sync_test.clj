@@ -5,23 +5,21 @@
             [datahike.api :as dh]
             [re-db.integrations.datahike]
 
-            [re-db.in-memory :as mem]
             [re-db.integrations.in-memory]
 
             [re-db.api :as re]
             [re-db.query :as q]
             [re-db.reactive :as r]
-            [re-db.patterns :as patterns]
             [re-db.hooks :as hooks]
             [re-db.protocols :as rp]
             [re-db.subscriptions :as subs]
             [clojure.test :as test :refer [is are deftest testing]]
             [re-db.schema :as schema]
-            [re-db.entity :as entity]
+            [re-db.read :as read]
             [clojure.string :as str]))
 
 (subs/clear-subscription-cache!)
-(patterns/clear-listeners!)
+(read/clear-listeners!)
 
 (do
 
@@ -42,7 +40,7 @@
   (defn transact! [txs]
     (mapv (fn [{:keys [conn]}]
             (->> (rp/transact conn txs)
-                 (patterns/handle-report! conn))) databases))
+                 (read/handle-report! conn))) databases))
 
   (doseq [{:keys [conn]} databases]
     (rp/merge-schema conn {:movie/title
@@ -205,7 +203,7 @@
       )))
 
 (deftest attribute-resolvers
-  (binding [entity/*attribute-resolvers* {:movie/title-lowercase
+  (binding [read/*attribute-resolvers* {:movie/title-lowercase
                                           (fn [{:keys [movie/title]}]
                                             (str/lower-case title))}]
     (doseq [conn (map :conn databases)]

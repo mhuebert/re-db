@@ -1,5 +1,7 @@
 (ns re-db.history
-  (:require [re-db.in-memory :as db]))
+  (:require [re-db.in-memory :as db]
+            [re-db.read :as read]
+            [re-db.reactive :as r]))
 
 (defn last-tx [history] (-> history :log first :tx))
 (defn current-tx [history] (:tx @(:conn history)))
@@ -67,3 +69,7 @@
   "Returns conn with db-value at `tx`"
   [!history tx]
   (atom (db-as-of @!history tx)))
+
+(defn rx-as-of [rx db]
+  (binding [read/*db* db]
+    (r/compute rx)))

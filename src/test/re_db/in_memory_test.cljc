@@ -4,13 +4,12 @@
                :cljs [cljs.test :refer [deftest is testing]])
             [re-db.in-memory :as mem]
             [re-db.api :as d]
-            [re-db.entity :refer [entity #?(:cljs Entity)]]
-            [re-db.pull :refer [pull]]
+            [re-db.read :as read :refer [entity #?(:cljs Entity) pull]]
             [re-db.schema :as schema]
             [re-db.util :as util]
             [re-db.test-helpers :refer [throws]]
             [re-db.in-memory :as db])
-  #?(:clj (:import [re_db.entity Entity])))
+  #?(:clj (:import [re_db.read Entity])))
 
 (defn ids [entities] (util/guard (into #{} (map :db/id) entities)
                                  seq))
