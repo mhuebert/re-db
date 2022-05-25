@@ -8,8 +8,8 @@
 (defonce !watching (atom {}))
 
 ;; websocket-handling code needs to set the send-fn here
-(defonce !send-fn (atom (fn [& args])))
-(defn set-send-fn! [f] (reset! !send-fn f))
+(defonce !send-fn (atom (fn [& args] (throw (js/Error. "send-fn has not been established yet")))))
+(defn set-send-fn! [f] (reset! !send-fn (fn [& args] (apply f args))))
 
 ;; for instantiating entities
 (def read-handlers {"re-db/entity" (transit/read-handler
