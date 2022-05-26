@@ -357,10 +357,17 @@
    (assert db)
    ;; first clause reads from db
    (let [[clause & clauses] clauses
-         [a v] (if (keyword? clause) [clause nil] clause)]
-     (->> (cond (nil? v) (ae conn db a)
-                (fn? v) (filter v (ae conn db a))
-                :else (ave conn db a v))
+         _ (assert (not (fn? clause)) "where cannot begin with function (scans entire db)")
+         entity-ids  (if (keyword? clause)
+                       (ae conn db clause)
+                       (let [[a v] clause]
+                         (if (fn? v)
+                           (into [] (comp
+                                     (map #(eav conn db % a))
+                                     (filter v))
+                                 (ae conn db a))
+                           (ave conn db a v))))]
+     (->> entity-ids
           (into #{}
                 (comp (map entity)
                       ;; additional clauses filter entities from step 1
