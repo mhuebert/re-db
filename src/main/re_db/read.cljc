@@ -362,10 +362,8 @@
                        (ae conn db clause)
                        (let [[a v] clause]
                          (if (fn? v)
-                           (into [] (comp
-                                     (map #(eav conn db % a))
-                                     (filter v))
-                                 (ae conn db a))
+                           (filterv #(v (eav conn db % a))
+                                    (ae conn db a))
                            (ave conn db a v))))]
      (->> entity-ids
           (into #{}
