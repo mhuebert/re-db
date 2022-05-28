@@ -99,7 +99,7 @@
 (defn resolve-lookup-ref
   ([e] (resolve-lookup-ref *conn* (current-db *conn*) e))
   ([conn db [a v :as e]]
-   (assert (rp/unique? db a) "Lookup ref attribute must be unique")
+   (assert (rp/unique? db a) (str "Lookup ref attribute must be unique: " e))
    (if (vector? v) ;; nested lookup ref
      (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
      (when v
@@ -254,8 +254,8 @@
             (f conn db v)))
 
 (defn- pull*
-  ([conn db e pullv wrap-ref] (pull* conn db e pullv #{} wrap-ref))
-  ([conn db e pullv found wrap-ref]
+  ([wrap-ref conn db pullv e] (pull* wrap-ref conn db pullv #{} e))
+  ([wrap-ref conn db pullv found e]
    (let [e (resolve-e conn db e)]
      (reduce-kv
       (fn pull [m i pullexpr]
@@ -301,7 +301,7 @@
                                                      pullv)
                                              do-pull #(if (and (= :... recursions) (found %))
                                                         %
-                                                        (pull* conn db % pullv found wrap-ref))]
+                                                        (pull* wrap-ref conn db pullv found %))]
                                          (if is-many
                                            (into [] (keep do-pull) v)
                                            (do-pull v)))
@@ -309,10 +309,10 @@
                           refs #_(cond-> refs (not is-many) first))
 
                         ;; cardinality/many
-                        is-many (mapv #(pull* conn db % map-expr wrap-ref) v)
+                        is-many (mapv #(pull* wrap-ref conn db map-expr %) v)
 
                         ;; cardinality/one
-                        :else (pull* conn db v map-expr wrap-ref))]
+                        :else (pull* wrap-ref conn db map-expr v))]
             (cond-> m (some? v) (assoc alias v)))))
       nil
       pullv))))
@@ -326,15 +326,15 @@
                 {:db/id 3}]}"
   ;; difference from clojure:
   ;; - if an attribute is not present, `nil` is provided
-  ([pull-expr] (fn [e] (pull e pull-expr)))
-  ([e pull-expr]
-   (pull e pull-expr (fn [conn db e] {:db/id e})))
-  ([e pull-expr wrap-ref]
-   (pull* *conn* (current-db) e pull-expr wrap-ref)))
+  ([pull-expr] (fn [e] (pull pull-expr e)))
+  ([pull-expr e]
+   (pull pull-expr (fn [conn db e] {:db/id e}) e))
+  ([pull-expr wrap-ref e]
+   (pull* wrap-ref *conn* (current-db) pull-expr e)))
 
 (defn pull-entities
-  ([pull-expr] (fn [e] (pull-entities e pull-expr)))
-  ([e pull-expr] (pull* *conn* (current-db) e pull-expr entity)))
+  ([pull-expr] (fn [e] (pull-entities pull-expr e)))
+  ([pull-expr e] (pull* entity *conn* (current-db) pull-expr e)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Where
@@ -390,3 +390,4 @@
                       :db-after @*conn*
                       :datoms (into [] (mapcat :datoms) txs#)}
                      {:value val#}))))))
+

@@ -72,7 +72,7 @@
       #_(is (= {:db/id "fred"
                 :name "Fred"
                 :_pets #{"1"}
-                :pet "fido"} (-> (pull "fred" '[* :_pets])
+                :pet "fido"} (-> (pull '[* :_pets] "fred")
                                  (update :_pets ids)))
             "refs with cardinality-many"))))
 
@@ -105,7 +105,7 @@
                                    {:email "peter@example.com"
                                     :age 32}]))
       (is (= {:email "matt@example.com"}
-             (pull [:email "matt@example.com"] [:email])))
+             (pull [:email] [:email "matt@example.com"])))
       (is (= (-> (entity "fred")
                  :friend
                  :db/id)
@@ -255,7 +255,7 @@
       (is (= {:db/id "fred"
               :name "Fred"
               :_owner [{:db/id "ball"}]}
-             (pull "fred" '[* :_owner]))
+             (pull '[* :_owner] "fred"))
           "reverse refs")))
 
   (d/with-conn (doto (mem/create-conn {:authors {:db/valueType :db.type/ref
@@ -273,7 +273,7 @@
     (is (= {:db/id "fred"
             :name "Fred"
             :_authors [{:db/id "1"}]
-            :pet {:db/id "fido"}} (pull "fred" '[* :_authors]))
+            :pet {:db/id "fido"}} (pull '[* :_authors] "fred"))
         "refs with cardinality-many")
     (is (= {:db/id "fido"}
            (d/get "fido")))))
@@ -303,29 +303,29 @@
                   {:db/id "B2"
                    :name "B2"}])
 
-    (is (= (d/pull "B" '[:db/id {:child :...}])
+    (is (= (d/pull '[:db/id {:child :...}] "B")
            {:db/id "B"
             :child {:db/id "B1"
                     :child {:db/id "B2"}}}))
 
     (is (= [{:db/id "B1"}]
-           (-> (d/pull "B2" [:_child])
+           (-> (d/pull [:_child] "B2")
                :_child)))
 
     (is (= {:db/id "A.0"}
-           (-> (d/pull "A" [:children])
+           (-> (d/pull [:children] "A")
                :children first)))
 
     (is (= {:db/id "A.1"}
-           (-> (d/pull "A" [{:children 1}])
+           (-> (d/pull [{:children 1}] "A")
                :children first :children first)))
 
     (is (= {:db/id "A.2"}
-           (-> (d/pull "A" [{:children 2}])
+           (-> (d/pull [{:children 2}] "A")
                :children first :children first :children first)))
 
     (is (= [{:db/id "A.4"}]
-           (-> (d/pull "A" [:db/id {:children :...}])
+           (-> (d/pull [:db/id {:children :...}] "A")
                :children first :children first :children first :children first :children)))))
 
 (deftest custom-db-operations

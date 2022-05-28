@@ -13,7 +13,7 @@
 (defmacro with-conn
   "Evaluates body with *conn* bound to `conn`, which may be a connection or a schema"
   [conn & body]
-  `(read/with-conn ~conn ~@body))
+  `(binding [*conn* (mem/->conn ~conn)] (assert *conn*) ~@body))
 
 (defmacro bound-fn
   "Define an anonymous function where *conn* is bound at definition-time"
@@ -39,11 +39,11 @@
 
 (m/defpartial pull {:f '(read/pull _)}
   ([pull-expr])
-  ([id pull-expr]))
+  ([pull-expr id]))
 
 (m/defpartial pull-entities {:f '(read/pull-entities _)}
   ([pull-expr])
-  ([id pull-expr]))
+  ([pull-expr id]))
 
 (m/defpartial transact! {:f '(->> (rp/transact *conn* _)
                                   (read/handle-report! *conn*))}

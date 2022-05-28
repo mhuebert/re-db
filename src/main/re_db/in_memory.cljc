@@ -3,9 +3,8 @@
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
             [re-db.fast :as fast]
-            [re-db.util :as u :refer [guard set-replace set-diff]]
-            [re-db.schema :as schema]
-            [re-db.protocols :as rp]))
+            [re-db.util :as u :refer [set-replace set-diff]]
+            [re-db.schema :as schema]))
 
 (def index-all-ave? false)
 (def index-all-ae? false)
@@ -37,19 +36,53 @@
 
 ;; Schema properties are mirrored in javascript properties for fast lookups
 
-(defn resolve-lookup-ref [[a v] db]
+(defn resolve-lookup-ref [db [a v]]
   (when v
     (if (vector? v)
-      (resolve-lookup-ref [a (resolve-lookup-ref v db)] db)
+      (resolve-lookup-ref db [a (resolve-lookup-ref v db)])
       (first (fast/gets db :ave a v)))))
+
+
+(defonce last-e (volatile! 0.1))
+(defn gen-e [] (vswap! last-e inc))
+
+;; generate internal db uuids
+(defn tempid? [x] (neg? x))
 
 (defn resolve-e
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
   Lookup refs are only supported for indexed attributes."
-  [e db]
+  [db e]
+  (assert (not (tempid? e)) (str "invalid use of tempid: " e))
   (if (vector? e)
-    (resolve-lookup-ref e db)
+    (resolve-lookup-ref db e)
     e))
+
+(declare add)
+
+(defn tempid+ [db e]
+  (if-let [id (get (:tempids db) e)]
+    [db id]
+    (let [id (gen-e)]
+      [(update db :tempids assoc e id)
+       id])))
+
+(defn resolve-lookup-ref+ [db e]
+  (if-let [id (resolve-lookup-ref db e)]
+    [db id]
+    ;; upsert lookup ref
+    (let [[a v] e
+          id (gen-e)]
+      [(add db [nil id a v])
+       id])))
+
+(defn resolve-e+
+  "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
+  Lookup refs are only supported for indexed attributes."
+  [db e]
+  (cond (vector? e) (resolve-lookup-ref+ db e)
+        (tempid? e) (tempid+ db e)
+        :else [db e]))
 
 ;; index helpers
 
@@ -199,7 +232,7 @@
   (let [a-schema (get-schema db a)
         is-many (many? a-schema)
         is-ref (ref? a-schema)
-        v (cond-> v is-ref (resolve-e db))]
+        v (cond->> v is-ref (resolve-e db))]
     (if-some [pv (fast/gets db :eav e a)]
       (if is-many
         (do
@@ -229,7 +262,7 @@
         is-ref (ref? a-schema)
         pm (get-entity db e)
         pv (get pm a)
-        v (cond-> v is-ref (resolve-e db))]
+        [db v] (if is-ref (resolve-e+ db v) [db v])]
     (if is-many
       (do
         (assert (not (set? v)) ":db/add on :db.cardinality/many does not accept a set")
@@ -261,39 +294,26 @@
 (j/defn reverse-datom [^js [e a v pv]]
   (#?(:cljs array :clj vector) e a pv v))
 
-;; generate internal db uuids
-(defonce last-e (volatile! 0.1))
-(defn gen-e [] (vswap! last-e inc))
-
 (defn e-from-unique-attr
   "Finds an entity id by looking for a unique attribute in `m`.
 
    Special return values:
-   nil   => a unique attribute was found, but no matching entry in the db
-   false => no unique attributes found in `m`"
+   ::upsert   => a unique attribute was found, but no matching entry in the db
+   ::missing-unique-attribute => no unique attributes found in `m`"
   [db m]
-  (let [uniques (-> db :schema :db/uniques)]
-    (reduce (fn [ret a]
-              (fast/if-found [v (m a)]
-                (if-some [e (resolve-e [a v] db)]
-                  (reduced e)
-                  nil)
-                ret)) false
-            uniques)))
-
-;; adds :db/id to entity based on unique attributes
-(defn- resolve-map-e [db m]
-  (let [e (:db/id m)]
-    (cond (nil? e) (let [e-from-attr (e-from-unique-attr db m)]
-                     (assert (not (false? e-from-attr)) (str "must have a unique attribute" m))
-                     (assoc m :db/id (or e-from-attr (gen-e))))
-          ;; support for lookup ref as :db/id. avoids iterating over keys to find a unique attribute
-          ;; when we already know which attribute is unique/identity.
-          (vector? e) (let [[a v] e]
-                        (-> m
-                            (assoc :db/id (or (resolve-e e db) (gen-e))
-                                   a v)))
-          :else m)))
+  (let [uniques (-> db :schema :db/uniques)
+        e (reduce (fn [ret a]
+                    (fast/if-found [v (m a)]
+                      (if-some [e (resolve-lookup-ref db [a v])]
+                        (reduced e)
+                        ::upsert)
+                      ret))
+                  ::missing-unique-attribute
+                  uniques)]
+    (case e ::upsert (gen-e)
+            ::missing-unique-attribute (throw (#?(:clj Exception. :cljs js/Error.)
+                                               (str "missing unique attribute" m)))
+            e)))
 
 (defn- add-attr-index [db e a v pv ^Schema a-schema]
   (let [is-many (many? a-schema)]
@@ -307,70 +327,75 @@
 (declare add-map)
 
 (defn handle-lookup-ref [db v]
+  ;; if a lookup ref doesn't resolve,
+  ;; treat it as an upsert (map)
   (if (vector? v)
-    (or (resolve-e v db)
+    (or (resolve-lookup-ref db v)
         {(v 0) (v 1)})
     v))
 
+(defn- resolve-map-e [db m]
+  (if-let [e (:db/id m)]
+    (conj (resolve-e+ db e) (dissoc m :db/id))
+    [db (e-from-unique-attr db m) m]))
+
 (defn handle-nested-refs [db v ^Schema a-schema]
-  (if (many? a-schema)
-    (reduce
-     (fn [[db vs :as state] v]
-       (let [v-resolved (handle-lookup-ref db v)]
-         (if (map? v-resolved)
-           (let [sub-entity (resolve-map-e db v-resolved)]
-             [(add-map db sub-entity)
-              (set-replace vs v (:db/id sub-entity))])
-           [db (set-replace vs v v-resolved)])))
-     [db v]
-     v)
-    (let [v-resolved (handle-lookup-ref db v)]
-      (if (map? v-resolved)
-        (let [sub-entity (resolve-map-e db v-resolved)]
-          [(add-map db sub-entity)
-           (:db/id sub-entity)])
-        [db v-resolved]))))
+  ;; 'refs' can update the db in a handful of ways:
+  ;; - tempids,
+  ;; - map upserts,
+  ;; - lookup ref upserts
+  (let [resolve-ref (fn [db v]
+                      (if (map? v)
+                        (let [[db e sub-entity] (resolve-map-e db v)]
+                          [(add-map db e sub-entity)
+                           e])
+                        (resolve-e+ db v)))]
+    (if (many? a-schema)
+      (reduce
+       (fn [[db vs] v]
+         (let [[db e] (resolve-ref db v)]
+           [db (conj vs e)]))
+       [db (empty v)]
+       v)
+      (resolve-ref db v))))
 
 (defn- add-map
-  [db m]
-  (let [{:as m e :db/id} (resolve-map-e db m)]
-    (let [prev-m (get-entity db e)
-          db-schema (:schema db)
-          m (dissoc m :db/id)
-          [db new-m] (reduce-kv (fn [[db new-m] a v]
-                                  (let [a-schema (db-schema a default-schema)
-                                        is-ref (ref? a-schema)
-                                        is-many (many? a-schema)
-                                        v (cond-> v is-many set)
-                                        ;; if ref attribute, handle inline/nested entities
-                                        [db new-v] (if is-ref
-                                                     (handle-nested-refs db v a-schema)
-                                                     [db v])
-                                        ;; update indexes
-                                        db (add-attr-index db e a new-v (get prev-m a) a-schema)
-                                        value-present (if is-many
-                                                        (seq new-v)
-                                                        (some? new-v))]
-                                    [db (if value-present
-                                          (assoc new-m a new-v)
-                                          (dissoc new-m a))]))
-                                [db (or prev-m m)]
-                                m)]
-      (fast/update! db :eav assoc! e new-m))))
+  ([db m] (let [[db e m] (resolve-map-e db m)]
+            (add-map db e m)))
+  ([db e m]
+   (let [prev-m (get-entity db e)
+         db-schema (:schema db)
+         [db new-m] (reduce-kv (fn [[db new-m] a v]
+                                 (let [a-schema (db-schema a default-schema)
+                                       is-ref (ref? a-schema)
+                                       is-many (many? a-schema)
+                                       v (cond-> v is-many set)
+                                       ;; if ref attribute, handle inline/nested entities
+                                       [db new-v] (if is-ref
+                                                    (handle-nested-refs db v a-schema)
+                                                    [db v])
+                                       ;; update indexes
+                                       db (add-attr-index db e a new-v (get prev-m a) a-schema)
+                                       value-present (if is-many
+                                                       (seq new-v)
+                                                       (some? new-v))]
+                                   [db (if value-present
+                                         (assoc new-m a new-v)
+                                         (dissoc new-m a))]))
+                               [db (or prev-m m)]
+                               m)]
+     (fast/update! db :eav assoc! e new-m))))
 
 (defn- commit-tx [db tx]
   (if (vector? tx)
     (let [operation (tx 0)]
       (case operation
-        :db/add (let [e (tx 1)]
-                  (if-let [resolved-e (resolve-e e db)]
-                    (add db (assoc tx 1 resolved-e))
-                    (do ;; id cannot be resolved - upsert lookup ref
-                      (assert (vector? e) "db/id missing")
-                      (add-map db {(e 0) (e 1)
-                                   (tx 2) (tx 3)}))))
-        :db/retractEntity (retract-entity db (update tx 1 resolve-e db))
-        :db/retract (retract-attr db (update tx 1 resolve-e db))
+        :db/add (let [e (tx 1)
+                      _ (assert e (str "db/id not present in tx: " tx))
+                      [db resolved-e] (resolve-e+ db e)]
+                  (add db (assoc tx 1 resolved-e)))
+        :db/retractEntity (retract-entity db (update tx 1 #(resolve-e db %)))
+        :db/retract (retract-attr db (update tx 1 #(resolve-e db %)))
         :db/datoms (reduce commit-datom db (tx 1))
         :db/datoms-reverse (->> (tx 1)
                                 (reverse)
@@ -381,7 +406,7 @@
           (do
             ;; TODO
             (prn :no-op-found (fast/gets db :schema :db/tx-fns operation))
-            (throw (#?(:cljs js/Error :clj Exception.) (str "No db op: " operation)))))))
+            (throw (#?(:cljs js/Error. :clj Exception.) (str "No db op: " operation)))))))
     (add-map db tx)))
 
 

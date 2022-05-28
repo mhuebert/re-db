@@ -1,5 +1,5 @@
 (ns re-db.schema
-  (:refer-clojure :exclude [ref]))
+  (:refer-clojure :exclude [ref long]))
 
 ;; schema
 (def one {:db/cardinality :db.cardinality/one})
@@ -12,3 +12,4 @@
 ;; types
 (def string {:db/valueType :db.type/string})
 (def ref {:db/valueType :db.type/ref})
+(def long {:db/valueType :db.type/long})
