@@ -1,4 +1,5 @@
 (ns re-db.read
+  (:refer-clojure :exclude [get peek])
   (:require [re-db.reactive :as r]
             [re-db.fast :as fast]
             [re-db.util :as u]
@@ -224,7 +225,7 @@
         (let [db (current-db conn db)]
           (resolve-entity-e! conn db e e-resolved?)
           (get* conn db e a false))
-        (if-some [v (get o a)] v nf)))
+        (if-some [v (clojure.core/get o a)] v nf)))
     IDeref
     (-deref [this]
       (let [db (current-db conn db)]
@@ -317,6 +318,8 @@
       nil
       pullv))))
 
+(defn- default-ref-wrap [_conn _db e] {:db/id e})
+
 (defn pull
   "Returns entity as map, as well as linked entities specified in `pull`.
 
@@ -328,9 +331,11 @@
   ;; - if an attribute is not present, `nil` is provided
   ([pull-expr] (fn [e] (pull pull-expr e)))
   ([pull-expr e]
-   (pull pull-expr (fn [conn db e] {:db/id e}) e))
-  ([pull-expr wrap-ref e]
-   (pull* wrap-ref *conn* (current-db) pull-expr e)))
+   (pull* default-ref-wrap *conn* (current-db) pull-expr e))
+  ([{:keys [wrap-ref conn db]
+     :or {wrap-ref default-ref-wrap
+          conn *conn*}} pull-expr e]
+   (pull* wrap-ref conn (current-db conn db) pull-expr e)))
 
 (defn pull-entities
   ([pull-expr] (fn [e] (pull-entities pull-expr e)))
@@ -346,10 +351,10 @@
     (let [[a v] clause]
       (cond
         ;; arbitrary function
-        (fn? v) (fn [entity] (v (get entity a)))
+        (fn? v) (fn [entity] (v (clojure.core/get entity a)))
         ;; refs - resolve `v` lookup-refs & compare to :db/id of the thing
-        (rp/ref? db a) (fn [entity] (= (resolve-v conn db a v) (:db/id (get entity a))))
-        :else (fn [entity] (= (get entity a) v))))))
+        (rp/ref? db a) (fn [entity] (= (resolve-v conn db a v) (:db/id (clojure.core/get entity a))))
+        :else (fn [entity] (= (clojure.core/get entity a) v))))))
 
 (defn where
   ([clauses] (where *conn* (current-db) clauses))
@@ -372,6 +377,15 @@
                       (filter (if (seq clauses)
                                 (apply every-pred (map #(clause-filter conn db %) clauses))
                                 identity))))))))
+
+(defn get
+  "Read entity or attribute reactively"
+  ([conn db e]
+   (some->> (resolve-e conn db e) (eav conn db)))
+  ([conn db e a]
+   (some->> (resolve-e conn db e) (eav conn db a)))
+  ([conn db e a not-found]
+   (u/some-or (get conn db e a) not-found)))
 
 (comment
  ;; should this exist? mem-only...

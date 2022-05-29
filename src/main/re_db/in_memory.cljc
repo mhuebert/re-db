@@ -39,7 +39,7 @@
 (defn resolve-lookup-ref [db [a v]]
   (when v
     (if (vector? v)
-      (resolve-lookup-ref db [a (resolve-lookup-ref v db)])
+      (resolve-lookup-ref db [a (resolve-lookup-ref db v)])
       (first (fast/gets db :ave a v)))))
 
 
@@ -47,7 +47,7 @@
 (defn gen-e [] (vswap! last-e inc))
 
 ;; generate internal db uuids
-(defn tempid? [x] (neg? x))
+(defn tempid? [x] (neg-int? x))
 
 (defn resolve-e
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
@@ -64,7 +64,7 @@
   (if-let [id (get (:tempids db) e)]
     [db id]
     (let [id (gen-e)]
-      [(update db :tempids assoc e id)
+      [(fast/update! db :tempids assoc! e id)
        id])))
 
 (defn resolve-lookup-ref+ [db e]
@@ -92,7 +92,7 @@
        " but already have " pe "."))
 
 (defn set-unique!
-  "Returns a checked setter for unique attributes
+  "Returns a checked setter for unique attributes`
   - throws a meaningful error if encounters a non-empty set"
   [a v]
   (fn [coll e]
@@ -360,8 +360,9 @@
       (resolve-ref db v))))
 
 (defn- add-map
-  ([db m] (let [[db e m] (resolve-map-e db m)]
-            (add-map db e m)))
+  ([db m]
+   (let [[db e m] (resolve-map-e db m)]
+     (add-map db e m)))
   ([db e m]
    (let [prev-m (get-entity db e)
          db-schema (:schema db)
@@ -431,7 +432,9 @@
   [db-before txs options]
   {:pre [db-before (or (nil? txs) (sequential? txs))]}
   (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
-    (let [db-after (-> (reduce commit-tx (transient-map (dissoc db-before :tx)) txs)
+    (let [db-after (-> (reduce commit-tx (transient-map (-> db-before
+                                                            (dissoc :tx)
+                                                            (assoc :tempids {}))) txs)
                        (persistent-map!))
           datoms (if *datoms*
                    #?(:cljs (vec *datoms*)

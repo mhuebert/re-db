@@ -130,6 +130,25 @@
 
 (defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
+(deftest tempids
+  (d/with-conn (doto (mem/create-conn {:email schema/unique-id
+                                       :friends (merge schema/ref
+                                                       schema/many)})
+                 (mem/transact! [{:db/id -1
+                                  :email "fred@x.com"}
+                                 {:db/id -2
+                                  :email "matt@x.com"
+                                  :friends [-1]}
+                                 {:db/id -3
+                                  :email "herman@x.com"
+                                  :friends [-1]}]))
+    (is (= (d/entity [:email "fred@x.com"])
+           (first (:friends (d/entity [:email "matt@x.com"])))))
+    (is (= #{(d/entity [:email "matt@x.com"])
+             (d/entity [:email "herman@x.com"])}
+           (set (:_friends (d/entity [:email "fred@x.com"])))))
+    (is (not= -1 (:db/id (d/entity [:email "fred@x.com"]))))))
+
 (deftest lookup-refs
   (d/with-conn (doto (mem/create-conn {:email {:db/unique :db.unique/identity}
                                        :friend {:db/valueType :db.type/ref}})
