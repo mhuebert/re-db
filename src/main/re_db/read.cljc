@@ -318,7 +318,7 @@
       nil
       pullv))))
 
-(defn- default-ref-wrap [_conn _db e] {:db/id e})
+(defn- default-ref-wrap [_conn _db e] {:db/id (:db/id e e)})
 
 (defn pull
   "Returns entity as map, as well as linked entities specified in `pull`.
