@@ -21,10 +21,10 @@
 ;; for instantiating entities
 (def read-handlers {"re-db/entity" (transit/read-handler
                                     (fn [e]
-                                      (let [id (.fromArray PersistentVector e true)]
-                                        (d/entity (cond-> id
-                                                          (= 1 (count id))
-                                                          first)))))})
+                                      (let [[a v] e]
+                                        (d/entity (if (= a :db/id)
+                                                    v
+                                                    [a v])))))})
 
 (defn transact-txs [txs]
   (d/transact! txs))
