@@ -261,7 +261,9 @@
          ;; splice * into pullv
          pullv (reduce (fn [out pullexpr]
                          (if (= '* pullexpr)
-                           (into out (keys (dissoc (rp/eav db e) :db/id)))
+                           (do
+                             (depend-on-triple! e nil nil)
+                             (into out (keys (dissoc (rp/eav db e) :db/id))))
                            (conj out pullexpr))) [] pullv)]
      (reduce-kv
       (fn pull [m i pullexpr]
