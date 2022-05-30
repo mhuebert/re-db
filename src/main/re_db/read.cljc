@@ -254,72 +254,79 @@
   (if many? (mapv (fn [v] (f conn db v)) v)
             (f conn db v)))
 
+(defn- wrap-refs [wrap-ref conn db m]
+  (reduce-kv (fn [m a v]
+               (let [a-schema (rp/get-schema db a)]
+                 (if (rp/ref? db a a-schema)
+                   (assoc m a
+                            (if (rp/many? db a a-schema)
+                              (into (empty v) (map #(wrap-ref conn db %)) v)
+                              (wrap-ref conn db v)))
+                   m))) m m))
+
 (defn- pull*
   ([wrap-ref conn db pullv e] (pull* wrap-ref conn db pullv #{} e))
   ([wrap-ref conn db pullv found e]
-   (let [e (resolve-e conn db e)
-         ;; splice * into pullv
-         pullv (reduce (fn [out pullexpr]
-                         (if (= '* pullexpr)
-                           (do
-                             (depend-on-triple! e nil nil)
-                             (into out (keys (dissoc (rp/eav db e) :db/id))))
-                           (conj out pullexpr))) [] pullv)]
+   (let [e (resolve-e conn db e)]
      (reduce-kv
       (fn pull [m i pullexpr]
-        (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
-                             [pullexpr nil]
-                             (first pullexpr))
-              [a alias val-fn opts] (if (list? a)
-                                      (let [{:as opts
-                                             :keys [default limit]
-                                             alias :as
-                                             :or {alias (first a)}} (apply hash-map (rest a))
-                                            a (first a)]
-                                        (if (:db/id opts)
-                                          [a :db/id #(vector a %) opts]
-                                          [a alias (comp #(if limit (take limit %) %)
-                                                         (or (when default #(u/some-or % default))
-                                                             identity)) opts]))
-                                      [a a identity])
-              is-reverse (u/reverse-attr? a)
-              forward-a (cond-> a is-reverse u/forward-attr)
-              a-schema (rp/get-schema db forward-a)
-              v (val-fn (get* conn db e a false))
-              is-ref (rp/ref? db a a-schema)
-              is-many (or (rp/many? db a a-schema) is-reverse)
-              v (cond (not is-ref) v
+        (if (= pullexpr '*)
+          (do
+            (depend-on-triple! conn e nil nil)
+            (merge m (wrap-refs wrap-ref conn db (dissoc (rp/eav db e) :db/id))))
+          (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
+                               [pullexpr nil]
+                               (first pullexpr))
+                [a alias val-fn opts] (if (list? a)
+                                        (let [{:as opts
+                                               :keys [default limit]
+                                               alias :as
+                                               :or {alias (first a)}} (apply hash-map (rest a))
+                                              a (first a)]
+                                          (if (:db/id opts)
+                                            [a :db/id #(vector a %) opts]
+                                            [a alias (comp #(if limit (take limit %) %)
+                                                           (or (when default #(u/some-or % default))
+                                                               identity)) opts]))
+                                        [a a identity])
+                is-reverse (u/reverse-attr? a)
+                forward-a (cond-> a is-reverse u/forward-attr)
+                a-schema (rp/get-schema db forward-a)
+                v (val-fn (get* conn db e a false))
+                is-ref (rp/ref? db a a-schema)
+                is-many (or (rp/many? db a a-schema) is-reverse)
+                v (cond (not is-ref) v
 
-                      ;; ref without pull-expr
-                      (nil? map-expr) (cond-> v
-                                              is-ref
-                                              (wrap-v conn db is-many wrap-ref))
+                        ;; ref without pull-expr
+                        (nil? map-expr) (cond-> v
+                                                is-ref
+                                                (wrap-v conn db is-many wrap-ref))
 
-                      ;; recurse
-                      (or (number? map-expr) (#{'... :...} map-expr))
-                      (let [recursions (if (= 0 map-expr) false map-expr)
-                            refs (when v
-                                   (if recursions
-                                     (let [found (conj found e)
-                                           pullv (if (number? recursions)
-                                                   ;; decrement recurse parameter
-                                                   (update-in pullv [i forward-a] dec)
-                                                   pullv)
-                                           do-pull #(if (and (= :... recursions) (found %))
-                                                      %
-                                                      (pull* wrap-ref conn db pullv found %))]
-                                       (if is-many
-                                         (into [] (keep do-pull) v)
-                                         (do-pull v)))
-                                     (wrap-v v conn db is-many wrap-ref)))]
-                        refs #_(cond-> refs (not is-many) first))
+                        ;; recurse
+                        (or (number? map-expr) (#{'... :...} map-expr))
+                        (let [recursions (if (= 0 map-expr) false map-expr)
+                              refs (when v
+                                     (if recursions
+                                       (let [found (conj found e)
+                                             pullv (if (number? recursions)
+                                                     ;; decrement recurse parameter
+                                                     (update-in pullv [i forward-a] dec)
+                                                     pullv)
+                                             do-pull #(if (and (= :... recursions) (found %))
+                                                        %
+                                                        (pull* wrap-ref conn db pullv found %))]
+                                         (if is-many
+                                           (into [] (keep do-pull) v)
+                                           (do-pull v)))
+                                       (wrap-v v conn db is-many wrap-ref)))]
+                          refs #_(cond-> refs (not is-many) first))
 
-                      ;; cardinality/many
-                      is-many (mapv #(pull* wrap-ref conn db map-expr %) v)
+                        ;; cardinality/many
+                        is-many (mapv #(pull* wrap-ref conn db map-expr %) v)
 
-                      ;; cardinality/one
-                      :else (pull* wrap-ref conn db map-expr v))]
-          (cond-> m (some? v) (assoc alias v))))
+                        ;; cardinality/one
+                        :else (pull* wrap-ref conn db map-expr v))]
+            (cond-> m (some? v) (assoc alias v)))))
       nil
       pullv))))
 
