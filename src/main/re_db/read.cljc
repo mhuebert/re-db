@@ -261,7 +261,7 @@
      (reduce-kv
       (fn pull [m i pullexpr]
         (if (= '* pullexpr)
-          (merge m (rp/eav db e))
+          (merge m (dissoc (rp/eav db e) :db/id))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
                                (first pullexpr))
