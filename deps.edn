@@ -1,7 +1,5 @@
 {:paths ["src/main"]
  :deps {org.clojure/clojure {:mvn/version "1.11.1"}
-        org.clojure/clojurescript {:mvn/version "1.11.4"}
-        thheller/shadow-cljs {:mvn/version "2.18.0"}
         applied-science/js-interop {:mvn/version "0.3.3"}
         net.cgrand/macrovich {:mvn/version "0.2.1"}
         com.lucasbradstreet/cljs-uuid-utils {:mvn/version "1.0.2"}
@@ -11,6 +9,8 @@
                                   #_#_com.datomic/datomic-pro {:mvn/version "1.0.6269"
                                                                :exclusions [org.slf4j/slf4j-nop]}}}
            :datahike {:extra-deps {io.replikativ/datahike {:mvn/version "0.5.1504"}}}
+           :dev {:extra-deps {org.clojure/clojurescript {:mvn/version "1.11.4"}
+                              thheller/shadow-cljs {:mvn/version "2.18.0"}}}
            :test {:extra-paths ["src/test"]}
 
            :clerk {:extra-paths ["src/notebooks"]
