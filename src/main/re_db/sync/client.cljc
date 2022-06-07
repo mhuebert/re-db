@@ -14,7 +14,11 @@
                           (js/console.warn (str ::!send-fn "Queueing message - send-fn not yet initialized"))
                           (swap! !message-queue conj args))))
 (defn set-send-fn! [f]
-  (reset! !send-fn (fn [& args] (apply f args)))
+
+  (reset! !send-fn f
+          #_(fn [& args]
+              (prn :calling-send-fn args)
+              (apply f args)))
   (doseq [args @!message-queue] (apply f args))
   (swap! !message-queue empty))
 

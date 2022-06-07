@@ -52,21 +52,22 @@
 
 (deftest datom-tx
   (let [conn (mem/create-conn pets-schema)
-        tx-report (mem/transact! conn pets-tx)]
+        tx-report (mem/transact! conn pets-tx)
+        db-data #(dissoc % :tx :schema :tempids)]
     (d/with-conn conn
-      (is (= (dissoc @conn :schema :tx)
-             (dissoc @(doto (mem/create-conn pets-schema)
-                        (mem/transact! [[:db/datoms (:datoms tx-report)]])) :schema :tx))
+      (is (= (db-data @conn)
+             (db-data @(doto (mem/create-conn pets-schema)
+                        (mem/transact! [[:db/datoms (:datoms tx-report)]]))))
           :db/datoms)
 
-      (is (= (dissoc @(mem/create-conn pets-schema) :tx :schema)
-             (dissoc (let [conn (mem/create-conn pets-schema)
+      (is (= (db-data @(mem/create-conn pets-schema))
+             (db-data (let [conn (mem/create-conn pets-schema)
                            {:keys [datoms]} (mem/transact! conn pets-tx)]
                        (mem/transact! conn [[:db/datoms-reverse datoms]])
-                       @conn) :tx :schema)
-             (dissoc @(doto (mem/create-conn pets-schema)
+                       @conn))
+             (db-data @(doto (mem/create-conn pets-schema)
                         (mem/transact! [[:db/datoms (:datoms tx-report)]
-                                        [:db/datoms-reverse (:datoms tx-report)]])) :tx :schema))
+                                        [:db/datoms-reverse (:datoms tx-report)]]))))
           :db/datoms-reverse)
 
       #_(is (= {:db/id "fred"
@@ -271,8 +272,7 @@
                                    {:db/id "ball"
                                     :name "Ball"
                                     :owner "fred"}]))
-      (is (= {:db/id "fred"
-              :name "Fred"
+      (is (= {:name "Fred"
               :_owner [{:db/id "ball"}]}
              (pull '[* :_owner] "fred"))
           "reverse refs")))
@@ -289,10 +289,10 @@
                                   :name "One"
                                   :authors #{"fred" "mary"}}
                                  #_[:db/add "1" :authors #{"fred" "mary"}]]))
-    (is (= {:db/id "fred"
-            :name "Fred"
+    (is (= {:name "Fred"
             :_authors [{:db/id "1"}]
-            :pet {:db/id "fido"}} (pull '[* :_authors] "fred"))
+            :pet {:db/id "fido"}}
+           (pull '[* :_authors] "fred"))
         "refs with cardinality-many")
     (is (= {:db/id "fido"}
            (d/get "fido")))))

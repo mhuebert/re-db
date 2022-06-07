@@ -4,4 +4,4 @@
 
 ;; or let Clerk watch the given `:paths` for changes
 (clerk/serve! {:watch-paths ["src/notebooks"]
-               :browse? true})
+               #_#_:browse? true})

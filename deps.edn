@@ -9,8 +9,10 @@
                                   #_#_com.datomic/datomic-pro {:mvn/version "1.0.6269"
                                                                :exclusions [org.slf4j/slf4j-nop]}}}
            :datahike {:extra-deps {io.replikativ/datahike {:mvn/version "0.5.1504"}}}
-           :dev {:extra-deps {org.clojure/clojurescript {:mvn/version "1.11.4"}
-                              thheller/shadow-cljs {:mvn/version "2.18.0"}}}
+           :dev {:extra-deps {thheller/shadow-cljs {:mvn/version "2.19.1"}
+                              com.bhauman/cljs-test-display {#_#_:mvn/version "0.1.1"
+                                                             :git/sha "76905766a8c13a95f2fb93ed2a54fa7b2343db20"
+                                                             :git/url "https://github.com/mhuebert/cljs-test-display"}}}
            :test {:extra-paths ["src/test"]}
 
            :clerk {:extra-paths ["src/notebooks"]

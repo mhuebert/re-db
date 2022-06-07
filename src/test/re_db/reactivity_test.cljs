@@ -11,9 +11,11 @@
             [reagent.dom :as rdom]
             [clojure.string :as str]
             [reagent.ratom :as ratom]
-            re-db.integrations.reagent
+            [re-db.integrations.reagent]
             [re-db.read :as read])
   (:require-macros [re-db.test-helpers :refer [throws]]))
+
+(re-db.integrations.reagent/init)
 
 (def dom-root (or (js/document.getElementById "rtest")
                   (let [el (-> (js/document.createElement "div")

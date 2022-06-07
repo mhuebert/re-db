@@ -1,8 +1,7 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [-peek peek atom])
   (:require [re-db.util :as util]
-            [re-db.macros :as r]
-            #?(:cljs [applied-science.js-interop :as j]))
+            [re-db.macros :as r])
   #?(:cljs (:require-macros re-db.reactive)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -41,11 +40,10 @@
 
 (def ^:dynamic *owner* nil)
 
+#?(:cljs (def get-reagent-context (constantly nil)))
+
 (defn owner []
-  (or *owner*
-      #?(:cljs
-         (when util/reagent-compat
-           (util/js-resolve-sym reagent.ratom/*ratom-context*)))))
+  (or *owner* #?(:cljs (get-reagent-context))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Deref Capture - for dependency on reactive sources
@@ -56,8 +54,10 @@
 
 (def ^:dynamic *captured-derefs* nil)
 
+#?(:cljs (def reagent-notify-deref-watcher! (fn [_])))
+
 (defn collect-deref! [producer]
-  #?(:cljs (util/reagent-notify-deref-watcher! producer))
+  #?(:cljs (reagent-notify-deref-watcher! producer))
   (some-> *captured-derefs* (vswap! conj producer)))
 
 (defn handle-new-derefs! [consumer new-derefs]

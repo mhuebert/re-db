@@ -6,15 +6,6 @@
             [re-db.fast :as fast])
   #?(:cljs (:require-macros [re-db.util :as u])))
 
-#?(:cljs
-   (do
-     ;; Reagent compatibility
-     (goog-define reagent-compat true)
-     (def !reagent-notify-deref (delay (u/js-resolve-sym reagent.ratom/notify-deref-watcher!)))
-     (defn reagent-notify-deref-watcher! [derefed]
-       (when reagent-compat
-         (when-some [f @!reagent-notify-deref] (f derefed))))))
-
 (defn guard [x f] (when (f x) x))
 
 (defn set-replace [s old new]
@@ -118,10 +109,6 @@
                     removed (guard (set/difference s1 s2) seq)]
                 (when (or added removed)
                   [added removed]))))
-
-(defmacro js-resolve-sym [sym]
-  `(j/get-in js/window ~(let [parts (conj (vec (str/split (str (namespace sym)) #"\.")) (name sym))]
-                          (mapv munge parts))))
 
 (defn reverse-attr? [a]
   (= \_ (.charAt (name a) 0)))
