@@ -96,9 +96,11 @@
   - throws a meaningful error if encounters a non-empty set"
   [a v]
   (fn [coll e]
-    (if (seq coll) #_(some-> coll (disj e) seq)
-      (throw (#?(:cljs js/Error.
-                 :clj  Exception.) (unique-err-msg a v e coll)))
+    (if (seq coll)
+      (throw (ex-info "Attempted to write duplicate e value on unique index"
+                      {:unique-av [a v]
+                       :found coll
+                       :new #{e}}))
       #{e})))
 
 ;; when the schema is normalized - we make lists of per-value and per-datom
@@ -311,8 +313,7 @@
                   ::missing-unique-attribute
                   uniques)]
     (case e ::upsert (gen-e)
-            ::missing-unique-attribute (throw (#?(:clj Exception. :cljs js/Error.)
-                                               (str "missing unique attribute" m)))
+            ::missing-unique-attribute (throw (ex-info "Missing unique attribute" {:entity-map m}))
             e)))
 
 (defn- add-attr-index [db e a v pv ^Schema a-schema]
@@ -392,7 +393,7 @@
     (let [operation (tx 0)]
       (case operation
         :db/add (let [e (tx 1)
-                      _ (assert e (str "db/id not present in tx: " tx))
+                      _ (when-not e (throw (ex-info "db/id not present in tx" {:tx tx})))
                       [db resolved-e] (resolve-e+ db e)]
                   (add db (assoc tx 1 resolved-e)))
         :db/retractEntity (retract-entity db (update tx 1 #(resolve-e db %)))
@@ -404,10 +405,7 @@
                                 (reduce commit-datom db))
         (if-let [op (fast/gets db :schema :db/tx-fns operation)]
           (reduce commit-tx db (op db tx))
-          (do
-            ;; TODO
-            (prn :no-op-found (fast/gets db :schema :db/tx-fns operation))
-            (throw (#?(:cljs js/Error. :clj Exception.) (str "No db op: " operation)))))))
+          (throw (ex-info "db operation does not exist" {:op operation})))))
     (add-map db tx)))
 
 
