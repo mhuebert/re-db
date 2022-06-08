@@ -1,7 +1,7 @@
 (ns re-db.integrations.datomic
   (:require [datomic.api :as d]
             [re-db.protocols :as rp])
-  (:import [datomic.peer LocalConnection]
+  (:import [datomic.peer LocalConnection Connection]
            [datomic.db Db]))
 
 (extend-type Db
@@ -37,5 +37,9 @@
   (doto-report-triples [db f report] (doseq [[e a v] (:tx-data report)] (f e a v))))
 
 (extend-type LocalConnection
+  rp/IConn
+  (db [conn] (d/db conn)))
+
+(extend-type Connection
   rp/IConn
   (db [conn] (d/db conn)))
