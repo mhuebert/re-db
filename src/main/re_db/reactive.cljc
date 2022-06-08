@@ -40,7 +40,7 @@
 
 (def ^:dynamic *owner* nil)
 
-#?(:cljs (def get-reagent-context (constantly nil)))
+#?(:cljs (defonce get-reagent-context (constantly nil)))
 
 (defn owner []
   (or *owner* #?(:cljs (get-reagent-context))))
@@ -54,7 +54,7 @@
 
 (def ^:dynamic *captured-derefs* nil)
 
-#?(:cljs (def reagent-notify-deref-watcher! (fn [_])))
+#?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
 
 (defn collect-deref! [producer]
   #?(:cljs (reagent-notify-deref-watcher! producer))

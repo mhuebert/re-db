@@ -15,8 +15,6 @@
             [re-db.read :as read])
   (:require-macros [re-db.test-helpers :refer [throws]]))
 
-(re-db.integrations.reagent/init)
-
 (def dom-root (or (js/document.getElementById "rtest")
                   (let [el (-> (js/document.createElement "div")
                                (j/!set :id "rtest"))]
