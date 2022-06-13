@@ -50,6 +50,12 @@
   (doseq [[qvec query] @!watching]
     (send-fn [:re-db.sync/watch-query qvec])))
 
+(comment
+ ;; TODO
+ ;; combine multiple queries
+ (defn $all [& queries]
+   (reduce (fn [{:keys [loading? error]}]) {:value []} queries)))
+
 
 ;; MAYBE TODO...
 ;; - pass tx-id (to the client) with each query result

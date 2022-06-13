@@ -128,13 +128,20 @@
 (defn notify-watches [ref old-val new-val watches]
   (doseq [[k f] watches] (f k ref old-val new-val)))
 
+(defprotocol IUpdateMeta
+  (update-meta! [x f] [x f a] [x f a b]))
+
 (util/support-clj-protocols
-   (deftype RAtom [^:volatile-mutable state ^:volatile-mutable watches ^:volatile-mutable dispose-fns meta]
+   (deftype RAtom [^:volatile-mutable state ^:volatile-mutable watches ^:volatile-mutable dispose-fns ^:volatile-mutable meta]
      ICompute
      (invalidate! [this]
        (notify-watches this -1 state watches))
      IMeta
      (-meta [this] meta)
+     IUpdateMeta
+     (update-meta! [this f] (set! meta (f meta)) this)
+     (update-meta! [this f a] (set! meta (f meta a)) this)
+     (update-meta! [this f a b] (set! meta (f meta a b)) this)
      IDispose
      (get-dispose-fns [this] dispose-fns)
      (set-dispose-fns! [this new-dispose-fns] (set! dispose-fns new-dispose-fns))

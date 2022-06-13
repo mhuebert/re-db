@@ -5,6 +5,7 @@
   #?(:cljs (:require-macros re-db.subscriptions)))
 
 (defonce !subscription-defs (atom {}))
+;; map of {svec, sub}
 (defonce !subscription-cache (atom {}))
 
 (defn subscription
