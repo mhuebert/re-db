@@ -78,6 +78,13 @@
                          ([] [])
                          ([acc x] (conj (empty acc) (second acc) x)))))
 
+(def sliding-window (comp reducing-transducer
+                          (fn sliding-window [size]
+                            (fn
+                              ([] ())
+                              ([acc] acc)
+                              ([acc x] (cons x (take (dec size) acc)))))))
+
 (comment
 
  (r/session

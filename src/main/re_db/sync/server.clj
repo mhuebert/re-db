@@ -99,21 +99,20 @@
 
 (defonce !watches (atom {})) ;; a map of {<client-id> #{...refs}}
 
-(defonce !tabs (atom 0))
-(defonce client-tab (memoize (fn [client-id] (swap! !tabs inc))))
-
-;; TODO
-;; collect last n actions in a !tail atom (for notebook logging)
+;; atom which can be watched for an event-stream from this ns
+(defonce !last-event (atom nil))
 
 (defn watch-ref
   "Adds watch for ref, syncing changes with client."
   [client-id id ref send-fn]
-  (prn :watch-ref (client-tab client-id) id)
+  (reset! !last-event {:event :watch-ref :client-id client-id :ref-id id})
   (let [!tx-ref ($diff-tx id ref)]
     (swap! !watches update client-id (fnil conj #{})
            (r/update-meta! !tx-ref merge {::id id}))
     (add-watch !tx-ref client-id (fn [_ _ _ txs]
-                                   (prn :send-ref (client-tab client-id) id)
+                                   (reset! !last-event {:event :send
+                                                        :client-id client-id
+                                                        :ref-id id})
                                    (send-fn client-id [:re-db/sync-tx txs])))
     ;; initial sync of current value
     (send-fn client-id [:re-db/sync-tx (diff-tx id [nil @ref])])))
@@ -121,13 +120,12 @@
 (defn unwatch-ref
   "Removes watch for ref."
   [client-id id ref]
-  (prn :unwatch-ref (client-tab client-id) id)
+  (reset! !last-event {:event :unwatch-ref :client-id client-id :ref-id id})
   (let [!tx-ref ($diff-tx id ref)]
     (swap! !watches update client-id disj !tx-ref)
     (remove-watch !tx-ref client-id)))
 
 (defn unwatch-all [client-id]
-  (prn :unwatch-all (client-tab client-id))
   (doseq [ref (@!watches client-id)]
     (remove-watch ref client-id))
   (swap! !watches dissoc client-id)
