@@ -126,6 +126,7 @@
     (remove-watch !tx-ref client-id)))
 
 (defn unwatch-all [client-id]
+  (reset! !last-event {:event :unwatch-all :client-id client-id})
   (doseq [ref (@!watches client-id)]
     (remove-watch ref client-id))
   (swap! !watches dissoc client-id)
