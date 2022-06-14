@@ -1,6 +1,7 @@
 (ns re-db.xform
   (:refer-clojure :exclude [map into])
-  (:require [re-db.reactive :as r]))
+  (:require [re-db.reactive :as r]
+            [re-db.xform.reducers :as reducers]))
 
 (defn step [xform]
   (let [rfn (xform conj)
@@ -74,16 +75,9 @@
 (defn before:after
   "Stateful transducer, returns a before/after tuple for successive values, starting with nil."
   []
-  (reducing-transducer (fn
-                         ([] [])
-                         ([acc x] (conj (empty acc) (second acc) x)))))
+  (reducing-transducer reducers/before:after))
 
-(def sliding-window (comp reducing-transducer
-                          (fn sliding-window [size]
-                            (fn
-                              ([] ())
-                              ([acc] acc)
-                              ([acc x] (cons x (take (dec size) acc)))))))
+(def sliding-window (comp reducing-transducer reducers/sliding-window))
 
 (comment
 
