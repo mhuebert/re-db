@@ -344,7 +344,7 @@
   ;; - if an attribute is not present, `nil` is provided
   ([pull-expr] (fn [e] (pull pull-expr e)))
   ([pull-expr e]
-   (pull* default-ref-wrap *conn* (current-db) pull-expr e))
+   (pull nil pull-expr e))
   ([{:keys [wrap-ref conn db]
      :or {wrap-ref default-ref-wrap
           conn *conn*}} pull-expr e]
@@ -353,6 +353,15 @@
 (defn pull-entities
   ([pull-expr] (fn [e] (pull-entities pull-expr e)))
   ([pull-expr e] (pull* entity *conn* (current-db) pull-expr e)))
+
+(defn partial-pull [options]
+  (fn pull-fn
+    ([pull-expr]
+     (fn [e] (pull-fn pull-expr e)))
+    ([pull-expr e]
+     (pull options pull-expr e))
+    ([options-2 pull-expr e]
+     (pull (merge options options-2) pull-expr e))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Where
@@ -394,9 +403,11 @@
 (defn get
   "Read entity or attribute reactively"
   ([conn db e]
-   (some->> (resolve-e conn db e) (eav conn db)))
+   (when-let [e (resolve-e conn db e)]
+     (eav conn db e)))
   ([conn db e a]
-   (some->> (resolve-e conn db e) (eav conn db a)))
+   (when-let [e (resolve-e conn db e)]
+     (eav conn db e a)))
   ([conn db e a not-found]
    (u/some-or (get conn db e a) not-found)))
 

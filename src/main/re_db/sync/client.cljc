@@ -51,8 +51,8 @@
 (defn find-first [coll pred]
   (reduce (fn [_ x] (if (pred x) (reduced x) _)) nil coll))
 
-(defn all [& queries]
-  (let [qs (map (comp deref $query) queries)]
+(defn all [& qvecs]
+  (let [qs (map (comp deref $query) qvecs)]
     (or (find-first qs :error)
         (find-first qs :loading?)
         {:value (into [] (map :value) qs)})))
