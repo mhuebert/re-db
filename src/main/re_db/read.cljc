@@ -345,10 +345,13 @@
   ([pull-expr] (fn [e] (pull pull-expr e)))
   ([pull-expr e]
    (pull nil pull-expr e))
-  ([{:keys [wrap-ref conn db]
-     :or {wrap-ref default-ref-wrap
+  ([{:keys [wrap-root wrap-ref conn db]
+     :or {wrap-root identity
+          wrap-ref default-ref-wrap
           conn *conn*}} pull-expr e]
-   (pull* wrap-ref conn (current-db conn db) pull-expr e)))
+   (let [db (current-db conn db)]
+     (->> (pull* wrap-ref conn db pull-expr e)
+          (wrap-root conn db)))))
 
 (defn pull-entities
   ([pull-expr] (fn [e] (pull-entities pull-expr e)))
