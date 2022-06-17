@@ -4,23 +4,23 @@
             [re-db.subscriptions :as subs]
             [cognitect.transit :as transit]))
 
-;; keeps track of all the queries we are watching
+;; all active queries
 (defonce !watching (atom {}))
 
-(defonce !message-queue (atom []))
+;; messages queued before 1st connection
+(defonce !initial-message-queue (atom []))
 
 ;; websocket-handling code needs to set the send-fn here
 (defonce !send-fn (atom (fn [& args]
                           (js/console.warn (str ::!send-fn "Queueing message - send-fn not yet initialized"))
-                          (swap! !message-queue conj args))))
+                          (swap! !initial-message-queue conj args))))
 (defn set-send-fn! [f]
-
   (reset! !send-fn f
           #_(fn [& args]
               (prn :calling-send-fn args)
               (apply f args)))
-  (doseq [args @!message-queue] (apply f args))
-  (swap! !message-queue empty))
+  (doseq [args @!initial-message-queue] (apply f args))
+  (swap! !initial-message-queue empty))
 
 ;; for instantiating entities
 (def read-handlers {"re-db/entity" (transit/read-handler
@@ -43,19 +43,19 @@
       (swap! !watching assoc qvec rx)
       rx)))
 
-(defn $eval [form] ($query [:eval form]))
-
 (defn on-handshake! [send-fn]
   (set-send-fn! send-fn)
   (doseq [[qvec query] @!watching]
     (send-fn [:re-db.sync/watch-query qvec])))
 
-(comment
- ;; TODO
- ;; combine multiple queries
- (defn $all [& queries]
-   (reduce (fn [{:keys [loading? error]}]) {:value []} queries)))
+(defn find-first [coll pred]
+  (reduce (fn [_ x] (if (pred x) (reduced x) _)) nil coll))
 
+(defn $all [& queries]
+  (let [qs (map deref queries)]
+    (or (find-first qs :error)
+        (find-first qs :loading?)
+        {:value (into [] (map :value) qs)})))
 
 ;; MAYBE TODO...
 ;; - pass tx-id (to the client) with each query result

@@ -99,7 +99,7 @@
 
 (defonce !watches (atom {})) ;; a map of {<client-id> #{...refs}}
 
-;; atom which can be watched for an event-stream from this ns
+;; atom which can act as source for an event-stream
 (defonce !last-event (atom nil))
 
 (defn watch-ref
