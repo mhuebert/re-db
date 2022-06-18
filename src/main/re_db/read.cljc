@@ -332,6 +332,7 @@
       pullv))))
 
 (defn- default-ref-wrap [_conn _db e] {:db/id (:db/id e e)})
+(defn- default-wrap-root [_conn _db m] m)
 
 (defn pull
   "Returns entity as map, as well as linked entities specified in `pull`.
@@ -346,16 +347,12 @@
   ([pull-expr e]
    (pull nil pull-expr e))
   ([{:keys [wrap-root wrap-ref conn db]
-     :or {wrap-root identity
+     :or {wrap-root default-wrap-root
           wrap-ref default-ref-wrap
           conn *conn*}} pull-expr e]
    (let [db (current-db conn db)]
      (->> (pull* wrap-ref conn db pull-expr e)
           (wrap-root conn db)))))
-
-(defn pull-entities
-  ([pull-expr] (fn [e] (pull-entities pull-expr e)))
-  ([pull-expr e] (pull* entity *conn* (current-db) pull-expr e)))
 
 (defn partial-pull [options]
   (fn pull-fn

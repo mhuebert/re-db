@@ -569,3 +569,41 @@
     (is (db/ref? (db/get-schema @conn :my/ref)))
     (is (some #{{:my/ref schema/ae}}
               (-> @conn :schema :db/runtime-changes)))))
+
+(deftest upsert-reverse
+  (d/with-conn {:name schema/unique-id
+                :pets (merge schema/ref
+                             schema/many)}
+    (d/transact! [{:name "Peter"}
+                  {:name "Mr. Rabbit"
+                   :_pets [[:name "Peter"]]}])
+    (is (= 1 (-> (d/entity [:name "Peter"])
+                 :pets
+                 count))
+        "upsert-reverse: lookup ref")
+
+    (d/transact! [{:name "Mr. Porcupine"
+                   :_pets [{:db/id [:name "Sally"]
+                            :hair-color "brown"}]}
+                  {:name "Sally"
+                   :car-color "red"}])
+
+    (is (= {:name "Sally"
+            :hair-color "brown"
+            :car-color "red"
+            :pets [{:name "Mr. Porcupine"}]}
+
+           (d/pull '[* {:pets [:name]}] [:name "Sally"]))
+        "upsert-reverse: map")
+
+    (d/transact! [{:db/id -1
+                   :name "Joe"}
+                  {:name "Mr. Beaver"
+                   :_pets [-1]}])
+
+    (is (= "Mr. Beaver"
+           (-> (d/entity [:name "Joe"])
+                 :pets
+                 first
+                 :name))
+        "upsert-reverse: db/id")))

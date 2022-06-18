@@ -41,10 +41,6 @@
   ([pull-expr])
   ([pull-expr id]))
 
-(m/defpartial pull-entities {:f '(read/pull-entities _)}
-  ([pull-expr])
-  ([pull-expr id]))
-
 (m/defpartial transact! {:f '(->> (rp/transact *conn* _)
                                   (read/handle-report! *conn*))}
   ([txs])
