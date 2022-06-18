@@ -2,6 +2,7 @@
   (:require [re-db.reactive :as r]
             [re-db.api :as d]
             [re-db.subscriptions :as subs]
+            [re-db.util :as u]
             [cognitect.transit :as transit]))
 
 ;; all active queries
@@ -48,14 +49,15 @@
   (doseq [[qvec query] @!watching]
     (send-fn [:re-db.sync/watch-query qvec])))
 
-(defn find-first [coll pred]
-  (reduce (fn [_ x] (if (pred x) (reduced x) _)) nil coll))
-
 (defn all [& qvecs]
   (let [qs (map (comp deref $query) qvecs)]
-    (or (find-first qs :error)
-        (find-first qs :loading?)
+    (or (u/find-first qs :error)
+        (u/find-first qs :loading?)
         {:value (into [] (map :value) qs)})))
+
+(subs/def $all
+  (fn [& qvecs]
+    (apply all qvecs)))
 
 ;; MAYBE TODO...
 ;; - pass tx-id (to the client) with each query result

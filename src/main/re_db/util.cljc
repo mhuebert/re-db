@@ -176,3 +176,6 @@
         (dissoc m k)))))
 
 (defmacro bool [form] (vary-meta form assoc :tag 'bool))
+
+(defn find-first [coll pred]
+  (reduce (fn [_ x] (if (pred x) (reduced x) _)) nil coll))
