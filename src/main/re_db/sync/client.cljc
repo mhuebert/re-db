@@ -55,9 +55,7 @@
         (u/find-first qs :loading?)
         {:value (into [] (map :value) qs)})))
 
-(subs/def $all
-  (fn [& qvecs]
-    (apply all qvecs)))
+(subs/def $all all)
 
 ;; MAYBE TODO...
 ;; - pass tx-id (to the client) with each query result
