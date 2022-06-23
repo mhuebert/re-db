@@ -13,7 +13,8 @@
 
 ;; websocket-handling code needs to set the send-fn here
 (defonce !send-fn (atom (fn [& args]
-                          (js/console.warn (str ::!send-fn "Queueing message - send-fn not yet initialized"))
+                          ;; TODO - set up cljc logging?
+                          (prn (str ::!send-fn "Queueing message - send-fn not yet initialized"))
                           (swap! !initial-message-queue conj args))))
 (defn set-send-fn! [f]
   (reset! !send-fn f
