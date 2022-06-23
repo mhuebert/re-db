@@ -98,6 +98,15 @@
   (def dh-conn (-> databases (nth 1) :conn))
   (def mem-conn (-> databases (nth 2) :conn)))
 
+(deftest entity-reverse
+  (re/with-conn mem-conn
+    (is (string? (:emotion/name (first (re/where [:emotion/name])))))
+    (is (= 1 (count (:movie/_emotions (first (re/where [:emotion/name]))))))
+    (let [movie (first (:movie/_emotions (first (re/where [:emotion/name]))))]
+      movie )
+
+    ))
+
 ;; a query-function that uses the read/entity api:
 
 (deftest db-queries
@@ -297,3 +306,16 @@
    (swap! b inc)
    (r/dispose! memo)
    (swap! a inc) (swap! b inc)))
+
+(comment
+ (rp/merge-schema dm-conn {:name (merge schema/unique-id
+                                        schema/one
+                                        schema/string)
+                           :pets (merge schema/ref
+                                        schema/many)})
+ (rp/transact dm-conn [{:db/id -1
+                        :name "Mr. Porcupine"
+                        :_pets {:db/id -2
+                                :name "Sally"
+                                :hair-color "brown"}}])
+ )

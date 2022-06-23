@@ -1,7 +1,8 @@
 (ns re-db.sync.server
   (:require [cognitect.transit :as transit]
-            [re-db.xform :as xf]
-            [re-db.subscriptions :as s]))
+            [re-db.reactive :as r]
+            [re-db.subscriptions :as s]
+            [re-db.xform :as xf]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity references over the wire
@@ -98,12 +99,20 @@
 
 (defonce !watches (atom {})) ;; a map of {<client-id> #{...refs}}
 
+;; atom which can act as source for an event-stream
+(defonce !last-event (atom nil))
+
 (defn watch-ref
   "Adds watch for ref, syncing changes with client."
   [client-id id ref send-fn]
+  (reset! !last-event {:event :watch-ref :client-id client-id :ref-id id})
   (let [!tx-ref ($diff-tx id ref)]
-    (swap! !watches update client-id (fnil conj #{}) !tx-ref)
+    (swap! !watches update client-id (fnil conj #{})
+           (r/update-meta! !tx-ref merge {::id id}))
     (add-watch !tx-ref client-id (fn [_ _ _ txs]
+                                   (reset! !last-event {:event :send
+                                                        :client-id client-id
+                                                        :ref-id id})
                                    (send-fn client-id [:re-db/sync-tx txs])))
     ;; initial sync of current value
     (send-fn client-id [:re-db/sync-tx (diff-tx id [nil @ref])])))
@@ -111,11 +120,13 @@
 (defn unwatch-ref
   "Removes watch for ref."
   [client-id id ref]
+  (reset! !last-event {:event :unwatch-ref :client-id client-id :ref-id id})
   (let [!tx-ref ($diff-tx id ref)]
     (swap! !watches update client-id disj !tx-ref)
     (remove-watch !tx-ref client-id)))
 
 (defn unwatch-all [client-id]
+  (reset! !last-event {:event :unwatch-all :client-id client-id})
   (doseq [ref (@!watches client-id)]
     (remove-watch ref client-id))
   (swap! !watches dissoc client-id)

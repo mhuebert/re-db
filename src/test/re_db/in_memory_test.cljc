@@ -85,32 +85,41 @@
                                schema/one)
                 :pets (merge schema/ref
                              schema/many)
+                :owner (merge schema/ref
+                              schema/one)
                 :pet/collar-nr (merge schema/one
                                       schema/unique-id
                                       {:db.type/valueType :db.type/bigint})}]
     (d/with-conn (doto (mem/create-conn schema)
                    (mem/transact! [{:db/id "fred"
-                                    :email "fred@example.com"
-                                    :friend {:email "matt@example.com"}
+                                    :email "fred@eg.com"
+                                    :friend {:email "matt@eg.com"}
                                     :pets #{{:pet/collar-nr 1}
                                             {:pet/collar-nr 2}}}
-                                   {:email "matt@example.com"}
-                                   {:email "matt@example.com"
+                                   {:email "matt@eg.com"}
+                                   {:email "matt@eg.com"
                                     :name "Matt"}
                                    {:pet/collar-nr 1
                                     :pet/name "pookie"}
                                    {:pet/collar-nr 2
                                     :pet/name "fido"}
-                                   {:db/id [:email "peter@example.com"]
+                                   {:db/id [:email "peter@eg.com"]
                                     :name "Peter"}
-                                   {:email "peter@example.com"
-                                    :age 32}]))
-      (is (= {:email "matt@example.com"}
-             (pull [:email] [:email "matt@example.com"])))
+                                   {:email "peter@eg.com"
+                                    :age 32}
+                                   {:email "rabbit@eg.com"
+                                    :owner {:db/id "fred"} ;; db/id map as ref
+                                    :name "Rabbit"}]))
+      (is (= {:email "fred@eg.com"}
+             (->> (entity [:email "rabbit@eg.com"])
+                  :owner
+                  (pull [:email]))))
+      (is (= {:email "matt@eg.com"}
+             (pull [:email] [:email "matt@eg.com"])))
       (is (= (-> (entity "fred")
                  :friend
                  :db/id)
-             (-> (entity [:email "matt@example.com"])
+             (-> (entity [:email "matt@eg.com"])
                  :db/id)))
       (is (= "Matt"
              (-> (entity "fred")
@@ -124,7 +133,7 @@
                   set)))
 
       (is (= ["Peter" 32]
-             (->> (entity [:email "peter@example.com"])
+             (->> (entity [:email "peter@eg.com"])
                   ((juxt :name :age)))))
 
       )))
@@ -154,16 +163,16 @@
   (d/with-conn (doto (mem/create-conn {:email {:db/unique :db.unique/identity}
                                        :friend {:db/valueType :db.type/ref}})
                  (mem/transact! [{:db/id "fred"
-                                  :email "fred@example.com"
-                                  :friend [:email "matt@example.com"]}
-                                 {:email "matt@example.com"
-                                  :friend [:email "fred@example.com"]}
+                                  :email "fred@eg.com"
+                                  :friend [:email "matt@eg.com"]}
+                                 {:email "matt@eg.com"
+                                  :friend [:email "fred@eg.com"]}
                                  {:db/id "herman"
-                                  :friend {:email "peter@example.com"}}]))
+                                  :friend {:email "peter@eg.com"}}]))
     (is (= (d/get "fred")
-           (d/get [:email "fred@example.com"]))
+           (d/get [:email "fred@eg.com"]))
         "Can substitute unique attr for id (à la 'lookup refs')")
-    (is (= "matt@example.com"
+    (is (= "matt@eg.com"
            (-> (entity "fred")
                :friend
                :email))
@@ -171,14 +180,14 @@
     (is (= (-> (entity "fred")
                :friend
                :db/id)
-           (-> (entity [:email "matt@example.com"])
+           (-> (entity [:email "matt@eg.com"])
                :db/id))
         "transact a map with no id, only a unique attribute")
-    (is (= "peter@example.com"
+    (is (= "peter@eg.com"
            (-> (entity "herman") :friend :email)))
 
     (is (= "fred"
-           (-> (entity [:email "matt@example.com"])
+           (-> (entity [:email "matt@eg.com"])
                :friend
                :db/id)))))
 
@@ -560,3 +569,41 @@
     (is (db/ref? (db/get-schema @conn :my/ref)))
     (is (some #{{:my/ref schema/ae}}
               (-> @conn :schema :db/runtime-changes)))))
+
+(deftest upsert-reverse
+  (d/with-conn {:name schema/unique-id
+                :pets (merge schema/ref
+                             schema/many)}
+    (d/transact! [{:name "Peter"}
+                  {:name "Mr. Rabbit"
+                   :_pets [[:name "Peter"]]}])
+    (is (= 1 (-> (d/entity [:name "Peter"])
+                 :pets
+                 count))
+        "upsert-reverse: lookup ref")
+
+    (d/transact! [{:name "Mr. Porcupine"
+                   :_pets [{:db/id [:name "Sally"]
+                            :hair-color "brown"}]}
+                  {:name "Sally"
+                   :car-color "red"}])
+
+    (is (= {:name "Sally"
+            :hair-color "brown"
+            :car-color "red"
+            :pets [{:name "Mr. Porcupine"}]}
+
+           (d/pull '[* {:pets [:name]}] [:name "Sally"]))
+        "upsert-reverse: map")
+
+    (d/transact! [{:db/id -1
+                   :name "Joe"}
+                  {:name "Mr. Beaver"
+                   :_pets [-1]}])
+
+    (is (= "Mr. Beaver"
+           (-> (d/entity [:name "Joe"])
+                 :pets
+                 first
+                 :name))
+        "upsert-reverse: db/id")))

@@ -101,10 +101,12 @@
   ([e] (resolve-lookup-ref *conn* (current-db *conn*) e))
   ([conn db [a v :as e]]
    (when-not (rp/unique? db a)
-     (throw (ex-info "Lookup ref attribute must be unique" {:attribute a})))
+     (throw (ex-info "Lookup ref attribute must be unique" {:lookup-ref e})))
+   (when (nil? v)
+     (throw (ex-info "Lookup ref is missing value" {:lookup-ref v})))
    (if (vector? v) ;; nested lookup ref
      (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
-     (when v
+     (do
        (depend-on-triple! conn nil a v)
        (first (rp/ave db a v))))))
 
@@ -332,6 +334,7 @@
       pullv))))
 
 (defn- default-ref-wrap [_conn _db e] {:db/id (:db/id e e)})
+(defn- default-wrap-root [_conn _db m] m)
 
 (defn pull
   "Returns entity as map, as well as linked entities specified in `pull`.
@@ -344,15 +347,25 @@
   ;; - if an attribute is not present, `nil` is provided
   ([pull-expr] (fn [e] (pull pull-expr e)))
   ([pull-expr e]
-   (pull* default-ref-wrap *conn* (current-db) pull-expr e))
-  ([{:keys [wrap-ref conn db]
-     :or {wrap-ref default-ref-wrap
+   (pull nil pull-expr e))
+  ([{:keys [wrap-root wrap-ref conn db]
+     :or {wrap-root default-wrap-root
+          wrap-ref default-ref-wrap
           conn *conn*}} pull-expr e]
-   (pull* wrap-ref conn (current-db conn db) pull-expr e)))
+   (let [db (current-db conn db)]
+     (->> (pull* wrap-ref conn db pull-expr e)
+          (wrap-root conn db)))))
 
-(defn pull-entities
-  ([pull-expr] (fn [e] (pull-entities pull-expr e)))
-  ([pull-expr e] (pull* entity *conn* (current-db) pull-expr e)))
+(defn partial-pull
+  "Defines a 3-arity pull function with default options"
+  [options]
+  (fn pull-fn
+    ([pull-expr]
+     (fn [e] (pull-fn pull-expr e)))
+    ([pull-expr e]
+     (pull options pull-expr e))
+    ([options-2 pull-expr e]
+     (pull (merge options options-2) pull-expr e))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Where
@@ -394,9 +407,11 @@
 (defn get
   "Read entity or attribute reactively"
   ([conn db e]
-   (some->> (resolve-e conn db e) (eav conn db)))
+   (when-let [e (resolve-e conn db e)]
+     (eav conn db e)))
   ([conn db e a]
-   (some->> (resolve-e conn db e) (eav conn db a)))
+   (when-let [e (resolve-e conn db e)]
+     (eav conn db e a)))
   ([conn db e a not-found]
    (u/some-or (get conn db e a) not-found)))
 

@@ -368,22 +368,33 @@
    (let [prev-m (get-entity db e)
          db-schema (:schema db)
          [db new-m] (reduce-kv (fn [[db new-m] a v]
-                                 (let [a-schema (db-schema a default-schema)
-                                       is-ref (ref? a-schema)
-                                       is-many (many? a-schema)
-                                       v (cond-> v is-many set)
-                                       ;; if ref attribute, handle inline/nested entities
-                                       [db new-v] (if is-ref
-                                                    (handle-nested-refs db v a-schema)
-                                                    [db v])
-                                       ;; update indexes
-                                       db (add-attr-index db e a new-v (get prev-m a) a-schema)
-                                       value-present (if is-many
-                                                       (seq new-v)
-                                                       (some? new-v))]
-                                   [db (if value-present
-                                         (assoc new-m a new-v)
-                                         (dissoc new-m a))]))
+                                 (let [reverse? (u/reverse-attr? a)
+                                       canonical-a (u/forward-attr a)
+                                       a-schema (db-schema canonical-a default-schema)]
+                                   (if reverse?
+                                     [(reduce (fn [db v]
+                                                (if (map? v)
+                                                  (let [[db ve m] (resolve-map-e db v)]
+                                                    (-> db
+                                                        (add [nil ve canonical-a e])
+                                                        (add-map ve m)))
+                                                  (let [[db ve] (resolve-e+ db v)]
+                                                    (add db [nil ve canonical-a e])))) db v) new-m]
+                                     (let [is-ref (ref? a-schema)
+                                           is-many (many? a-schema)
+                                           v (cond-> v is-many set)
+                                           ;; if ref attribute, handle inline/nested entities
+                                           [db new-v] (if is-ref
+                                                        (handle-nested-refs db v a-schema)
+                                                        [db v])
+                                           ;; update indexes
+                                           db (add-attr-index db e a new-v (get prev-m a) a-schema)
+                                           value-present (if is-many
+                                                           (seq new-v)
+                                                           (some? new-v))]
+                                       [db (if value-present
+                                             (assoc new-m a new-v)
+                                             (dissoc new-m a))]))))
                                [db (or prev-m m)]
                                m)]
      (fast/update! db :eav assoc! e new-m))))

@@ -5,11 +5,11 @@
 
 ;; a lightweight wrapper around r/reaction - unsure if this API should exist
 
-(defn compute-f [conn f]
+(defn compute-f [id conn f]
   (binding [*conn* conn]
     (try {:value (f)}
          (catch #?(:clj Exception :cljs js/Error) e
-           (prn :error-invalidating-query (ex-message e))
+           (prn :error-computing-query id (ex-message e))
            {:error (ex-message e)}))))
 
 (defn register
@@ -19,9 +19,9 @@
   [id f]
   (subs/register id
     (fn [conn args]
-      (r/reaction! (compute-f conn #(apply f args))))
+      (r/reaction! (compute-f id conn #(apply f args))))
     (fn [conn args]
-      (fn [] (compute-f conn #(apply f args))))))
+      (fn [] (compute-f id conn #(apply f args))))))
 
 (defn patterns [q] (->> (r/get-derefs q)
                         (keep (comp :pattern meta))))
