@@ -101,10 +101,12 @@
   ([e] (resolve-lookup-ref *conn* (current-db *conn*) e))
   ([conn db [a v :as e]]
    (when-not (rp/unique? db a)
-     (throw (ex-info "Lookup ref attribute must be unique" {:attribute a})))
+     (throw (ex-info "Lookup ref attribute must be unique" {:lookup-ref e})))
+   (when (nil? v)
+     (throw (ex-info "Lookup ref is missing value" {:lookup-ref v})))
    (if (vector? v) ;; nested lookup ref
      (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
-     (when v
+     (do
        (depend-on-triple! conn nil a v)
        (first (rp/ave db a v))))))
 
@@ -354,7 +356,9 @@
      (->> (pull* wrap-ref conn db pull-expr e)
           (wrap-root conn db)))))
 
-(defn partial-pull [options]
+(defn partial-pull
+  "Defines a 3-arity pull function with default options"
+  [options]
   (fn pull-fn
     ([pull-expr]
      (fn [e] (pull-fn pull-expr e)))

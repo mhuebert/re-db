@@ -1,5 +1,6 @@
-{:tasks {start (do (shell "yarn install")
-                   (shell "yarn shadow-cljs -A:dev:datomic:datahike:test:clerk start"))
+{:tasks {:requires ([babashka.fs :as fs])
+         dev (do (shell "yarn install")
+                 (shell "yarn shadow-cljs -A:dev:datomic:datahike:test:clerk start"))
          stop (shell "yarn shadow-cljs stop")
          test (do (run 'start)
                   (shell "yarn shadow-cljs watch test"))

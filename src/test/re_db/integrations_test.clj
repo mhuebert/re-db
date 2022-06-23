@@ -306,3 +306,16 @@
    (swap! b inc)
    (r/dispose! memo)
    (swap! a inc) (swap! b inc)))
+
+(comment
+ (rp/merge-schema dm-conn {:name (merge schema/unique-id
+                                        schema/one
+                                        schema/string)
+                           :pets (merge schema/ref
+                                        schema/many)})
+ (rp/transact dm-conn [{:db/id -1
+                        :name "Mr. Porcupine"
+                        :_pets {:db/id -2
+                                :name "Sally"
+                                :hair-color "brown"}}])
+ )
