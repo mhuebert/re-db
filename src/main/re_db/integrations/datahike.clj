@@ -1,8 +1,7 @@
 (ns re-db.integrations.datahike
-  (:require [datahike.api :as dh]
-            [datahike.core :as dh.core]
-            datahike.db
+  (:require [datahike.api :as d]
             datahike.datom
+            datahike.db
             [re-db.protocols :as rp])
   (:import datahike.db.DB
            datahike.datom.Datom))
@@ -10,12 +9,12 @@
 (extend-type datahike.db.DB
   rp/ITriple
   (eav
-    ([db e a] (get (dh/entity db e) a))
-    ([db e] (dh/pull db '[*] e)))
-  (ave [db a v] (into #{} (map :e) (dh/datoms db :avet a v)))
-  (ae [db a] (into #{} (map :e) (dh/datoms db :aevt a)))
+    ([db e a] (get (d/entity db e) a))
+    ([db e] (d/pull db '[*] e)))
+  (ave [db a v] (into #{} (map :e) (d/datoms db :avet a v)))
+  (ae [db a] (into #{} (map :e) (d/datoms db :aevt a)))
   (datom-a [db a] a)
-  (get-schema [db a] (dh/entity db a))
+  (get-schema [db a] (d/entity db a))
   (ref?
     ([this a] (rp/ref? this a (rp/get-schema this a)))
     ([this a schema] (= :db.type/ref (:db/valueType schema))))
@@ -29,7 +28,7 @@
     (doseq [^datahike.datom.Datom datom (:tx-data report)]
       (f (.-e datom) (.-a datom) (.-v datom))))
   (-transact
-    ([db conn txs] (dh/transact conn txs))
-    ([db conn txs opts] (dh/transact conn txs opts)))
+    ([db conn txs] (d/transact conn txs))
+    ([db conn txs opts] (d/transact conn txs opts)))
   (-merge-schema [db conn schema]
-    (dh/transact conn (mapv (fn [[ident m]] (assoc m :db/ident ident)) schema))))
+    (d/transact conn (mapv (fn [[ident m]] (assoc m :db/ident ident)) schema))))

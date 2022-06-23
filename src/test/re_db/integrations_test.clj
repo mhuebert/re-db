@@ -3,8 +3,9 @@
             [re-db.integrations.datomic]
 
             [datahike.api :as dh]
+            [datalevin.core :as dl]
             [re-db.integrations.datahike]
-
+            [re-db.integrations.datalevin]
             [re-db.integrations.in-memory]
 
             [re-db.api :as re]
@@ -30,18 +31,19 @@
 
 (do
 
+  (def mem-conn (re/create-conn))
+  (def dm-conn (dm/connect (doto "datomic:mem://foo7" dm/create-database)))
+  (def dh-conn (let [config {:store {:backend :file :path "/tmp/example"}}]
+                 (do (try (dh/delete-database config) (catch Exception e))
+                                 (try (dh/create-database config) (catch Exception e))
+                                 (dh/connect config))))
+  (def dl-conn (dl/get-conn "/tmp/datalevin/mydb" {}))
 
   (def databases
-    [{:id :datomic
-      :conn (dm/connect (doto "datomic:mem://foo7" dm/create-database))}
-     (let [config {:store {:backend :file :path "/tmp/example"}}]
-       {:id :datahike
-        :config config
-        :conn (do (try (dh/delete-database config) (catch Exception e))
-                  (try (dh/create-database config) (catch Exception e))
-                  (dh/connect config))})
-     {:id :in-memory
-      :conn (re/create-conn)}])
+    [{:id :datomic :conn dm-conn}
+     {:id :datahike :conn dh-conn}
+     {:id :datalevin :conn dl-conn}
+     {:id :in-memory :conn mem-conn}])
 
 
   (defn transact! [txs]
@@ -92,20 +94,30 @@
      :movie/emotions [[:emotion/name "happy"]
                       [:emotion/name "sad"]]
      :movie/top-emotion [:emotion/name "sad"]}])
+  nil
 
 
-  (def dm-conn (-> databases (nth 0) :conn))
-  (def dh-conn (-> databases (nth 1) :conn))
-  (def mem-conn (-> databases (nth 2) :conn)))
+
+  )
+
+(merge {} (dl/entity @dl-conn :emotion/name))
+(dl/entity @dl-conn [:emotion/name "tense"])
 
 (deftest entity-reverse
-  (re/with-conn mem-conn
-    (is (string? (:emotion/name (first (re/where [:emotion/name])))))
-    (is (= 1 (count (:movie/_emotions (first (re/where [:emotion/name]))))))
-    (let [movie (first (:movie/_emotions (first (re/where [:emotion/name]))))]
-      movie )
 
-    ))
+  (doseq [conn (map :conn databases)]
+    (re/with-conn conn
+      (is (string? (:emotion/name (first (re/where [:emotion/name])))))
+      (first (re/where [:emotion/name]))
+      (is (= 1 (count (:movie/_emotions (re/entity [:emotion/name "tense"])))))
+      (is (= "Commando"
+             (-> [:emotion/name "tense"]
+                 re/entity
+                 :movie/_emotions
+                 first
+                 :movie/title)))
+
+      )))
 
 ;; a query-function that uses the read/entity api:
 
@@ -163,11 +175,19 @@
     (rp/transact conn [{:owner [:name "Fred"]
                         :name "Ball"}]))
 
-  (let [[dm dh mem] (map :conn databases)]
+  (dl/update-schema dl-conn {:owner (merge schema/ref
+                                           schema/unique-id
+                                           schema/one)})
+
+  (let [[dm-conn
+         dh-conn
+         dl-conn
+         mem-conn] (map :conn databases)]
     (are [expr]
-      (= (re/with-conn dm expr)
-         (re/with-conn dh expr)
-         (re/with-conn mem expr))
+      (= (re/with-conn dm-conn expr)
+         (re/with-conn dh-conn expr)
+         (re/with-conn dl-conn expr)
+         (re/with-conn mem-conn expr))
 
       (->> [:movie/title "Repo Man"]
            (re/pull '[*
@@ -179,11 +199,15 @@
       (into #{} (map :name) (:_owner (re/entity [:name "Fred"])))
       (into #{} (map :name) (:_owner (re/pull '[:name :_owner] [:name "Fred"])))))
 
-  (let [[dm dh mem] (map :conn databases)]
+  (let [[dm-conn
+         dh-conn
+         dl-conn
+         mem-conn] (map :conn databases)]
     (are [expr]
-      (= (re/with-conn dm expr)
-         (re/with-conn dh expr)
-         (re/with-conn mem expr))
+      (= (re/with-conn dm-conn expr)
+         (re/with-conn dh-conn expr)
+         (re/with-conn dl-conn expr)
+         (re/with-conn mem-conn expr))
 
       (->> [:movie/title "The Goonies"]
            (re/pull '[*])
