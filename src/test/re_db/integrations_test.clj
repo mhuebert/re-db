@@ -32,11 +32,11 @@
 (do
 
   (def mem-conn (re/create-conn))
-  (def dm-conn (dm/connect (doto "datomic:mem://foo7" dm/create-database)))
+  (def dm-conn (dm/connect (doto "datomic:mem://foo02" dm/create-database)))
   (def dh-conn (let [config {:store {:backend :file :path "/tmp/example"}}]
                  (do (try (dh/delete-database config) (catch Exception e))
-                                 (try (dh/create-database config) (catch Exception e))
-                                 (dh/connect config))))
+                     (try (dh/create-database config) (catch Exception e))
+                     (dh/connect config))))
   (def dl-conn (dl/get-conn "/tmp/datalevin/mydb" {}))
 
   (def databases
@@ -67,7 +67,7 @@
                                                 schema/one
                                                 schema/unique-id)
                            :movie/top-emotion (merge schema/ref
-                                                          schema/one)
+                                                     schema/one)
                            }))
   (transact! (for [name ["sad"
                          "happy"
@@ -93,42 +93,36 @@
      :movie/release-year 1984
      :movie/emotions [[:emotion/name "happy"]
                       [:emotion/name "sad"]]
-     :movie/top-emotion [:emotion/name "sad"]}])
+     :movie/top-emotion [:emotion/name "sad"]}
+    {:movie/title "Mr. Bean"}])
   nil
-
-
 
   )
 
-(merge {} (dl/entity @dl-conn :emotion/name))
-(dl/entity @dl-conn [:emotion/name "tense"])
 
 (deftest entity-reverse
 
   (doseq [conn (map :conn databases)]
     (re/with-conn conn
       (is (string? (:emotion/name (first (re/where [:emotion/name])))))
-      (first (re/where [:emotion/name]))
       (is (= 1 (count (:movie/_emotions (re/entity [:emotion/name "tense"])))))
       (is (= "Commando"
              (-> [:emotion/name "tense"]
                  re/entity
                  :movie/_emotions
                  first
-                 :movie/title)))
-
-      )))
+                 :movie/title))))))
 
 ;; a query-function that uses the read/entity api:
 
 (deftest db-queries
 
   (q/register :emo-movies
-              (fn [emo-name]
-                (->> (re/entity [:emotion/name emo-name])
-                     :movie/_emotions
-                     (mapv :movie/title)
-                     set)))
+    (fn [emo-name]
+      (->> (re/entity [:emotion/name emo-name])
+           :movie/_emotions
+           (mapv :movie/title)
+           set)))
 
 
   (let [sad-queries (mapv (fn [{:keys [id conn]}]
@@ -168,12 +162,12 @@
     (rp/merge-schema conn {:owner (merge schema/ref
                                          schema/unique-id
                                          schema/one)
-                           :name (merge schema/unique-id
-                                        schema/one
-                                        schema/string)})
-    (rp/transact conn [{:name "Fred"}])
-    (rp/transact conn [{:owner [:name "Fred"]
-                        :name "Ball"}]))
+                           :person/name (merge schema/unique-id
+                                               schema/one
+                                               schema/string)})
+    (rp/transact conn [{:person/name "Fred"}])
+    (rp/transact conn [{:owner [:person/name "Fred"]
+                        :person/name "Ball"}]))
 
   (dl/update-schema dl-conn {:owner (merge schema/ref
                                            schema/unique-id
@@ -196,8 +190,11 @@
                       {:movie/emotions [(:emotion/name :db/id true)]}])
            (#(update % :movie/emotions set)))
 
-      (into #{} (map :name) (:_owner (re/entity [:name "Fred"])))
-      (into #{} (map :name) (:_owner (re/pull '[:name :_owner] [:name "Fred"])))))
+      (into #{} (map :person/name) (:_owner (re/entity [:person/name "Fred"])))
+      (into #{} (map :person/name) (:_owner (re/pull '[:person/name :_owner] [:person/name "Fred"])))
+
+      (->> [:movie/title "Mr. Bean"]
+           (re/pull '[:movie/emotions]))))
 
   (let [[dm-conn
          dh-conn
@@ -230,7 +227,7 @@
         (is (= "the goonies"
                (->> [:movie/title "The Goonies"]
                     (re/pull [:movie/title-lowercase])
-                   :movie/title-lowercase)))))))
+                    :movie/title-lowercase)))))))
 
 
 
@@ -247,7 +244,7 @@
  (q/once (dm-db)
          (-> (q/entity [:movie/title "Repo Man"])
              (q/pull '[(:movie/title :as :title)
-                       {(:movie/emotions :as :emos) [(:emotion/name :as :name)]}])))
+                       {(:movie/emotions :as :emos) [(:emotion/name :as :person/name)]}])))
 
  ;; :id option - use as lookup ref
  (q/once (dm-db)
@@ -286,7 +283,7 @@
                           #_(q/pull [:movie/release-year :movie/title])))
 
  ;; TODO - wildcard
- '(q/pull '[* {:sub/child [:name :birthdate]}])
+ '(q/pull '[* {:sub/child [:person/name :birthdate]}])
 
  (let [a (r/atom 0)
        my-query (q/make-query dm-conn #(doto (* @a 10) prn))]
@@ -332,14 +329,35 @@
    (swap! a inc) (swap! b inc)))
 
 (comment
- (rp/merge-schema dm-conn {:name (merge schema/unique-id
-                                        schema/one
-                                        schema/string)
+ (rp/merge-schema dm-conn {:person/name (merge schema/unique-id
+                                               schema/one
+                                               schema/string)
                            :pets (merge schema/ref
                                         schema/many)})
  (rp/transact dm-conn [{:db/id -1
-                        :name "Mr. Porcupine"
+                        :person/name "Mr. Porcupine"
                         :_pets {:db/id -2
-                                :name "Sally"
+                                :person/name "Sally"
                                 :hair-color "brown"}}])
  )
+
+(deftest ident-refs
+  (is
+   (apply =
+          (for [{:keys [id conn]} databases]
+            (re/with-conn conn
+              (re/merge-schema! {:favorite-attribute (merge schema/ref
+                                                            schema/one)
+                                 :person/name {}
+                                 :id (merge schema/unique-id
+                                            schema/string
+                                            schema/one)})
+              (re/transact! [{:db/ident :person/name}
+                             {:id "A"
+                              :favorite-attribute :person/name}])
+              [(-> (re/entity [:id "A"]) :favorite-attribute)
+               (re/pull '[:favorite-attribute] [:id "A"])])))))
+
+;; issues
+;; - support for keywords-as-refs in re-db (? what does this even mean)
+;; - support for resolving idents

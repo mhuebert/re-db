@@ -1,10 +1,9 @@
 (ns re-db.in-memory-test
-  (:require #?(:clj [datomic.api :as dm])
-            #?(:clj [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj [clojure.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing]])
             [re-db.in-memory :as mem]
             [re-db.api :as d]
-            [re-db.read :as read :refer [entity #?(:cljs Entity) pull]]
+            [re-db.read :refer [entity #?(:cljs Entity) pull]]
             [re-db.schema :as schema]
             [re-db.util :as util]
             [re-db.test-helpers :refer [throws]]
@@ -352,13 +351,13 @@
            (-> (d/pull [{:children 2}] "A")
                :children first :children first :children first)))
 
-    (is (= [{:db/id "A.4"}]
+    (is (= [{:db/id "A.4" :children []}]
            (-> (d/pull [:db/id {:children :...}] "A")
                :children first :children first :children first :children first :children)))))
 
 (deftest custom-db-operations
   ;; add an operation by
-  (d/with-conn {:db/tx-fns {:db/times-ten (fn [db [_ e a v]]
+  (d/with-conn {:db/tx-fns {:db/times-ten (fn [_db [_ e a v]]
                                             [[:db/add e a (* 10 v)]])}}
     (d/transact! [[:db/times-ten :matt :age 3.9]])
     (is (= 39.0 (d/get :matt :age))

@@ -2,12 +2,19 @@
   (:require [datomic.api :as d]
             [re-db.protocols :as rp])
   (:import [datomic.peer LocalConnection Connection]
-           [datomic.db Db]))
+           [datomic.db Db]
+           [datomic Datom]))
+
+(defn- v [^Datom d] (.-v d))
 
 (extend-type Db
   rp/ITriple
   (eav
-    ([db e a] (get (d/entity db e) a))
+    ([db e a]
+     (let [datoms (d/datoms db :eavt e a)]
+       (if (rp/many? db a)
+         (mapv v datoms)
+         (some-> (first datoms) v))))
     ([db e] (d/pull db '[*] e)))
   (ave [db a v]
     (if (:db/index (d/entity db a))
@@ -20,6 +27,7 @@
   (ae [db a] (into #{} (map :e) (d/datoms db :aevt a)))
   (datom-a [db a] (d/entid db a))
   (get-schema [db a] (d/entity db a))
+  (id->ident [db e] (d/ident db e))
   (ref?
     ([db a] (rp/ref? db a (rp/get-schema db a)))
     ([db a schema] (= :db.type/ref (:db/valueType schema))))
@@ -33,7 +41,12 @@
     ([db conn txs] @(d/transact conn txs))
     ([db conn txs opts] @(d/transact conn txs opts)))
   (-merge-schema [db conn schema]
-    @(d/transact conn (mapv (fn [[ident m]] (assoc m :db/ident ident)) schema)))
+    @(d/transact conn (mapcat (fn [[ident m]]
+                             (let [id (d/tempid :db.part/db)]
+                               (into [[:db/add id :db/ident ident]]
+                                     (for [[k v] m]
+                                       [:db/add id k v]))))
+                           schema)))
   (doto-report-triples [db f report] (doseq [[e a v] (:tx-data report)] (f e a v))))
 
 (extend-type LocalConnection

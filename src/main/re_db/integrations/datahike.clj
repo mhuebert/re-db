@@ -6,15 +6,22 @@
   (:import datahike.db.DB
            datahike.datom.Datom))
 
+(defn- v [^datahike.datom.Datom d] (.-v d))
+
 (extend-type datahike.db.DB
   rp/ITriple
   (eav
-    ([db e a] (get (d/entity db e) a))
+    ([db e a]
+     (let [datoms (d/datoms db :eavt e a)]
+       (if (rp/many? db a)
+         (mapv v datoms)
+         (some-> (first datoms) v))))
     ([db e] (d/pull db '[*] e)))
   (ave [db a v] (into #{} (map :e) (d/datoms db :avet a v)))
   (ae [db a] (into #{} (map :e) (d/datoms db :aevt a)))
   (datom-a [db a] a)
   (get-schema [db a] (d/entity db a))
+  (id->ident [db e] (or (rp/eav db e :db/ident) e))
   (ref?
     ([this a] (rp/ref? this a (rp/get-schema this a)))
     ([this a schema] (= :db.type/ref (:db/valueType schema))))

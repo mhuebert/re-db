@@ -17,6 +17,7 @@
   (ref? [db a] [db a schema])
   (unique? [db a] [db a schema])
   (many? [db a] [db a schema])
+  (id->ident [db e] "Returns :db/ident if it exists for e")
 
   (doto-report-triples [db f report])
   ;; fns that operate on a connection, but dispatch on db-type

@@ -40,6 +40,7 @@
                                      out)) [] (:eav db)))))
   (datom-a [db a] a)
   (get-schema [db a] (mem/get-schema db a))
+  (id->ident [db e] e)
   (ref?
     ([db a] (mem/ref? (mem/get-schema db a)))
     ([db a schema] (mem/ref? schema)))

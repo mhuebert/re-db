@@ -82,6 +82,7 @@
   [db e]
   (cond (vector? e) (resolve-lookup-ref+ db e)
         (tempid? e) (tempid+ db e)
+        #_#_(keyword? e) (resolve-lookup-ref+ db [:db/ident e])
         :else [db e]))
 
 ;; index helpers
