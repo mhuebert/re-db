@@ -6,16 +6,7 @@
 (extend-type #?(:cljs default :clj java.lang.Object)
   rp/ITriple
   (eav
-    ([db e] (when-let [m (fast/gets db :eav e)]
-              (reduce-kv (fn [m a v]
-                           (let [a-schema (mem/get-schema db a)]
-                             (cond-> m
-                                     (mem/ref? a-schema)
-                                     (assoc a (if (mem/many? a-schema)
-                                                (mapv (fn [id] {:db/id id}) v)
-                                                {:db/id v})))))
-                         (assoc m :db/id e)
-                         m)))
+    ([db e] (some-> (fast/gets db :eav e) (assoc :db/id e)))
     ([db e a] (fast/gets db :eav e a)))
   (ave [db a v]
     (let [a-schema (mem/get-schema db a)]

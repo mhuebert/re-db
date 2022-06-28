@@ -15,7 +15,7 @@
        (if (rp/many? db a)
          (mapv v datoms)
          (some-> (first datoms) v))))
-    ([db e] (d/pull db '[*] e)))
+    ([db e] (rp/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
   (ave [db a v]
     (if (:db/index (d/entity db a))
       (into #{} (map :e) (d/datoms db :avet a v))

@@ -27,7 +27,7 @@
        (if (rp/many? db a)
          (mapv v datoms)
          (some-> (first datoms) v))))
-    ([db e] (d/pull db '[*] e)))
+    ([db e] (rp/datoms->map db (d/datoms db :eavt e))))
   (ave [db a v] (into #{} (map (fn [^datalevin.datom.Datom d] (.-e d))) (d/datoms db :ave a v)))
   (ae [db a] (into #{} (map (fn [^datalevin.datom.Datom d] (.-e d))) (d/datoms db :ave a)))
   (datom-a [db a] a)

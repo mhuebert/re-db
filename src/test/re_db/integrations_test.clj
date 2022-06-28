@@ -30,14 +30,14 @@
                      x)) e))
 
 (do
-
+  (def db-uuid (random-uuid))
   (def mem-conn (re/create-conn))
-  (def dm-conn (dm/connect (doto "datomic:mem://foo02" dm/create-database)))
+  (def dm-conn (dm/connect (doto (str "datomic:mem://db-" db-uuid) dm/create-database)))
   (def dh-conn (let [config {:store {:backend :file :path "/tmp/example"}}]
                  (do (try (dh/delete-database config) (catch Exception e))
                      (try (dh/create-database config) (catch Exception e))
                      (dh/connect config))))
-  (def dl-conn (dl/get-conn "/tmp/datalevin/mydb" {}))
+  (def dl-conn (dl/get-conn (str "/tmp/datalevin/db-" db-uuid) {}))
 
   (def databases
     [{:id :datomic :conn dm-conn}
@@ -50,6 +50,25 @@
     (mapv (fn [{:keys [conn]}]
             (->> (rp/transact conn txs)
                  (read/handle-report! conn))) databases))
+
+  (def initial-data [{:movie/title "The Goonies"
+                      :movie/genre "action/adventure"
+                      :movie/release-year 1985
+                      :movie/emotions [[:emotion/name "happy"]
+                                       {:emotion/name "excited"}]}
+                     {:movie/title "Commando"
+                      :movie/genre "thriller/action"
+                      :movie/release-year 1985
+                      :movie/emotions [[:emotion/name "happy"]
+                                       {:emotion/name "tense"}
+                                       {:emotion/name "excited"}]}
+                     {:movie/title "Repo Man"
+                      :movie/genre "punk dystopia"
+                      :movie/release-year 1984
+                      :movie/emotions [[:emotion/name "happy"]
+                                       [:emotion/name "sad"]]
+                      :movie/top-emotion [:emotion/name "sad"]}
+                     {:movie/title "Mr. Bean"}])
 
   (doseq [{:keys [conn]} databases]
     (rp/merge-schema conn {:movie/title (merge schema/string
@@ -76,25 +95,7 @@
                          "tense"
                          "whatever"]]
                {:emotion/name name}))
-  (transact!
-   [{:movie/title "The Goonies"
-     :movie/genre "action/adventure"
-     :movie/release-year 1985
-     :movie/emotions [[:emotion/name "happy"]
-                      {:emotion/name "excited"}]}
-    {:movie/title "Commando"
-     :movie/genre "thriller/action"
-     :movie/release-year 1985
-     :movie/emotions [[:emotion/name "happy"]
-                      {:emotion/name "tense"}
-                      {:emotion/name "excited"}]}
-    {:movie/title "Repo Man"
-     :movie/genre "punk dystopia"
-     :movie/release-year 1984
-     :movie/emotions [[:emotion/name "happy"]
-                      [:emotion/name "sad"]]
-     :movie/top-emotion [:emotion/name "sad"]}
-    {:movie/title "Mr. Bean"}])
+  (transact! initial-data)
   nil
 
   )
@@ -117,13 +118,14 @@
 
 (deftest db-queries
 
+  (transact! initial-data)
+
   (q/register :emo-movies
     (fn [emo-name]
       (->> (re/entity [:emotion/name emo-name])
            :movie/_emotions
            (mapv :movie/title)
            set)))
-
 
   (let [sad-queries (mapv (fn [{:keys [id conn]}]
                             [id (q/query conn [:emo-movies "sad"])])
@@ -356,7 +358,8 @@
                              {:id "A"
                               :favorite-attribute :person/name}])
               [(-> (re/entity [:id "A"]) :favorite-attribute)
-               (re/pull '[:favorite-attribute] [:id "A"])])))))
+               (re/pull '[:favorite-attribute] [:id "A"])
+               (re/pull '[*] [:id "A"])])))))
 
 ;; issues
 ;; - support for keywords-as-refs in re-db (? what does this even mean)
