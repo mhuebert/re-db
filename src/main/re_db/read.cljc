@@ -176,7 +176,7 @@
 
 (def ref-wrapper-noop (make-ref-wrapper (fn [_conn _db e] e)))
 (def ref-wrapper-default (make-ref-wrapper (fn [_conn _db e] {:db/id (:db/id e e)})))
-(def ref-wrapper-entity (make-ref-wrapper entity))
+(def ref-wrapper-entity (delay (make-ref-wrapper entity)))
 (defn root-wrapper-default [_conn _db m] m)
 
 (defn get* [conn db e a ref-wrapper]
@@ -235,7 +235,7 @@
     (-lookup [o a]
       (let [db (current-db conn db)]
         (resolve-entity-e! conn db e e-resolved?)
-        (get* conn db e a ref-wrapper-entity)))
+        (get* conn db e a @ref-wrapper-entity)))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
