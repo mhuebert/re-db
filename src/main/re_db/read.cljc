@@ -360,7 +360,8 @@
   ([pull-expr e]
    (pull nil pull-expr e))
   ([{:keys [wrap-root wrap-ref conn db] :or {conn *conn*}} pull-expr e]
-   (let [ref-wrapper (if wrap-ref
+   (let [e (:db/id e e)
+         ref-wrapper (if wrap-ref
                        (make-ref-wrapper wrap-ref)
                        ref-wrapper-default)
          root-wrapper (or wrap-root root-wrapper-default)

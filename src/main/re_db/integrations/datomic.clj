@@ -1,6 +1,7 @@
 (ns re-db.integrations.datomic
   (:require [datomic.api :as d]
-            [re-db.protocols :as rp])
+            [re-db.protocols :as rp]
+            [re-db.util :as u])
   (:import [datomic.peer LocalConnection Connection]
            [datomic.db Db]
            [datomic Datom]))
@@ -15,7 +16,7 @@
        (if (rp/many? db a)
          (mapv v datoms)
          (some-> (first datoms) v))))
-    ([db e] (rp/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
+    ([db e] (when e (rp/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e)))))
   (ave [db a v]
     (if (:db/index (d/entity db a))
       (into #{} (map :e) (d/datoms db :avet a v))
