@@ -179,6 +179,8 @@
 (def ref-wrapper-entity (make-ref-wrapper entity))
 (defn root-wrapper-default [_conn _db m] m)
 
+(declare entity)
+
 (defn get* [conn db e a ref-wrapper]
   (if (= :db/id a)
     e
