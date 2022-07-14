@@ -174,9 +174,10 @@ Use `d/merge-schema!` to update indexes.
 
 ### Finding entities
 
-Use `d/where` to find entities that match a list of clauses, each of which should be:
+Use `d/where` to find entities that match a list of clauses. Clauses all joined with `AND` 
+with early termination when a result set is empty. Each clause should be:
 
-1. An attribute-value **vector**, to match entities which contain the attribute-value pair. If the attribute is indexed, this will be very fast. Logs an attribute-value pattern read (:_av).
+1. An attribute-value **vector**, to match entities which contain the attribute-value pair. If the attribute is indexed, this will be fast. Logs an attribute-value pattern read (:_av).
 
 ```clj
 (d/where [[:name "Matt"]])
@@ -188,8 +189,7 @@ Use `d/where` to find entities that match a list of clauses, each of which shoul
 (d/where [:name])
 ```
 
-Clauses are evaluated in order and joined using `clojure.set/intersection` (`AND`),
-with early termination when the result set is empty.
+3. A **function** of one argument (an entity) may be provided if it is not in the first position (because that would cause a full database scan).
 
 ## Todo
 
