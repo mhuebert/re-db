@@ -290,7 +290,7 @@
         (if (= pullexpr '*)
           (do
             (depend-on-triple! conn e nil nil)
-            (merge m (wrap-refs ref-wrapper conn db (dissoc (rp/eav db e) :db/id))))
+            (merge m (when e (wrap-refs ref-wrapper conn db (dissoc (rp/eav db e) :db/id)))))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
                                (first pullexpr))
@@ -391,9 +391,14 @@
       (cond
         ;; arbitrary function
         (fn? v) (fn [entity] (v (clojure.core/get entity a)))
+
+        (or (keyword? v)
+            (not (rp/ref? db a))) (fn [entity] (= v (clojure.core/get entity a)))
+
+        :else
         ;; refs - resolve `v` lookup-refs & compare to :db/id of the thing
-        (rp/ref? db a) (fn [entity] (= (resolve-v conn db a v) (:db/id (clojure.core/get entity a))))
-        :else (fn [entity] (= (clojure.core/get entity a) v))))))
+        (fn [entity] (= (resolve-v conn db a v)
+                        (:db/id (clojure.core/get entity a))))))))
 
 (defn where
   ([clauses] (where *conn* (current-db) clauses))
@@ -402,13 +407,13 @@
    ;; first clause reads from db
    (let [[clause & clauses] clauses
          _ (assert (not (fn? clause)) "where cannot begin with function (scans entire db)")
-         entity-ids  (if (keyword? clause)
-                       (ae conn db clause)
-                       (let [[a v] clause]
-                         (if (fn? v)
-                           (filterv #(v (eav conn db % a))
-                                    (ae conn db a))
-                           (ave conn db a v))))]
+         entity-ids (if (keyword? clause)
+                      (ae conn db clause)
+                      (let [[a v] clause]
+                        (if (fn? v)
+                          (filterv #(v (eav conn db % a))
+                                   (ae conn db a))
+                          (ave conn db a v))))]
      (->> entity-ids
           (into #{}
                 (comp (map entity)

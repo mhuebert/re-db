@@ -361,6 +361,25 @@
                (re/pull '[:favorite-attribute] [:id "A"])
                (re/pull '[*] [:id "A"])])))))
 
+(deftest idents-in-where
+  (re/with-conn dm-conn
+    (re/merge-schema! {:service/commission (merge schema/ref schema/one)
+                       :system/id (merge schema/unique-id schema/one schema/string)
+                       :commission/name (merge schema/string schema/one)
+                       :service/phase (merge schema/ref schema/one)
+                       :phase/entry {}})
+    (re/transact! [{:db/id "1"
+                    :system/id "S"
+                    :service/phase :phase/entry
+                    :service/commission "2"}
+                   {:db/id "2"
+                    :system/id "C"
+                    :commission/name "A commission"}])
+    (is (some? (first (re/where [[:service/phase :phase/entry]
+                                 [:service/commission [:system/id "C"]]]))))
+    (is (some? (first (re/where [[:service/commission [:system/id "C"]]
+                                 [:service/phase :phase/entry]]))))))
+
 ;; issues
 ;; - support for keywords-as-refs in re-db (? what does this even mean)
 ;; - support for resolving idents

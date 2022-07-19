@@ -16,7 +16,7 @@
        (if (rp/many? db a)
          (mapv v datoms)
          (some-> (first datoms) v))))
-    ([db e] (when e (rp/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e)))))
+    ([db e] (rp/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
   (ave [db a v]
     (if (:db/index (d/entity db a))
       (into #{} (map :e) (d/datoms db :avet a v))
@@ -27,17 +27,17 @@
        db a v)))
   (ae [db a] (into #{} (map :e) (d/datoms db :aevt a)))
   (datom-a [db a] (d/entid db a))
-  (get-schema [db a] (d/entity db a))
+  (get-schema [db a] (d/attribute db a))
   (id->ident [db e] (d/ident db e))
   (ref?
-    ([db a] (rp/ref? db a (rp/get-schema db a)))
-    ([db a schema] (= :db.type/ref (:db/valueType schema))))
+    ([db a] (= :db.type/ref (:value-type (d/attribute db a))))
+    ([db a schema] (= :db.type/ref (:value-type schema))))
   (unique?
-    ([db a] (rp/unique? db a (rp/get-schema db a)))
-    ([db a schema] (:db/unique schema)))
+    ([db a] (:unique (d/attribute db a)))
+    ([db a schema] (:unique schema)))
   (many?
-    ([db a] (rp/many? db a (rp/get-schema db a)))
-    ([db a schema] (= :db.cardinality/many (:db/cardinality schema))))
+    ([db a] (= :db.cardinality/many (:cardinality (d/attribute db a))))
+    ([db a schema] (= :db.cardinality/many (:cardinality schema))))
   (-transact
     ([db conn txs] @(d/transact conn txs))
     ([db conn txs opts] @(d/transact conn txs opts)))

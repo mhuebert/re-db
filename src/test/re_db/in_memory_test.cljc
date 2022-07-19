@@ -606,3 +606,20 @@
                  first
                  :name))
         "upsert-reverse: db/id")))
+
+(deftest upsert
+
+ (d/with-conn {:system/name schema/unique-id
+               :system/id schema/unique-id
+               :person/worst-friend schema/ref
+               :person/best-friend schema/ref}
+   (d/transact! [{:db/id -1
+                  :person/name "Matt"
+                  :person/worst-friend [:system/id 1]
+                  :person/best-friend [:system/name "B"]}])
+   (is (thrown? Exception
+                (d/transact! [{:system/id 1
+                               :system/name "B"}]))
+       "Lookup ref upsert gotcha: if we upsert two lookup refs separately, which refer to the same entity, that entity must
+        already be transacted otherwise the lookup refs will resolve to different entities.")))
+
