@@ -281,6 +281,16 @@
                               (ref-wrapper conn db v)))
                    m))) m m))
 
+(defn compose-pull-xf [{:keys [default xform sort-by sort-by/dir skip limit]}]
+  (apply comp (cond-> ()
+                      default (conj #(if (some? %) % default))
+                      xform (conj xform)
+                      sort-by (conj (case dir
+                                      :desc #(clojure.core/sort-by sort-by (fn [a b] (compare b a)) %)
+                                      #(clojure.core/sort-by sort-by %)))
+                      skip (conj #(drop skip %))
+                      limit (conj #(take limit %)))))
+
 (defn- pull*
   ([ref-wrapper conn db pullv e] (pull* ref-wrapper conn db pullv #{} e))
   ([ref-wrapper conn db pullv found e]
@@ -296,15 +306,12 @@
                                (first pullexpr))
                 [a alias val-fn opts] (if (list? a)
                                         (let [{:as opts
-                                               :keys [default limit]
                                                alias :as
                                                :or {alias (first a)}} (apply hash-map (rest a))
                                               a (first a)]
                                           (if (:db/id opts)
                                             [a :db/id #(vector a %) opts]
-                                            [a alias (comp #(if limit (take limit %) %)
-                                                           (or (when default #(u/some-or % default))
-                                                               identity)) opts]))
+                                            [a alias (compose-pull-xf opts) opts]))
                                         [a a identity])
                 is-reverse (u/reverse-attr? a)
                 forward-a (cond-> a is-reverse u/forward-attr)

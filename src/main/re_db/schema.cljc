@@ -6,10 +6,11 @@
 (def many {:db/cardinality :db.cardinality/many})
 (def unique-id {:db/unique :db.unique/identity})
 (def unique-value {:db/unique :db.unique/value})
-(def ave {:db/index true})
-(def ae {:db/index-ae true})
 (def component {:db/isComponent true})
 (def fulltext {:db/fulltext true})
+(def ave {:db/index true})
+(def ae {:db/index-ae true})
+
 
 ;; types
 (def bigdec {:db/valueType :db.type/bigdec})
