@@ -12,7 +12,9 @@
 (def write-handlers
   {TaggedValue (transit/write-handler #(.-tag %) #(.-rep %))})
 
-(defn entity-pointer [id] (TaggedValue. "re-db/entity" id))
+(defn entity-pointer [id] (TaggedValue. "re-db/entity" (if (vector? id)
+                                                         id
+                                                         [:db/id id])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity diffing - transacting only changes when a query updates
