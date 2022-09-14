@@ -18,8 +18,9 @@
          hook @!hook]
      (when (or (r/fresh? hook) (not= (:prev-deps hook) deps))
        (some-> (:dispose hook) eval-fn)
+       (vswap! !hook assoc :initialized? true)
        (let [dispose (util/guard (r/without-deref-capture (f)) fn?)]
-         (vswap! !hook assoc :dispose dispose :prev-deps deps)))
+          (vswap! !hook assoc :dispose dispose :prev-deps deps)))
      nil)))
 
 (defn use-memo
