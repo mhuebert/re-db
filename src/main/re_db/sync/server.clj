@@ -81,6 +81,9 @@
       :entities/many (conj (diff-entities (:value old-result) value)
                            [:db/add db-id :result {:value (mapv (comp entity-pointer :db/id) value)}]))))
 
+(defn send-error [client-id id send-fn error]
+  (send-fn client-id [:re-db/sync-tx
+                      [[:db/add {:re-db/query-result id} :result {:error error}]]]))
 
 ;; currently only used for tests
 (s/def $diff
