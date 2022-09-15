@@ -8,22 +8,19 @@
 ;; Invalidation - for recomputing reactive sources
 
 (defprotocol ICompute
-  (-set-function! [this new-f])
   (compute [this])
   (invalidate! [this]))
-
-(defn reset-function! [reaction new-f]
-  (-set-function! reaction new-f)
-  (invalidate! reaction))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Disposal - for side effecting cleanup
 
 (defprotocol IDispose
   (get-dispose-fns [this])
-  (set-dispose-fns! [this fns]))
+  (set-dispose-fns! [this fns])
+  (before-dispose [this]))
 
 (defn dispose! [this]
+  (before-dispose this)
   (doseq [f (get-dispose-fns this)] (f this))
   (set-dispose-fns! this [])
   nil)
@@ -46,6 +43,13 @@
   (or *owner* #?(:cljs (get-reagent-context))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Access to 'watches' field for copying watches
+
+(defprotocol IWatchable*
+  (get-watches [this])
+  (notify-watches! [this old-val new-val]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Deref Capture - for dependency on reactive sources
 
 (defprotocol ICaptureDerefs
@@ -64,7 +68,7 @@
   (let [derefs (get-derefs consumer)
         [added removed] (util/set-diff (util/guard derefs seq)
                                        (util/guard new-derefs seq))]
-    (doseq [producer added] (add-watch producer consumer (fn [key _ _ _] (invalidate! key))))
+    (doseq [producer added] (add-watch producer consumer (fn [_ _ _ _] (invalidate! consumer))))
     (doseq [producer removed] (remove-watch producer consumer))
     (set-derefs! consumer new-derefs)
     consumer))
@@ -132,44 +136,45 @@
   (update-meta! [x f] [x f a] [x f a b]))
 
 (util/support-clj-protocols
-   (deftype RAtom [^:volatile-mutable state ^:volatile-mutable watches ^:volatile-mutable dispose-fns ^:volatile-mutable meta]
-     ICompute
-     (invalidate! [this]
-       (notify-watches this -1 state watches))
-     IMeta
-     (-meta [this] meta)
-     IUpdateMeta
-     (update-meta! [this f] (set! meta (f meta)) this)
-     (update-meta! [this f a] (set! meta (f meta a)) this)
-     (update-meta! [this f a b] (set! meta (f meta a b)) this)
-     IDispose
-     (get-dispose-fns [this] dispose-fns)
-     (set-dispose-fns! [this new-dispose-fns] (set! dispose-fns new-dispose-fns))
-     IPeek
-     (-peek [this] state)
-     IDeref
-     (-deref [this]
-       (collect-deref! this)
-       state)
-     IReset
-     (-reset! [this new-val]
-       (let [old-val state]
-         (set! state new-val)
-         (notify-watches this old-val new-val watches)
-         new-val))
-     ISwap
-     (-swap! [this f] (reset! this (f state)))
-     (-swap! [this f x] (reset! this (f state x)))
-     (-swap! [this f x y] (reset! this (f state x y)))
-     (-swap! [this f x y args] (reset! this (apply f state x y args)))
-     IWatchable
-     (-add-watch [this key f]
-       (r/set-swap! watches assoc key f)
-       this)
-     (-remove-watch [this key]
-       (r/set-swap! watches dissoc key)
-       (when (empty? watches) (dispose! this))
-       this)))
+  (deftype RAtom [^:volatile-mutable state ^:volatile-mutable watches ^:volatile-mutable dispose-fns ^:volatile-mutable meta]
+    IWatchable*
+    (get-watches [this] watches)
+    (notify-watches! [this old-val new-val] (notify-watches this old-val new-val watches))
+    IMeta
+    (-meta [this] meta)
+    IUpdateMeta
+    (update-meta! [this f] (set! meta (f meta)) this)
+    (update-meta! [this f a] (set! meta (f meta a)) this)
+    (update-meta! [this f a b] (set! meta (f meta a b)) this)
+    IDispose
+    (get-dispose-fns [this] dispose-fns)
+    (set-dispose-fns! [this new-dispose-fns] (set! dispose-fns new-dispose-fns))
+    (before-dispose [this] (set! watches {}))
+    IPeek
+    (-peek [this] state)
+    IDeref
+    (-deref [this]
+      (collect-deref! this)
+      state)
+    IReset
+    (-reset! [this new-val]
+      (let [old-val state]
+        (set! state new-val)
+        (notify-watches! this old-val new-val)
+        new-val))
+    ISwap
+    (-swap! [this f] (reset! this (f state)))
+    (-swap! [this f x] (reset! this (f state x)))
+    (-swap! [this f x y] (reset! this (f state x y)))
+    (-swap! [this f x y args] (reset! this (apply f state x y args)))
+    IWatchable
+    (-add-watch [this key f]
+      (r/set-swap! watches assoc key f)
+      this)
+    (-remove-watch [this key]
+      (r/set-swap! watches dissoc key)
+      (when (empty? watches) (dispose! this))
+      this)))
 
 (defn atom
   ([initial-value]
@@ -184,6 +189,9 @@
 (util/support-clj-protocols
   (deftype Reaction
     [^:volatile-mutable f ratom ^:volatile-mutable derefs ^:volatile-mutable hooks ^:volatile-mutable dirty?]
+    IWatchable*
+    (get-watches [this] (get-watches ratom))
+    (notify-watches! [this old-val new-val] (notify-watches! ratom old-val new-val))
     IMeta
     (-meta [this] (meta ratom))
     IHook
@@ -191,7 +199,7 @@
     (set-hooks! [this new-hooks] (set! hooks new-hooks))
     IDeref
     (-deref [this]
-      (when dirty? (invalidate! this) (set! dirty? false))
+      (when dirty? (invalidate! this))
       @ratom)
     IPeek
     (-peek [this] (-peek ratom))
@@ -200,16 +208,22 @@
     IDispose
     (get-dispose-fns [this] (get-dispose-fns ratom))
     (set-dispose-fns! [this dispose-fns] (set-dispose-fns! ratom dispose-fns))
+    (before-dispose [this]
+      (dispose-derefs! this)
+      (dispose-hooks! this))
     IWatchable
-    (-add-watch [this key f] (add-watch ratom key f) this)
+    (-add-watch [this key f]
+      (add-watch ratom key f)
+      (when dirty? (invalidate! this))
+      this)
     (-remove-watch [this key] (remove-watch ratom key) this)
     ICaptureDerefs
     (get-derefs [this] derefs)
     (set-derefs! [this new-derefs] (set! derefs new-derefs))
     ICompute
-    (-set-function! [this new-f] (set! f new-f))
     (compute [this] (f))
     (invalidate! [this]
+      (set! dirty? false)
       (let [new-val (r/with-owner this
                       (r/with-hook-support!
                        (r/with-deref-capture!
@@ -217,6 +231,16 @@
         (when (not= (peek ratom) new-val)
           (reset! ratom new-val))
         this))))
+
+(defn migrate-watches!
+  "Utility for transparently swapping out a watchable while keeping watches informed"
+  [watches old-val to]
+  (doseq [[consumer f] watches]
+    (add-watch to consumer f))
+  (let [new-val @to]
+    (when (not= old-val new-val)
+      (notify-watches! to old-val new-val)))
+  to)
 
 (defn conj-some
   "Conj non-nil values to coll"
@@ -227,17 +251,12 @@
 
 (defn make-reaction [compute-fn & {:keys [on-dispose init dirty? meta]
                                    :or {dirty? true}}]
-  (let [state (atom init meta)
-        rxn (->Reaction compute-fn
-                        state
-                        empty-derefs
-                        empty-hooks
-                        dirty?)]
-    (add-on-dispose! state (fn [_]
-                             (dispose-derefs! rxn)
-                             (dispose-hooks! rxn)
-                             (when on-dispose (on-dispose rxn))))
-    rxn))
+  (assert (not on-dispose) "on-dispose is deprecated, use use-effect hook instead.")
+  (->Reaction compute-fn
+              (atom init meta)
+              empty-derefs
+              empty-hooks
+              dirty?))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
@@ -249,6 +268,7 @@
         session (util/support-clj-protocols
                   (reify
                     IDispose
+                    (before-dispose [this])
                     (get-dispose-fns [this] (get-dispose-fns ratom))
                     (set-dispose-fns! [this new-dispose-fns] (set-dispose-fns! ratom new-dispose-fns))
                     IWatchable

@@ -19,9 +19,7 @@
   [id f]
   (subs/register id
     (fn [conn args]
-      (r/reaction! (compute-f id conn #(apply f args))))
-    (fn [conn args]
-      (fn [] (compute-f id conn #(apply f args))))))
+      (r/reaction (compute-f id conn #(apply f args))))))
 
 (defn patterns [q] (->> (r/get-derefs q)
                         (keep (comp :pattern meta))))
