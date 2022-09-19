@@ -4,6 +4,8 @@
             [re-db.macros :as r])
   #?(:cljs (:require-macros re-db.reactive)))
 
+;; TODO - write tests for re-registering reactions
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Invalidation - for recomputing reactive sources
 
