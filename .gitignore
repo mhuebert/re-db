@@ -5,3 +5,4 @@ node_modules
 *.iml
 **/js/**
 .cache
+src/main/re_db/scratch
