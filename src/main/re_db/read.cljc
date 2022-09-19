@@ -171,8 +171,9 @@
 
 (defn make-ref-wrapper [wrap-ref]
   (fn [conn db e]
-    (or (id->ident db e)
-        (wrap-ref conn db e))))
+    (when e
+      (or (id->ident db e)
+          (wrap-ref conn db e)))))
 
 (def ref-wrapper-noop (make-ref-wrapper (fn [_conn _db e] e)))
 (def ref-wrapper-default (make-ref-wrapper (fn [_conn _db e] {:db/id (:db/id e e)})))

@@ -303,7 +303,22 @@
            (pull '[* :_authors] "fred"))
         "refs with cardinality-many")
     (is (= {:db/id "fido"}
-           (d/get "fido")))))
+           (d/get "fido"))))
+
+  (d/with-conn {:person/pet schema/ref
+                :pet/name schema/unique-id
+                :person/name schema/unique-id}
+    (d/transact! [{:person/name "Sue"
+                   :person/pet {:pet/name "Sup"}}
+                  {:person/name "Bob"}])
+    (is (nil? (:person/pet (d/entity [:person/name "Bob"]))))
+    (is (some? (:person/pet (d/entity [:person/name "Sue"]))))
+    (is (= 1 (count (d/where [:person/name
+                              (complement :person/pet)]))))
+    (is (= 1 (count (d/where [:person/name
+                              :person/pet]))))
+    (is (nil? (:person/pet (d/pull [:person/pet] [:person/name "Bob"]))))
+    (is (some? (:person/pet (d/pull [:person/pet] [:person/name "Sue"]))))))
 
 (deftest touch-refs
 
@@ -617,7 +632,7 @@
                   :person/name "Matt"
                   :person/worst-friend [:system/id 1]
                   :person/best-friend [:system/name "B"]}])
-   (is (thrown? Exception
+   (is (thrown? #?(:cljs js/Error :clj Exception)
                 (d/transact! [{:system/id 1
                                :system/name "B"}]))
        "Lookup ref upsert gotcha: if we upsert two lookup refs separately, which refer to the same entity, that entity must
