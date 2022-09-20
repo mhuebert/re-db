@@ -1,6 +1,7 @@
 (ns re-db.sync.client
   (:require [re-db.reactive :as r]
             [re-db.api :as d]
+            [re-db.hooks :as hooks]
             [re-db.subscriptions :as subs]
             [re-db.util :as u]
             [cognitect.transit :as transit]))
@@ -38,10 +39,12 @@
 (subs/def $query
   (fn [qvec]
     (@!send-fn [:re-db.sync/watch-query qvec])
-    (let [rx (r/make-reaction #(d/get {:re-db/query-result qvec} :result {:loading? true})
-                              :on-dispose (fn [_]
-                                            (swap! !watching dissoc qvec)
-                                            (@!send-fn [:re-db.sync/unwatch-query qvec])))]
+    (let [rx (r/reaction
+              (hooks/use-effect
+               (constantly (fn dispose-query []
+                             (swap! !watching dissoc qvec)
+                             (@!send-fn [:re-db.sync/unwatch-query qvec]))))
+              (d/get {:re-db/query-result qvec} :result {:loading? true}))]
       (swap! !watching assoc qvec rx)
       rx)))
 
