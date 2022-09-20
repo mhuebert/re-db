@@ -47,7 +47,7 @@
                tx-report)
             invalidated @result]
         #_(prn :invalidating (mapv (comp :pattern meta) invalidated))
-        (doseq [listener invalidated] (r/invalidate! listener))
+        (doseq [listener invalidated] (r/notify-watches! listener 0 1))
         (assoc tx-report ::handled (count invalidated)))
       tx-report)))
 
