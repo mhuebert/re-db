@@ -1,6 +1,7 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [-peek peek atom])
-  (:require [re-db.util :as util]
+  (:require [applied-science.js-interop :as j]
+            [re-db.util :as util]
             [re-db.macros :as macros])
   #?(:cljs (:require-macros re-db.reactive)))
 
@@ -64,8 +65,9 @@
 #?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
 
 (defn collect-deref! [producer]
-  #?(:cljs (reagent-notify-deref-watcher! producer))
-  (some-> *captured-derefs* (vswap! conj producer)))
+  (when-not (identical? producer *owner*)
+    #?(:cljs (reagent-notify-deref-watcher! producer))
+    (some-> *captured-derefs* (vswap! conj producer))))
 
 (defn handle-new-derefs! [consumer new-derefs]
   (let [derefs (get-derefs consumer)
@@ -178,7 +180,7 @@
       this)
     (-remove-watch [this key]
       (macros/set-swap! watches dissoc key)
-      (when (empty? watches) (dispose! this))
+      #_(when (empty? watches) (dispose! this))
       this)))
 
 (defn atom
@@ -270,9 +272,9 @@
                        empty-derefs
                        empty-hooks
                        dirty?)]
-    (add-on-dispose! a (fn this [ratom]
+    (add-on-dispose! a (fn f [ratom]
                          (on-dispose rx)
-                         (add-on-dispose! ratom this)))
+                         (add-on-dispose! ratom f)))
     rx))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
