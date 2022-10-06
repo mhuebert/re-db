@@ -52,6 +52,20 @@
                              new-value))))
     ((juxt :value :update-fn) @!hook)))
 
+(defn use-volatile [initial-state]
+  (let [!hook (r/get-next-hook! :state)]
+    (when (r/fresh? @!hook)
+      (vswap! !hook assoc
+              :value (r/without-deref-capture (eval-fn initial-state))
+              :update-fn (fn [value]
+                           (let [new-value (if (fn? value)
+                                             (let [old-value (:value @!hook)]
+                                               (r/without-deref-capture (value old-value)))
+                                             value)]
+                             (vswap! !hook assoc :value new-value)
+                             new-value))))
+    ((juxt :value :update-fn) @!hook)))
+
 (defn use-watch
   "Returns [old-value, new-value] when ref changes - initially [nil, value]"
   [ref]

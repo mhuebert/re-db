@@ -1,7 +1,7 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [-peek peek atom])
   (:require [re-db.util :as util]
-            [re-db.macros :as r])
+            [re-db.macros :as macros])
   #?(:cljs (:require-macros re-db.reactive)))
 
 ;; TODO - write tests for re-registering reactions
@@ -19,20 +19,21 @@
 (defprotocol IDispose
   (get-dispose-fns [this])
   (set-dispose-fns! [this fns])
-  (before-dispose [this]))
+  (on-dispose [this]))
+
+(def empty-dispose-fns [])
 
 (defn dispose! [this]
-  (before-dispose this)
-  (doseq [f (get-dispose-fns this)] (f this))
-  (set-dispose-fns! this [])
+  (on-dispose this)
+  (let [dispose-fns (get-dispose-fns this)]
+    (set-dispose-fns! this [])
+    (doseq [f dispose-fns] (f this)))
   nil)
 
 (defn add-on-dispose!
   ([this f]
    (set-dispose-fns! this (conj (get-dispose-fns this) f)))
   ([this f & fns] (set-dispose-fns! this (apply conj (get-dispose-fns this) f fns))))
-
-(def empty-dispose-fns [])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Ownership - for multiple purposes: dependency tracking, disposal, hooks,
@@ -90,7 +91,7 @@
   (-peek [this]))
 
 (defn peek [this]
-  (if (satisfies? IPeek this) (-peek this) (r/without-deref-capture @this)))
+  (if (satisfies? IPeek this) (-peek this) (macros/without-deref-capture @this)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Hooks - for composable side-effects within reactions (modeled on React hooks).
@@ -121,12 +122,14 @@
 
 (defn fresh? [hook] (empty? hook))
 
-(defn dispose-hooks! [this]
-  (doseq [hook (get-hooks this)
-          :let [dispose (:dispose @hook)]]
-    (when dispose (dispose))))
-
 (def empty-hooks [])
+
+(defn dispose-hooks! [this]
+  (let [hooks (get-hooks this)]
+    (set-hooks! this empty-hooks)
+    (doseq [hook hooks
+            :let [dispose (:dispose @hook)]]
+      (when dispose (dispose)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactive Atom - simplest building-block
@@ -151,7 +154,7 @@
     IDispose
     (get-dispose-fns [this] dispose-fns)
     (set-dispose-fns! [this new-dispose-fns] (set! dispose-fns new-dispose-fns))
-    (before-dispose [this] (set! watches {}))
+    (on-dispose [this] (set! watches {}))
     IPeek
     (-peek [this] state)
     IDeref
@@ -171,10 +174,10 @@
     (-swap! [this f x y args] (reset! this (apply f state x y args)))
     IWatchable
     (-add-watch [this key f]
-      (r/set-swap! watches assoc key f)
+      (macros/set-swap! watches assoc key f)
       this)
     (-remove-watch [this key]
-      (r/set-swap! watches dissoc key)
+      (macros/set-swap! watches dissoc key)
       (when (empty? watches) (dispose! this))
       this)))
 
@@ -202,7 +205,12 @@
     IDeref
     (-deref [this]
       (when dirty? (invalidate! this))
-      @ratom)
+      (let [v @ratom]
+        ;; when not in a reactive context, immediately dispose
+        (when (and (not (owner))
+                   (empty? (get-watches ratom)))
+          (dispose! this))
+        v))
     IPeek
     (-peek [this] (-peek ratom))
     IReset
@@ -210,7 +218,8 @@
     IDispose
     (get-dispose-fns [this] (get-dispose-fns ratom))
     (set-dispose-fns! [this dispose-fns] (set-dispose-fns! ratom dispose-fns))
-    (before-dispose [this]
+    (on-dispose [this]
+      (set! dirty? true)
       (dispose-derefs! this)
       (dispose-hooks! this))
     IWatchable
@@ -226,10 +235,10 @@
     (compute [this] (f))
     (invalidate! [this]
       (set! dirty? false)
-      (let [new-val (r/with-owner this
-                      (r/with-hook-support!
-                       (r/with-deref-capture!
-                        (f))))]
+      (let [new-val (macros/with-owner this
+                      (macros/with-hook-support!
+                       (macros/with-deref-capture! this
+                         (f))))]
         (when (not= (peek ratom) new-val)
           (reset! ratom new-val))
         this))))
@@ -251,14 +260,20 @@
   ([coll x & args]
    (reduce conj-some (conj-some coll x) args)))
 
-(defn make-reaction [compute-fn & {:keys [on-dispose init dirty? meta]
+(defn make-reaction [compute-fn & {:as opts
+                                   :keys [init dirty? meta]
                                    :or {dirty? true}}]
-  (assert (not on-dispose) "on-dispose is deprecated, use use-effect hook instead.")
-  (->Reaction compute-fn
-              (atom init meta)
-              empty-derefs
-              empty-hooks
-              dirty?))
+  (assert (not (:on-dispose opts)) "on-dispose is deprecated, use use-effect hook instead.")
+  (let [a (atom init meta)
+        rx (->Reaction compute-fn
+                       a
+                       empty-derefs
+                       empty-hooks
+                       dirty?)]
+    (add-on-dispose! a (fn this [ratom]
+                         (on-dispose rx)
+                         (add-on-dispose! ratom this)))
+    rx))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
@@ -270,7 +285,7 @@
         session (util/support-clj-protocols
                   (reify
                     IDispose
-                    (before-dispose [this])
+                    (on-dispose [this])
                     (get-dispose-fns [this] (get-dispose-fns ratom))
                     (set-dispose-fns! [this new-dispose-fns] (set-dispose-fns! ratom new-dispose-fns))
                     IWatchable
@@ -298,11 +313,7 @@
    (dispose! my-session)))
 
 ;; macro passthrough
-(defmacro with-owner [& args] `(r/with-owner ~@args))
-(defmacro with-deref-capture! [& args] `(r/with-deref-capture! ~@args))
-(defmacro without-deref-capture [& args] `(r/without-deref-capture ~@args))
-(defmacro with-hook-support! [& args] `(r/with-hook-support! ~@args))
-(defmacro reaction [& args] `(r/reaction ~@args))
-(defmacro reaction! [& args] `(r/reaction! ~@args))
-(defmacro with-session [& args] `(r/with-session ~@args))
-(defmacro session [& body] `(r/session ~@body))
+(defmacro session [& body] `(macros/session ~@body))
+(defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
+(defmacro reaction [& body] `(macros/reaction ~@body))
+(defmacro reaction! [& body] `(macros/reaction! ~@body))

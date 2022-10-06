@@ -3,58 +3,58 @@
   #_(:require [re-db.reactive :as-alias r]) ;; TODO when cursive fixes bug https://github.com/cursive-ide/cursive/issues/2690
   #?(:cljs (:require-macros re-db.macros)))
 
+;; Macro implementations are kept separate from macros to facilitate usage from sci
+
 (defmacro set-swap! [sym f & args]
   `(set! ~sym (~f ~sym ~@args)))
 
-(defmacro with-owner [owner & body]
-  `(binding [re-db.reactive/*owner* ~owner] ~@body))
-
-(defmacro with-deref-capture! [& body]
-  `(binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/empty-derefs)]
+(defmacro with-deref-capture! [owner & body]
+  `(binding [~'re-db.reactive/*captured-derefs* (volatile! ~'re-db.reactive/empty-derefs)]
      (let [val# (do ~@body)
-           new-derefs# @re-db.reactive/*captured-derefs*]
-       (re-db.reactive/handle-new-derefs! re-db.reactive/*owner* new-derefs#)
+           new-derefs# @~'re-db.reactive/*captured-derefs*]
+       (~'re-db.reactive/handle-new-derefs! ~owner new-derefs#)
        val#)))
 
-(defmacro without-deref-capture [& body]
-  `(binding [re-db.reactive/*captured-derefs* nil] ~@body))
+(defn -without-deref-capture [body]
+  `(binding [~'re-db.reactive/*captured-derefs* nil] ~@body))
 
-(defmacro with-hook-support! [& body]
-  `(binding [re-db.reactive/*hook-i* (volatile! -1)]
+(defmacro without-deref-capture [& body] (-without-deref-capture body))
+
+
+(defn -with-hook-support! [body]
+  `(binding [~'re-db.reactive/*hook-i* (volatile! -1)]
      ~@body))
 
-(defmacro reaction
+(defmacro with-hook-support! [& body] (-with-hook-support! body))
+
+(defn -with-owner [owner body]
+  `(let [owner# ~owner]
+     (binding [~'re-db.reactive/*owner* owner#]
+       ~@body)))
+
+(defmacro with-owner [owner & body] (-with-owner owner body))
+
+(defn -reaction
   "Returns a derefable reactive source based on body. Re-evaluates body when any dependencies (captured derefs) change. Lazy."
-  [& body]
-  `(re-db.reactive/make-reaction (fn [] ~@body)))
+  [body]
+  `(~'re-db.reactive/make-reaction (fn [] ~@body)))
+
+(defmacro reaction [& body] (-reaction body))
+
+(defn reaction!:impl [body]
+  `(doto (~'re-db.reactive/make-reaction (fn [] ~@body)) deref))
 
 (defmacro reaction!
   "Eager version of reaction"
-  [& body]
-  `(doto (re-db.reactive/make-reaction (fn [] ~@body)) re-db.reactive/invalidate!))
-
-;; for dev - only adds derefs
-(defmacro with-session
-  "Evaluates body, accumulating dependencies in session (for later disposal)"
-  [session & body]
-  `(let [session# ~session]
-     (with-owner session#
-       (binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/empty-derefs)]
-         (let [val# (do ~@body)
-               new-derefs# @re-db.reactive/*captured-derefs*]
-           (doseq [producer# new-derefs#] (add-watch producer# session# (fn [& args#])))
-           (re-db.reactive/set-derefs! session# (into (re-db.reactive/get-derefs session#) new-derefs#))
-           val#)))))
+  [& body] (-reaction body))
 
 (defmacro session
-  "[] - returns a session.
-   [& body] - Evaluates body in a reactive session which is immediately disposed"
-  ([] `(~'re-db.reactive/make-session))
-  ([& body]
-   `(let [s# (re-db.reactive/make-session)
-          v# (with-session s# ~@body)]
-      (re-db.reactive/dispose! s#)
-      v#)))
+  "Evaluate body in a reaction which is immediately disposed"
+  [& body]
+  `(let [rx# (reaction ~@body)
+         v# @rx#]
+     (re-db.reactive/dispose! rx#)
+     v#))
 
 (defn dequote [x]
   (cond-> x
