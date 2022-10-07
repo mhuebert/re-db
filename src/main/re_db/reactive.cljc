@@ -180,7 +180,7 @@
       this)
     (-remove-watch [this key]
       (macros/set-swap! watches dissoc key)
-      #_(when (empty? watches) (dispose! this))
+      (when (empty? watches) (dispose! this))
       this)))
 
 (defn atom
