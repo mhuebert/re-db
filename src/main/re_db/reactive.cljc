@@ -65,9 +65,8 @@
 #?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
 
 (defn collect-deref! [producer]
-  (when-not (identical? producer *owner*)
-    #?(:cljs (reagent-notify-deref-watcher! producer))
-    (some-> *captured-derefs* (vswap! conj producer))))
+  #?(:cljs (reagent-notify-deref-watcher! producer))
+  (some-> *captured-derefs* (vswap! conj producer)))
 
 (defn handle-new-derefs! [consumer new-derefs]
   (let [derefs (get-derefs consumer)
@@ -207,7 +206,9 @@
     IDeref
     (-deref [this]
       (when dirty? (invalidate! this))
-      (let [v @ratom]
+      (let [v (if (identical? *owner* this)
+                (peek ratom)
+                @ratom)]
         ;; when not in a reactive context, immediately dispose
         (when (and (not (owner))
                    (empty? (get-watches ratom)))
