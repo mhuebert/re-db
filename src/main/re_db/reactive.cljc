@@ -218,6 +218,11 @@
     (-peek [this] (-peek ratom))
     IReset
     (-reset! [this new-val] (reset! ratom new-val))
+    ISwap
+    (-swap! [this f] (reset! ratom (f (peek ratom))))
+    (-swap! [this f x] (reset! ratom (f (peek ratom) x)))
+    (-swap! [this f x y] (reset! ratom (f (peek ratom) x y)))
+    (-swap! [this f x y args] (reset! ratom (apply f (peek ratom) x y args)))
     IDispose
     (get-dispose-fns [this] (get-dispose-fns ratom))
     (set-dispose-fns! [this dispose-fns] (set-dispose-fns! ratom dispose-fns))
