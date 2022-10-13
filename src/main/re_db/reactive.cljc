@@ -206,8 +206,8 @@
     IDeref
     (-deref [this]
       (when dirty? (invalidate! this))
-      (let [v (if (identical? *owner* this)
-                (peek ratom)
+      (let [v (if (identical? *owner* this) ;; avoid circular dep
+        (peek ratom)
                 @ratom)]
         ;; when not in a reactive context, immediately dispose
         (when (and (not (owner))
