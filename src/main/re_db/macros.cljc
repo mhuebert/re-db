@@ -34,18 +34,16 @@
 
 (defmacro with-owner [owner & body] (-with-owner owner body))
 
-(defn -reaction
-  "Returns a derefable reactive source based on body. Re-evaluates body when any dependencies (captured derefs) change. Lazy."
-  [body]
+(defmacro reaction
+  "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
+   when they change. Disposes self when last watch is removed."
+  [& body]
   `(~'re-db.reactive/make-reaction (fn [] ~@body)))
 
-(defmacro reaction [& body] (-reaction body))
-
 (defmacro reaction!
-  "Eager version of reaction"
+  "Returns an eager reaction: computes immediately, remains active until explicitly disposed."
   [& body]
-  `(~'re-db.reactive/invalidate!
-    (reaction ~@body)))
+  `(~'re-db.reactive/make-reaction (fn [] ~@body) :eager? true))
 
 (defmacro session
   "Evaluate body in a reaction which is immediately disposed"

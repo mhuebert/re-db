@@ -179,7 +179,7 @@
       this)
     (-remove-watch [this key]
       (macros/set-swap! watches dissoc key)
-      (when (empty? watches) (dispose! this))
+      (when (and (empty? watches) (not (:eager? meta)) (dispose! this)))
       this)))
 
 (defn atom
@@ -271,10 +271,10 @@
    (reduce conj-some (conj-some coll x) args)))
 
 (defn make-reaction [compute-fn & {:as opts
-                                   :keys [init dirty? meta]
+                                   :keys [init dirty? eager? meta]
                                    :or {dirty? true}}]
   (assert (not (:on-dispose opts)) "on-dispose is deprecated, use use-effect hook instead.")
-  (let [a (atom init meta)
+  (let [a (atom init (cond-> meta eager? (assoc :eager? true)))
         rx (->Reaction compute-fn
                        a
                        empty-derefs
@@ -283,7 +283,8 @@
     (add-on-dispose! a (fn f [ratom]
                          (on-dispose rx)
                          (add-on-dispose! ratom f)))
-    rx))
+    (cond-> rx
+            eager? invalidate!)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
