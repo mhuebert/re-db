@@ -205,14 +205,16 @@
     (set-hooks! [this new-hooks] (set! hooks new-hooks))
     IDeref
     (-deref [this]
-      (when dirty? (invalidate! this))
+
+      (when dirty?
+        (when-not *captured-derefs*
+          (throw (ex-info "an inactive reaction cannot be dereferenced without a reactive context. wrap in r/session for immediate disposal." {:reaction this})))
+        (invalidate! this))
+
       (let [v (if (identical? *owner* this) ;; avoid circular dep
-        (peek ratom)
+                (peek ratom)
                 @ratom)]
-        ;; when not in a reactive context, immediately dispose
-        (when (and (not (owner))
-                   (empty? (get-watches ratom)))
-          (dispose! this))
+
         v))
     IPeek
     (-peek [this] (-peek ratom))
@@ -227,9 +229,9 @@
     (get-dispose-fns [this] (get-dispose-fns ratom))
     (set-dispose-fns! [this dispose-fns] (set-dispose-fns! ratom dispose-fns))
     (on-dispose [this]
-      (set! dirty? true)
       (dispose-derefs! this)
-      (dispose-hooks! this))
+      (dispose-hooks! this)
+      (set! dirty? true))
     IWatchable
     (-add-watch [this key f]
       (add-watch ratom key f)

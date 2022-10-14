@@ -41,17 +41,16 @@
 
 (defmacro reaction [& body] (-reaction body))
 
-(defn reaction!:impl [body]
-  `(doto (~'re-db.reactive/make-reaction (fn [] ~@body)) deref))
-
 (defmacro reaction!
   "Eager version of reaction"
-  [& body] (-reaction body))
+  [& body]
+  `(~'re-db.reactive/invalidate!
+    (reaction ~@body)))
 
 (defmacro session
   "Evaluate body in a reaction which is immediately disposed"
   [& body]
-  `(let [rx# (reaction ~@body)
+  `(let [rx# (reaction! ~@body)
          v# @rx#]
      (re-db.reactive/dispose! rx#)
      v#))
