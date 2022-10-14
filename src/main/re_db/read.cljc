@@ -19,8 +19,8 @@
 (defn make-listener [conn e a v]
   (r/->RAtom nil
              {}
-             [(fn [_] (swap! !listeners u/dissoc-in [conn e a v]))]
-             {:pattern [e a v]}))
+             {:pattern [e a v]}
+             (fn [_] (swap! !listeners u/dissoc-in [conn e a v]))))
 
 
 (defn handle-report!
@@ -102,13 +102,12 @@
   ([conn db [a v :as e]]
    (when-not (rp/unique? db a)
      (throw (ex-info "Lookup ref attribute must be unique" {:lookup-ref e})))
-   (when (nil? v)
-     (throw (ex-info "Lookup ref is missing value" {:lookup-ref v})))
-   (if (vector? v) ;; nested lookup ref
-     (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
-     (do
-       (depend-on-triple! conn nil a v)
-       (first (rp/ave db a v))))))
+   (when (some? v)
+     (if (vector? v) ;; nested lookup ref
+       (resolve-lookup-ref conn db [a (resolve-lookup-ref conn db v)])
+       (do
+         (depend-on-triple! conn nil a v)
+         (first (rp/ave db a v)))))))
 
 (defn resolve-e
   ([e] (resolve-e *conn* (current-db *conn*) e))

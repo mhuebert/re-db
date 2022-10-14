@@ -4,17 +4,9 @@
             [re-db.subscriptions :as s]
             [re-db.hooks :as hooks]))
 
-(deftest subscriptions
-  (s/clear-subscription-cache!)
-  (let [a (r/atom 0)]
-    (s/def $a (fn [] (r/reaction @a)))
-    (s/register :a (fn [] (r/reaction @a)))
-    (swap! a inc)
-    (is (= @a @($a) @(s/subscription [:a])))))
+
 
 (deftest disposal
-
-
 
   (let [!latch (atom 0)]
     (r/session

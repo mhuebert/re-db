@@ -1,103 +1,106 @@
 (ns re-db.reactivity-test
   (:require [applied-science.js-interop :as j]
-            [cljs.test :refer-macros [deftest is are testing async]]
-            [re-db.api :as api :refer [create-conn]]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is are testing #?(:cljs async)]]
+            [re-db.api :as api]
             [re-db.in-memory :as db]
             [re-db.in-memory.local-state :refer [local-state]]
             [re-db.integrations.reagent.context :as context]
             [re-db.reactive :as r]
             [re-db.schema :as schema]
-            [reagent.core :as reagent :refer [track!]]
-            [reagent.dom :as rdom]
-            [clojure.string :as str]
-            [reagent.ratom :as ratom]
-            [re-db.integrations.reagent]
-            [re-db.read :as read])
-  (:require-macros [re-db.test-helpers :refer [throws]]))
+            [re-db.read :as read]
+            [re-db.test-helpers :refer [throws]]
+            [re-db.subscriptions :as s]
+            [re-db.hooks :as hooks]
+            #?@(:cljs [[reagent.core :as reagent :refer [track!]]
+                       [reagent.dom :as rdom]
+                       [reagent.ratom :as ratom]
+                       [re-db.integrations.reagent]])))
 
-(def dom-root (or (js/document.getElementById "rtest")
-                  (let [el (-> (js/document.createElement "div")
-                               (j/!set :id "rtest"))]
-                    (js/document.body.appendChild el)
-                    el)))
+#?(:cljs
+   (def dom-root (or (js/document.getElementById "rtest")
+                     (let [el (-> (js/document.createElement "div")
+                                  (j/!set :id "rtest"))]
+                       (js/document.body.appendChild el)
+                       el))))
 
-(deftest reagent-compat
-  (let [a (r/atom 0)
-        r (ratom/make-reaction (fn [] @a) :auto-run true)]
-    (is (= @r 0))
-    (swap! a inc)
-    (is (= @r 1))
-    (swap! a inc)
-    (is (= @r 2))))
+#?(:cljs
+   (deftest reagent-compat
+     (let [a (r/atom 0)
+           r (ratom/make-reaction (fn [] @a) :auto-run true)]
+       (is (= @r 0))
+       (swap! a inc)
+       (is (= @r 1))
+       (swap! a inc)
+       (is (= @r 2)))))
 
-(deftest reagent-state
-  (api/with-conn {}
-    (let [log (atom [])
-          counter (atom 0)
-          conn (api/conn)
-          component (fn [{:keys [app/id]}]
-                      (let [!state (local-state ratom/*ratom-context*
-                                                :conn conn
-                                                :default {:i (swap! counter inc)}
-                                                :key id)]
-                        (swap! !state assoc :id-cap (str/capitalize id))
-                        (swap! log conj [(@!state :i) id (@!state :id-cap)])
-                        [:div "Hello"]))]
-      (rdom/render [:div
-                    [component {:app/id "a"}]
-                    [component {:app/id "b"}]] dom-root)
-      (reagent/flush)
-      (is (= @log [[1 "a" "A"]
-                   [2 "b" "B"]])
-          "Local state has unique defaults and mutation results"))))
+#?(:cljs
+   (deftest reagent-state
+     (api/with-conn {}
+       (let [log (atom [])
+             counter (atom 0)
+             conn (api/conn)
+             component (fn [{:keys [app/id]}]
+                         (let [!state (local-state ratom/*ratom-context*
+                                                   :conn conn
+                                                   :default {:i (swap! counter inc)}
+                                                   :key id)]
+                           (swap! !state assoc :id-cap (str/capitalize id))
+                           (swap! log conj [(@!state :i) id (@!state :id-cap)])
+                           [:div "Hello"]))]
+         (rdom/render [:div
+                       [component {:app/id "a"}]
+                       [component {:app/id "b"}]] dom-root)
+         (reagent/flush)
+         (is (= @log [[1 "a" "A"]
+                      [2 "b" "B"]])
+             "Local state has unique defaults and mutation results")))))
 
-(deftest reagent-bind-dom
-  (async done
-    (let [conn (api/create-conn {})
-          component (fn []
-                      (context/bind-conn conn
-                                         [:div {:ref (fn [el]
-                                                       (when el
-                                                         (js/setTimeout
-                                                          (fn []
-                                                            (is (identical? (context/element-conn el) conn)
-                                                                "Conn is bound via dom node ancestry")
-                                                            (prn 1)
-                                                            (done))
-                                                          100)))}]))]
-      (rdom/render [component] dom-root))))
+#?(:cljs
+   (deftest reagent-bind-dom
+     (async done
+       (let [conn (api/create-conn {})
+             component (fn []
+                         (context/bind-conn conn
+                                            [:div {:ref (fn [el]
+                                                          (when el
+                                                            (js/setTimeout
+                                                             (fn []
+                                                               (is (identical? (context/element-conn el) conn)
+                                                                   "Conn is bound via dom node ancestry")
+                                                               (prn 1)
+                                                               (done))
+                                                             100)))}]))]
+         (rdom/render [component] dom-root)))))
 
-(deftest reagent-bind-context
-  (async done
-    (let [conn (api/create-conn {})
-          component (reagent/create-class
-                     {:context-type context/conn-context
-                      :reagent-render
-                      (fn []
-                        (is (= (context/component-conn) conn)
-                            "Conn is bound via react context")
-                        (done)
-                        [:div])})]
-      (rdom/render (context/bind-conn conn
-                                      (do
-                                        (is (= conn (re-db.api/conn))
-                                            "Conn is bound via dynamic var")
-                                        [component])) dom-root))))
+#?(:cljs
+   (deftest reagent-bind-context
+     (async done
+       (let [conn (api/create-conn {})
+             component (reagent/create-class
+                        {:context-type context/conn-context
+                         :reagent-render
+                         (fn []
+                           (is (= (context/component-conn) conn)
+                               "Conn is bound via react context")
+                           (done)
+                           [:div])})]
+         (rdom/render (context/bind-conn conn
+                                         (do
+                                           (is (= conn (re-db.api/conn))
+                                               "Conn is bound via dynamic var")
+                                           [component])) dom-root)))))
 
 (defonce rx (atom nil))
 
-(defn ^:dev/before-load start
-  ([] (some-> @rx reagent/dispose!))
-  ([f]
-   (start)
-   (reset! rx (reagent/track! f))))
+#?(:cljs
+   (defn ^:dev/before-load start
+     ([] (some-> @rx reagent/dispose!))
+     ([f]
+      (start)
+      (reset! rx (reagent/track! f)))))
 
 (api/with-conn {}
-
-  (start (api/bound-fn []
-           (prn :name/first (api/get :matt :name/first))
-           (prn :name/last (api/get :matt :name/last))
-           (prn :pets (api/get :matt :pets))))
 
   (api/transact! [{:db/id :matt
                    :name/first "Matt"
@@ -139,8 +142,6 @@
      (let [get-patterns (fn [f]
                           (let [res (atom nil)
                                 rx (r/reaction! (f) (reset! res (r/captured-patterns)))]
-                            (reagent/flush)
-                            (reagent/dispose! rx)
                             @res))]
 
        (are [f patterns]
@@ -186,27 +187,85 @@
       (api/transact! [{:db/id "peter" :name "Peter"}])
 
       (let [log (atom 0)]
-        @(r/make-reaction
-          (api/bound-fn []
-            (api/get [:person/children "peter"])
-            (swap! log inc)))
+        (r/make-reaction
+         (api/bound-fn []
+           (api/get [:person/children "peter"])
+           (swap! log inc))
+         :eager? true)
         (is (= 1 @log))
         (api/transact! [[:db/add "mary" :person/children "peter"]])
         (is (= 2 @log))))))
 
 
 (deftest read-from-reaction
-  (async done
-    (api/with-conn {
-                    ;:name schema/ae
-                    }
-      (api/transact! [{:db/id 1 :name \a}
-                      {:db/id 2 :name \b}])
-      (is (= #{\a \b}
-             (into #{} (map :name) (api/where [:name]))))
-      (track! #(do (is (= #{\a \b}
-                          (into #{} (map :name) (api/where [:name]))))
-                   (done))))))
+  (api/transact! [{:db/id 1 :name \a}
+                  {:db/id 2 :name \b}])
+  (is (= #{\a \b}
+         (into #{} (map :name) (api/where [:name]))))
+  (is (= #{\a \b}
+         (into #{} (map :name) (api/where [:name])))))
+
+(deftest subscriptions
+  (r/session
+   (s/clear-subscription-cache!)
+
+   ;; source atom
+   (def a (r/atom 0))
+
+   ;; consumer subscriptions
+   (s/def $a (fn [] (r/reaction! @a)))
+   (s/register :a (fn [] (r/reaction! @a)))
+   (swap! a inc)
+
+   (is (= @a
+          @($a)
+          @(s/subscription [:a])))))
+
+(deftest disposal
+
+
+  (let [!latch (atom 0)]
+    (r/session
+     @(r/reaction
+       (hooks/use-effect
+        (fn []
+          (swap! !latch inc)
+          #(swap! !latch inc)))))
+    (is (= 2 @!latch)
+        "use-effect hook is disposed"))
+
+  (let [!latch (atom 0)
+        rx (r/reaction (hooks/use-effect
+                        (fn []
+                          (swap! !latch inc)
+                          #(swap! !latch inc))))]
+    (r/session @rx)
+    (r/session @rx)
+    (is (= @!latch 4) "Same reaction can be instantiated multiple times"))
+
+  (let [!latch (atom 0)
+        rx (r/reaction (hooks/use-effect
+                        (fn []
+                          (swap! !latch inc)
+                          #(swap! !latch inc))))]
+    (doseq [i (range 3)]
+      (add-watch rx i identity)
+      (remove-watch rx i))
+    (is (= @!latch 6) "Reaction can be started and stopped multiple times via watch/unwatch"))
+
+  (let [rx (r/reaction
+            (let [[v v!] (hooks/use-volatile 0)]
+              (v! inc)))]
+    (is (= (r/session @rx) 1))
+    (r/invalidate! rx)
+    (is (= @rx 1)
+        "Without an owner resent, a reaction disposes itself after every read.
+        It begins again with fresh state.")
+
+    (r/reaction!
+     (is (= @rx 1))
+     (r/invalidate! rx)
+     (is (= @rx 2) "With an owner present, a reaction persists across time."))))
 
 (comment
  (deftest pattern-listeners
@@ -337,3 +396,4 @@
         (d/compute! [:db/settings :name-x-2] false)
         (api/transact! [[:db/add :db/settings :name "Veronica"]])
         (is (= 6 @eval-count)))))
+

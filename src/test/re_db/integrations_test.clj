@@ -127,36 +127,37 @@
            (mapv :movie/title)
            set)))
 
-  (let [sad-queries (mapv (fn [{:keys [id conn]}]
-                            [id (q/query conn [:emo-movies "sad"])])
-                          databases)
-        toggle-emotion! #(let [sad? (re/with-conn (:conn (first databases))
-                                      (contains? (->> (re/get [:movie/title "Commando"] :movie/emotions)
-                                                      (into #{} (map :emotion/name)))
-                                                 "sad"))]
-                           (transact! [[(if sad? :db/retract :db/add)
-                                        [:movie/title "Commando"]
-                                        :movie/emotions
-                                        [:emotion/name "sad"]]]))
-        !result (atom {})]
+  (r/session
+   (let [sad-queries (mapv (fn [{:keys [id conn]}]
+                             [id (q/query conn [:emo-movies "sad"])])
+                           databases)
+         toggle-emotion! #(let [sad? (re/with-conn (:conn (first databases))
+                                       (contains? (->> (re/get [:movie/title "Commando"] :movie/emotions)
+                                                       (into #{} (map :emotion/name)))
+                                                  "sad"))]
+                            (transact! [[(if sad? :db/retract :db/add)
+                                         [:movie/title "Commando"]
+                                         :movie/emotions
+                                         [:emotion/name "sad"]]]))
+         !result (atom {})]
 
-    (doseq [[id q] sad-queries]
-      (add-watch q ::watch (fn [_ _ _ new] (swap! !result update id conj new)))
-      (r/reaction! (swap! !result update id conj @q)))
-
-
-    (toggle-emotion!)
-
-    (is (apply = (vals @!result)))
-
-    (toggle-emotion!)
-
-    (is (apply = (vals @!result)))
-
-    ;; watching our query, printing the value
+     (doseq [[id q] sad-queries]
+       (add-watch q ::watch (fn [_ _ _ new] (swap! !result update id conj new)))
+       @(r/reaction (swap! !result update id conj @q)))
 
 
-    (doseq [[_ q] sad-queries] (r/dispose! q))))
+     (toggle-emotion!)
+
+     (is (apply = (vals @!result)))
+
+     (toggle-emotion!)
+
+     (is (apply = (vals @!result)))
+
+     ;; watching our query, printing the value
+
+
+     (doseq [[_ q] sad-queries] (r/dispose! q)))))
 
 (deftest reads
 
