@@ -222,7 +222,7 @@
     (-deref [this]
 
       (when dirty?
-        (when-not *captured-derefs*
+        (when-not (owner)
           (throw (ex-info "an inactive reaction cannot be dereferenced without a reactive context. wrap in r/session for immediate disposal." {:reaction this})))
         (invalidate! this))
 
