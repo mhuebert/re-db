@@ -32,8 +32,8 @@
                            ::no-op nil
                            ::done (remove-watch source key)
                            (reset! out v))))]
-    (handle-value @source)
     (add-watch source key (fn [_ _ _ value] (handle-value value)))
+    (handle-value @source)
     (doto out (r/add-on-dispose! (fn [_] (remove-watch source key))))))
 
 (defn map [f source]
