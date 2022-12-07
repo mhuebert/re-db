@@ -192,7 +192,7 @@
 
 (util/support-clj-protocols
   (deftype Reaction
-    [^:volatile-mutable f ratom ^:volatile-mutable derefs ^:volatile-mutable hooks ^:volatile-mutable dispose-fns ^:volatile-mutable dirty? eager?]
+    [^:volatile-mutable f ratom ^:volatile-mutable derefs ^:volatile-mutable hooks ^:volatile-mutable dispose-fns ^:volatile-mutable dirty? ^:volatile-mutable eager?]
     IWatchable*
     (get-watches [this] (get-watches ratom))
     (set-watches! [this new-watches] (set-watches! ratom new-watches))
@@ -283,18 +283,24 @@
    (reduce conj-some (conj-some coll x) args)))
 
 (defn make-reaction [compute-fn & {:as opts
-                                   :keys [init dirty? eager? meta]
-                                   :or {dirty? true}}]
+                                   :keys [init meta]}]
   (assert (not (:on-dispose opts)) "on-dispose is deprecated, use use-effect hook instead.")
-  (cond-> (->Reaction compute-fn
-                      (atom init meta)
-                      empty-derefs
-                      empty-hooks
-                      empty-dispose-fns
-                      dirty?
-                      eager?)
-          eager?
-          invalidate!))
+  (->Reaction compute-fn
+              (atom init meta)
+              empty-derefs
+              empty-hooks
+              empty-dispose-fns
+              true
+              false))
+
+(defn eager!
+  "Computes a reaction immediately and remains active until explicitly disposed."
+  [^Reaction rx]
+  (when-not (.-eager? rx)
+    (set! (.-eager? rx) true)
+    (when (.-dirty? rx)
+      (invalidate! rx)))
+  rx)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
@@ -337,4 +343,4 @@
 (defmacro session [& body] `(macros/session ~@body))
 (defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
 (defmacro reaction [& body] `(macros/reaction ~@body))
-(defmacro reaction! [& body] `(macros/reaction! ~@body))
+(defmacro reaction! [& body] `(eager! (macros/reaction ~@body)))

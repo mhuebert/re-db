@@ -187,11 +187,10 @@
       (api/transact! [{:db/id "peter" :name "Peter"}])
 
       (let [log (atom 0)]
-        (r/make-reaction
+        (r/reaction!
          (api/bound-fn []
            (api/get [:person/children "peter"])
-           (swap! log inc))
-         :eager? true)
+           (swap! log inc)))
         (is (= 1 @log))
         (api/transact! [[:db/add "mary" :person/children "peter"]])
         (is (= 2 @log))))))

@@ -43,7 +43,8 @@
 (defmacro reaction!
   "Returns an eager reaction: computes immediately, remains active until explicitly disposed."
   [& body]
-  `(~'re-db.reactive/make-reaction (fn [] ~@body) :eager? true))
+  `(-> (~'re-db.reactive/make-reaction (fn [] ~@body))
+       ~'re-db.reactive/eager!))
 
 (defmacro session
   "Evaluate body in a reaction which is immediately disposed"
