@@ -24,7 +24,7 @@
   "Streams values from ref into a new ratom, applying any supplied xforms (transducers)"
   [source & xforms]
   (let [key (gensym "stream")
-        out (r/atom nil)
+        out (r/make-reaction (fn []) :eager? true :on-dispose (fn [_] (remove-watch source key)))
         f (step (apply comp xforms))
         handle-value (fn [value]
                        (let [v (f value)]
@@ -34,7 +34,7 @@
                            (reset! out v))))]
     (add-watch source key (fn [_ _ _ value] (handle-value value)))
     (handle-value @source)
-    (doto out (r/add-on-dispose! (fn [_] (remove-watch source key))))))
+    out))
 
 (defn map [f source]
   (transform source (clojure.core/map f)))
@@ -87,20 +87,20 @@
     @before-after))
 
  (r/session
-  (let [source (atom 1)
+  (let [source (atom 0)
         before-after (transform source (before:after))]
-    (reset! source 2)
+    (swap! source inc)
     @before-after))
 
 
  (r/session
-  (let [source (atom 1)
+  (let [source (atom 0)
         pairs (transform source
-                           (before:after)
-                           (take 5)
-                           (into []))]
-    (dotimes [n 10]
-      (reset! source n))
+                         (before:after)
+                         (take 5)
+                         (into []))]
+    (dotimes [_ 10]
+      (swap! source inc))
     @pairs))
 
  (r/session
@@ -109,5 +109,7 @@
                          (filter even?)
                          (take 3)
                          (into []))]
-    (dotimes [n 10] (reset! source (inc n)))
-    @evens)))
+    (dotimes [_ 10] (swap! source inc))
+    @evens))
+
+ )

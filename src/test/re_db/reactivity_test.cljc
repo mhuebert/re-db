@@ -141,9 +141,8 @@
     (testing
      (let [get-patterns (fn [f]
                           (let [res (atom nil)
-                                rx (r/reaction! (f) (reset! res (r/captured-patterns)))]
+                                rx (r/session @(r/reaction (f) (reset! res (r/captured-patterns))))]
                             @res))]
-
        (are [f patterns]
          (= (get-patterns f) patterns)
 
@@ -185,15 +184,15 @@
                                             schema/unique-value)}
 
       (api/transact! [{:db/id "peter" :name "Peter"}])
-
-      (let [log (atom 0)]
-        (r/reaction!
-         (api/bound-fn []
-           (api/get [:person/children "peter"])
-           (swap! log inc)))
-        (is (= 1 @log))
-        (api/transact! [[:db/add "mary" :person/children "peter"]])
-        (is (= 2 @log))))))
+      (r/session
+       (let [log (atom 0)]
+         @(r/make-reaction
+          (api/bound-fn []
+            (api/get [:person/children "peter"])
+            (swap! log inc)))
+         (is (= 1 @log))
+         (api/transact! [[:db/add "mary" :person/children "peter"]])
+         (is (= 2 @log)))))))
 
 
 (deftest read-from-reaction
@@ -205,15 +204,15 @@
          (into #{} (map :name) (api/where [:name])))))
 
 (deftest subscriptions
+  (s/clear-subscription-cache!)
   (r/session
-   (s/clear-subscription-cache!)
 
    ;; source atom
    (def a (r/atom 0))
 
    ;; consumer subscriptions
-   (s/def $a (fn [] (r/reaction! @a)))
-   (s/register :a (fn [] (r/reaction! @a)))
+   (s/def $a #(r/reaction @a))
+   (s/register :a (fn [] (r/reaction @a)))
    (swap! a inc)
 
    (is (= @a

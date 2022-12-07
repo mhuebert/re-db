@@ -17,11 +17,10 @@
 (defn clear-listeners! [] (swap! !listeners empty))
 
 (defn make-listener [conn e a v]
-  (r/->RAtom nil
-             {}
-             {:pattern [e a v]}
-             (fn [_] (swap! !listeners u/dissoc-in [conn e a v]))))
-
+  (r/make-reaction (fn [])
+                   :dirty? false
+                   :meta {:pattern [e a v]}
+                   :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v]))))
 
 (defn handle-report!
   "Invalidate readers for a tx-report from conn based on datoms transacted"

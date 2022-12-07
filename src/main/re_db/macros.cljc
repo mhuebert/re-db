@@ -34,17 +34,22 @@
 
 (defmacro with-owner [owner & body] (-with-owner owner body))
 
+(defn reaction* [form env body]
+  `(~'re-db.reactive/make-reaction (fn [] ~@body)
+    :meta {:display-name ~(str *ns* "@"
+                               (:line (meta form))
+                               ":"
+                               (:column (meta form)))}))
 (defmacro reaction
   "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
    when they change. Disposes self when last watch is removed."
   [& body]
-  `(~'re-db.reactive/make-reaction (fn [] ~@body)))
+  (reaction* &form &env body))
 
 (defmacro reaction!
   "Returns an eager reaction: computes immediately, remains active until explicitly disposed."
   [& body]
-  `(-> (~'re-db.reactive/make-reaction (fn [] ~@body))
-       ~'re-db.reactive/eager!))
+  (concat (reaction* &form &env body) [:eager? true]))
 
 (defmacro session
   "Evaluate body in a reaction which is immediately disposed"
@@ -53,6 +58,18 @@
          v# @rx#]
      (re-db.reactive/dispose! rx#)
      v#))
+
+(defmacro with-session
+  "Evaluates body, accumulating dependencies in session (for later disposal)"
+  [session & body]
+  `(let [session# ~session]
+     (with-owner session#
+       (binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/empty-derefs)]
+         (let [val# (do ~@body)
+               new-derefs# @re-db.reactive/*captured-derefs*]
+           (doseq [producer# new-derefs#] (add-watch producer# session# (fn [& args#])))
+           (re-db.reactive/set-derefs! session# (into (re-db.reactive/get-derefs session#) new-derefs#))
+           val#)))))
 
 (defn dequote [x]
   (cond-> x

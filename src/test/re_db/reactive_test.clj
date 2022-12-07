@@ -4,6 +4,7 @@
             [re-db.subscriptions :as s]
             [re-db.hooks :as hooks]))
 
+(s/clear-subscription-cache!)
 
 
 (deftest disposal
@@ -16,49 +17,39 @@
           (swap! !latch inc)
           #(swap! !latch inc)))))
     (is (= 2 @!latch)
-        "use-effect hook is disposed")
+        "lazy (default) reaction is disposed"))
+  (let [!latch (atom 0)]
+    (r/session
+     (def r (r/reaction!
+             (hooks/use-effect
+              (fn []
+                (swap! !latch inc)
+                #(swap! !latch inc))))))
+    (is (= 1 @!latch)
+        "eager reaction is not disposed")
+    (r/dispose! r))
 
+  (let [!latch (atom 0)]
+    (def !latch (atom 0))
     (s/clear-subscription-cache!)
+    (s/def $sub (fn []
+                  (r/reaction
+                   (hooks/use-effect
+                    (fn []
+                      (swap! !latch inc)
+                      #(swap! !latch inc))))))
 
-    (let [!latch (atom 0)]
-      (s/def $sub (fn []
-                    (r/reaction
-                     (hooks/use-effect
-                      (fn []
-                        (swap! !latch inc)
-                        #(swap! !latch inc))))))
-      (binding [r/*owner* nil]
-        (let [v @(r/reaction
-                  (hooks/use-effect
-                   (fn []
-                     (swap! !latch inc)
-                     #(swap! !latch inc)))
-                  1)]
-          (is (= v 1) "Reaction without owner returns correct value")
-          (is (= @!latch 2) "Reaction without owner is immediately disposed")))
+    (r/session @($sub))
+    (is (= @!latch 2) "Session immediately disposes"))
 
-      (r/reaction!
-       (r/session @($sub))
-       (is (= @!latch 4) "Session immediately disposes"))
+  (let [!latch (atom 0)]
+    (s/clear-subscription-cache!)
+    (let [rx (r/reaction (hooks/use-effect
+                          (fn []
+                            (swap! !latch inc)
+                            #(swap! !latch inc))))]
+      (r/session @rx)
+      (r/session @rx)
+      (is (= @!latch 4) "Same reaction can be instantiated multiple times")))
+  )
 
-      (let [rx (r/reaction (hooks/use-effect
-                            (fn []
-                              (swap! !latch inc)
-                              #(swap! !latch inc))))]
-        @rx
-        @rx
-        (is (= @!latch 8) "Same reaction can be instantiated multiple times"))
-
-      (let [rx (r/reaction
-                (let [[v v!] (hooks/use-volatile 0)]
-                  (v! inc)))]
-        (is (= @rx 1))
-        (r/invalidate! rx)
-        (is (= @rx 1)
-            "Without an owner resent, a reaction disposes itself after every read.
-            It begins again with fresh state.")
-
-        (r/reaction!
-         (is (= @rx 1))
-         (r/invalidate! rx)
-         (is (= @rx 2) "With an owner present, a reaction persists across time."))))))

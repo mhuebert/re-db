@@ -54,10 +54,11 @@
     (send-fn [:re-db.sync/watch-query qvec])))
 
 (defn all [& qvecs]
-  (let [qs (map (comp deref $query) qvecs)]
-    (or (u/find-first qs :error)
-        (u/find-first qs :loading?)
-        {:value (into [] (map :value) qs)})))
+  (r/reaction
+   (let [qs (mapv (comp deref $query) qvecs)]
+     (or (u/find-first qs :error)
+         (u/find-first qs :loading?)
+         {:value (into [] (map :value) qs)}))))
 
 (subs/def $all all)
 

@@ -18,6 +18,7 @@
                 (prn (str "Subscription not defined: " id) svec))
             sub (doto (apply init-fn args)
                   (->> (swap! !subscription-cache assoc svec)))]
+        (assert (satisfies? r/ICompute sub) "Subscription function must return a reaction")
         (add-on-dispose! sub (fn [_]
                                (swap! !subscription-cache dissoc svec)))
         sub)))
@@ -47,7 +48,7 @@
 (defn clear-subscription-cache! []
   (try
     (doseq [sub (vals @!subscription-cache)] (when (satisfies? r/IDispose sub) (dispose! sub))))
-  (swap! !subscription-cache empty))
+  (swap! !subscription-cache empty) )
 
 (defmacro def
   "Registers a subscription for name, returns subscription constructor function.
