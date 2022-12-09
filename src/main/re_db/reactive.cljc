@@ -276,9 +276,9 @@
   "Utility for transparently swapping out a watchable while keeping watches informed"
   [watches old-val to]
   (when (seq watches)
+    (doseq [[consumer f] watches]
+      (add-watch to consumer f))
     (let [new-val @to]
-      (doseq [[consumer f] watches]
-        (add-watch to consumer f))
       (when (not= old-val new-val)
         (notify-watches! to old-val new-val))))
   to)

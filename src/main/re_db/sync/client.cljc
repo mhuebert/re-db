@@ -3,59 +3,44 @@
             [re-db.api :as d]
             [re-db.hooks :as hooks]
             [re-db.subscriptions :as subs]
-            [re-db.util :as u]
-            [cognitect.transit :as transit]))
+            [re-db.util :as u]))
 
 ;; all active queries
 (defonce !watching (atom {}))
 
-;; messages queued before 1st connection
-(defonce !initial-message-queue (atom []))
-
 ;; websocket-handling code needs to set the send-fn here
-(defonce !send-fn (atom (fn [& args]
-                          ;; TODO - set up cljc logging?
-                          (prn (str ::!send-fn "Queueing message - send-fn not yet initialized"))
-                          (swap! !initial-message-queue conj args))))
-(defn set-send-fn! [f]
-  (reset! !send-fn f
-          #_(fn [& args]
-              (prn :calling-send-fn args)
-              (apply f args)))
-  (doseq [args @!initial-message-queue] (apply f args))
-  (swap! !initial-message-queue empty))
+(defonce !send-fns (atom {}))
 
-;; for instantiating entities
-(def read-handlers {"re-db/entity" (transit/read-handler
-                                    (fn [e]
-                                      (let [[a v] e]
-                                        (d/entity (if (= a :db/id)
-                                                    v
-                                                    [a v])))))})
+(defn send-message [socket message]
+  (when-let [send! (@!send-fns socket)]
+    (send! message)))
 
 (defn transact-txs [txs]
   (d/transact! txs))
 
 (subs/def $query
-  (fn [qvec]
-    (@!send-fn [:re-db.sync/watch-query qvec])
+  (fn [socket qvec]
+    (send-message socket [:re-db.sync/watch-query qvec])
     (let [rx (r/reaction
               (hooks/use-effect
                (constantly (fn dispose-query []
                              (swap! !watching dissoc qvec)
-                             (@!send-fn [:re-db.sync/unwatch-query qvec]))))
+                             (send-message socket [:re-db.sync/unwatch-query qvec]))))
               (d/get {:re-db/query-result qvec} :result {:loading? true}))]
       (swap! !watching assoc qvec rx)
       rx)))
 
-(defn on-handshake! [send-fn]
-  (set-send-fn! send-fn)
-  (doseq [[qvec query] @!watching]
+(defn on-open [channel send-fn]
+  (swap! !send-fns assoc channel send-fn)
+  (doseq [[qvec _] @!watching]
     (send-fn [:re-db.sync/watch-query qvec])))
 
-(defn all [& qvecs]
+(defn on-close [socket]
+  (swap! !send-fns dissoc socket))
+
+(defn all [socket & qvecs]
   (r/reaction
-   (let [qs (mapv (comp deref $query) qvecs)]
+   (let [qs (mapv (comp deref (partial $query socket)) qvecs)]
      (or (u/find-first qs :error)
          (u/find-first qs :loading?)
          {:value (into [] (map :value) qs)}))))

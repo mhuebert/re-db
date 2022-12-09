@@ -1,0 +1,16 @@
+Breaking changes:
+
+- Renamed `:re-db/sync-tx` to `:re-db.sync/tx` for consistency
+
+- in re-db.sync.client:
+  - renamed `re-db.sync.client/on-handshake!` to `on-open`
+  - `$query` and `all` now take `socket` as 1st parameter
+  - messages are no longer queued before connection;  keeping track of active queries should be sufficient
+  - added `on-close` to clean up a closed connection
+- moved transit-related sync code to re-db.sync.transit namespace
+
+
+Other changes:
+
+- migrate-watches adds watches before dereferencing the destination rx
+- reagent integration is now cljc

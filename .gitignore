@@ -6,3 +6,5 @@ node_modules
 **/js/**
 .cache
 src/main/re_db/scratch
+.clerk
+public/clerk

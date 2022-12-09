@@ -1,20 +1,8 @@
 (ns re-db.sync.server
-  (:require [cognitect.transit :as transit]
-            [re-db.reactive :as r]
+  (:require [re-db.reactive :as r]
             [re-db.subscriptions :as s]
+            [re-db.sync.transit :refer [entity-pointer]]
             [re-db.xform :as xf]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Entity references over the wire
-
-(defonce _ (deftype TaggedValue [tag rep]))
-
-(def write-handlers
-  {TaggedValue (transit/write-handler #(.-tag %) #(.-rep %))})
-
-(defn entity-pointer [id] (TaggedValue. "re-db/entity" (if (vector? id)
-                                                         id
-                                                         [:db/id id])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity diffing - transacting only changes when a query updates
@@ -82,7 +70,7 @@
                            [:db/add db-id :result {:value (mapv (comp entity-pointer :db/id) value)}]))))
 
 (defn send-error [client-id id send-fn error]
-  (send-fn client-id [:re-db/sync-tx
+  (send-fn client-id [:re-db.sync/tx
                       [[:db/add {:re-db/query-result id} :result {:error error}]]]))
 
 ;; currently only used for tests
@@ -118,9 +106,10 @@
                                    (reset! !last-event {:event :send
                                                         :client-id client-id
                                                         :ref-id id})
-                                   (send-fn client-id [:re-db/sync-tx txs])))
+                                   (send-fn client-id [:re-db.sync/tx txs])))
+    (prn :will-send send-fn [:re-db.sync/tx (diff-tx id [nil @ref])])
     ;; initial sync of current value
-    (send-fn client-id [:re-db/sync-tx (diff-tx id [nil @ref])])))
+    (send-fn client-id [:re-db.sync/tx (diff-tx id [nil @ref])])))
 
 (defn unwatch-ref
   "Removes watch for ref."

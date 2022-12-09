@@ -3,31 +3,35 @@
         applied-science/js-interop {:mvn/version "0.3.3"}
         net.cgrand/macrovich {:mvn/version "0.2.1"}
         com.lucasbradstreet/cljs-uuid-utils {:mvn/version "1.0.2"}
-        reagent/reagent {:mvn/version "1.1.0"}
-        metosin/malli {:mvn/version "0.6.1"}}
+        reagent/reagent {:mvn/version "1.1.1"}
+        metosin/malli {:mvn/version "0.9.2"}}
  :aliases {:datomic {:extra-deps {com.datomic/datomic-free {:mvn/version "0.9.5697"}}}
            :datahike {:extra-deps {io.replikativ/datahike {:mvn/version "0.5.1504"}}}
            :datalevin {:jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                                   "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]
                        :extra-deps {datalevin/datalevin {:mvn/version "0.6.14"}}}
-           :dev {:extra-deps {thheller/shadow-cljs {:mvn/version "2.19.1"}
+           :dev {:extra-deps {thheller/shadow-cljs {:mvn/version "2.20.13"}
                               com.bhauman/cljs-test-display {#_#_:mvn/version "0.1.1"
                                                              :git/sha "76905766a8c13a95f2fb93ed2a54fa7b2343db20"
                                                              :git/url "https://github.com/mhuebert/cljs-test-display"}}}
            :test {:extra-paths ["src/test"]}
 
            :clerk {:extra-paths ["src/notebooks"]
-                   :extra-deps {io.github.nextjournal/clerk
-                                {:mvn/version "0.4.316"}}}
+                   :extra-deps {io.github.mhuebert/clerk-cljs
+                                {:local/root "../clerk-cljs"
+                                 #_#_:git/sha "4cda4e214f54a96360b3c0004411735c73dd2e63"}
+                                org.clojure/core.async {:mvn/version "1.6.673"}
+                                http-kit/http-kit {:mvn/version "2.6.0"}
+                                ring/ring {:mvn/version "1.9.6"}
+                                ring/ring-defaults {:mvn/version "0.3.4"}}}
 
            :bench {:extra-paths ["src/bench"]
                    :extra-deps {datascript/datascript {:mvn/version "1.2.8"}
                                 io.github.ribelo/doxa {:git/sha "8270dfefd9a7ffcaa6df988d26c66f57fb2a99b9"}
                                 edn-query-language/eql {:mvn/version "1.0.2"}
-                                juji/editscript {:mvn/version "0.5.7"}
                                 meander/epsilon {:mvn/version "0.0.650"}
-                                com.taoensso/encore {:mvn/version "3.10.1"}
-                                com.taoensso/timbre {:mvn/version "5.1.2"}}}}
+                                com.taoensso/encore {:mvn/version "3.42.0"}
+                                com.taoensso/timbre {:mvn/version "6.0.3"}}}}
  :mvn/repos
  {"central" {:url "https://repo1.maven.org/maven2/"}
   "clojars" {:url "https://clojars.org/repo"}
