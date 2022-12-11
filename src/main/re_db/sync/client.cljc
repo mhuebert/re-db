@@ -1,53 +1,84 @@
 (ns re-db.sync.client
-  (:require [re-db.reactive :as r]
-            [re-db.api :as d]
+  (:require [re-db.api :as d]
             [re-db.hooks :as hooks]
+            [re-db.reactive :as r]
             [re-db.subscriptions :as subs]
-            [re-db.util :as u]))
+            [re-db.sync :as-alias sync]
+            [re-db.util :as u]
+            [re-db.xform :as xf]))
 
-;; all active queries
+;; Re-DB's sync client.
+
+;; all active queries, {channel {id #{...rx}}}
 (defonce !watching (atom {}))
 
-;; websocket-handling code needs to set the send-fn here
+;; send-fns for channels
 (defonce !send-fns (atom {}))
 
-(defn send-message [socket message]
-  (when-let [send! (@!send-fns socket)]
+(defn send-message
+  "Send a message to a channel"
+  [channel message]
+  (when-let [send! (@!send-fns channel)]
     (send! message)))
 
-(defn transact-txs [txs]
-  (d/transact! txs))
+;; re-db transaction format for synced results
 
-(subs/def $query
-  (fn [socket qvec]
-    (send-message socket [:re-db.sync/watch-query qvec])
+(defn db-id
+  "The local re-db id under which results will be stored"
+  [id]
+  {:re-db.sync id})
+
+(defn read-result [id]
+  (d/get (db-id id) :result {:loading? true}))
+
+(defn set-result-tx [id value]
+  [[:db/add (db-id id) :result value]])
+
+;; Channel lifecycle functions (to be called at appropriate stages of a long-lived server connection)
+
+(defn on-open
+  "Must be called when a long-lived server connection opens.
+  `channel` should be a unique identifier for this connection.
+   `send-fn` should be a function of [message] which sends a message to this connection."
+  [channel send-fn]
+  (swap! !send-fns assoc channel send-fn)
+  (doseq [[id _] (@!watching channel)]
+    (send-fn [::sync/watch id])))
+
+(defn on-close [channel]
+  (swap! !send-fns dissoc channel))
+
+;; Client subscriptions
+
+(subs/def $watch
+  "Watch a server-side value (by id). Returns map containing one of {:value, :error, :loading?}"
+  ;; the server is responsible for mapping `id` to a data source
+  (fn [channel id]
+    (send-message channel [::sync/watch id])
     (let [rx (r/reaction
               (hooks/use-effect
-               (constantly (fn dispose-query []
-                             (swap! !watching dissoc qvec)
-                             (send-message socket [:re-db.sync/unwatch-query qvec]))))
-              (d/get {:re-db/query-result qvec} :result {:loading? true}))]
-      (swap! !watching assoc qvec rx)
+               (fn []
+                 (fn []
+                   (swap! !watching update channel dissoc id)
+                   (send-message channel [::sync/unwatch id]))))
+              (read-result id))]
+      (swap! !watching update channel assoc id rx)
       rx)))
 
-(defn on-open [channel send-fn]
-  (swap! !send-fns assoc channel send-fn)
-  (doseq [[qvec _] @!watching]
-    (send-fn [:re-db.sync/watch-query qvec])))
+(subs/def $all
+  "Compose any number of watches (by id). Returns first :loading? or :error,
+   or joins results into a :value vector."
+  (fn [channel & ids]
+    (r/reaction
+     (let [qs (mapv (comp deref (partial $watch channel)) ids)]
+       (or (u/find-first qs :error)
+           (u/find-first qs :loading?)
+           {:value (into [] (map :value) qs)})))))
 
-(defn on-close [socket]
-  (swap! !send-fns dissoc socket))
+;; Server subscriptions
 
-(defn all [socket & qvecs]
-  (r/reaction
-   (let [qs (mapv (comp deref (partial $query socket)) qvecs)]
-     (or (u/find-first qs :error)
-         (u/find-first qs :loading?)
-         {:value (into [] (map :value) qs)}))))
-
-(subs/def $all all)
-
-;; MAYBE TODO...
-;; - pass tx-id (to the client) with each query result
-;; - when reconnecting, client passes this tx-id with the query
-;; - server can re-run the query using db/as-of tx-id, compare with query "now", send only that diff
+(subs/def $ref-tx
+  "Returns a new ref, with values wrapped in a re-db.sync transaction"
+  (fn [id ref]
+    (xf/transform ref
+      (map (fn [value] (set-result-tx id {:value value}))))))

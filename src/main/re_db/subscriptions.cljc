@@ -10,18 +10,20 @@
 
 (defn subscription
   "Finds or creates a subscription for the given svec, a vector of [id & args]"
-  [svec]
-  (or (@!subscription-cache svec)
-      (let [[id & args] svec
-            init-fn (if (fn? id) id (@!subscription-defs id))
-            _ (when-not init-fn
-                (prn (str "Subscription not defined: " id) svec))
-            sub (doto (apply init-fn args)
-                  (->> (swap! !subscription-cache assoc svec)))]
-        (assert (satisfies? r/ICompute sub) "Subscription function must return a reaction")
-        (add-on-dispose! sub (fn [_]
-                               (swap! !subscription-cache dissoc svec)))
-        sub)))
+  ([svec not-found]
+   (or (@!subscription-cache svec)
+       (let [[id & args] svec]
+         (when-let [init-fn (if (fn? id) id (@!subscription-defs id))]
+           (let [sub (doto (apply init-fn args)
+                       (->> (swap! !subscription-cache assoc svec)))]
+             (assert (satisfies? r/ICompute sub) "Subscription function must return a reaction")
+             (add-on-dispose! sub (fn [_]
+                                    (swap! !subscription-cache dissoc svec)))
+             sub)))
+       not-found))
+  ([svec]
+   (or (subscription svec nil)
+       (throw (ex-info (str "Subscription not found for " (first svec)) {:svec svec})))))
 
 (defn sub
   "Returns current value of subscription for the given svec, a vector of [id & args]"
@@ -59,10 +61,12 @@
   ($my-sub :foo) is the same as (subscribe ['my-app.core/$my-sub :foo])
 
    An id is made from `name`, qualified to the current namespace."
-  [name f]
-  (let [id (symbol (str *ns*) (str name))]
-    `(do (register '~id ~f)
-         (defn ~name [& args#] (subscription (into ['~id] args#))))))
+  ([name doc f]
+   `(~'re-db.subscriptions/def ~name ~f))
+  ([name f]
+   (let [id (symbol (str *ns*) (str name))]
+     `(do (register '~id ~f)
+          (defn ~name [& args#] (subscription (into ['~id] args#)))))))
 
 (comment
  (clear-subscription-cache!)

@@ -3,11 +3,18 @@ Breaking changes:
 - Renamed `:re-db/sync-tx` to `:re-db.sync/tx` for consistency
 
 - in re-db.sync.client:
-  - renamed `re-db.sync.client/on-handshake!` to `on-open`
-  - `$query` and `all` now take `socket` as 1st parameter
-  - messages are no longer queued before connection;  keeping track of active queries should be sufficient
-  - added `on-close` to clean up a closed connection
-- moved transit-related sync code to re-db.sync.transit namespace
+  - renamed `on-handshake!` to `on-open`
+  - renamed `$query` to `$watch`
+  - removed `all`
+  - `$watch`, ``$all` now take `channel` as 1st parameter
+  - messages are no longer queued before connection. We already keep track of active queries and re-initialize
+    on re-connect, this should be sufficient.
+  - added `on-close` fn for clean-up
+  - removed `transact-txs`
+- moved transit code to `re-db.sync.transit`
+- moved diffing code to `re-db.sync.entity-diff-1`
+- `re-db.subscriptions/subscription` accepts optional not-found parameter,
+  otherwise throws if id is not registered.
 
 
 Other changes:

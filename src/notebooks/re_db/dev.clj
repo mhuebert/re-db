@@ -10,4 +10,5 @@
                  :watch-paths ["src/notebooks"]}))
 
 (comment
- (start))
+ (start)
+ (clerk/clear-cache!))
