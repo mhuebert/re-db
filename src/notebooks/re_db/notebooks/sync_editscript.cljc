@@ -44,12 +44,13 @@
 
 ;; For an example, let's modify a map:
 
-(defonce !map (atom {}))
+(defonce !list (atom ()))
 
-(swap! sync-simple/!refs-to-serve assoc :map (r/eager! ($edits !map)))
+(defmethod sync-simple/resolve-ref :list [_]
+  ($edits !list))
 
 (show-cljs
- (let [result @(client/$watch sync-simple/channel :map)]
+ (let [result @(client/$watch sync-simple/channel [:list])]
    (cond (:loading? result) "loading..."
          (:error result) [:div "Error: " (:error result)]
          :else [:div.text-xl.bg-slate-600.text-white.inline-block.p-3.rounded
@@ -57,13 +58,10 @@
 
 (show-cljs
  [:button.p-2.rounded.bg-blue-100
-  {:on-click #(render/clerk-eval '(swap! !map update (rand-int 10) (fnil inc 0)))}
-  "Map get bigger!"])
+  {:on-click #(render/clerk-eval '(swap! !list conj (rand-int 20)))}
+  "List, grow!"])
 
 ;; Message log:
 
 (show-cljs [:div.whitespace-pre-wrap.code.text-xs
             (with-out-str (pprint @sync-simple/!log))])
-
-;; TODO
-;; error

@@ -38,8 +38,8 @@
                             (when on-close
                               (http/on-close channel* (fn [status] (on-close channel status))))
                             (when on-message
-                              (http/on-receive channel* (fn [message] (on-message channel (doto (unpack message)
-                                                                                           (->> (prn :messagex))))))))*)
+                              (http/on-receive channel* (fn [message]
+                                                          (on-message channel (unpack message))))))*)
        (throw (ex-info (str "Unknown request " request-method uri) request)))))
 
 #?(:clj

@@ -26,7 +26,11 @@
 ;; Let's make a map of "syncable things" (refs) that we want to expose to clients.
 ;; Each ref will have a name that clients can use to request it, eg `:counter`:
 
-(def !refs-to-serve (atom {:counter (r/eager! (sync/$values !counter))}))
+(defmulti resolve-ref (fn [qvec] (first qvec)))
+
+(defmethod resolve-ref :counter
+  [_]
+  (sync/$values !counter))
 
 ; For handling websocket messages we use the `handle-message` multimethod.
 
@@ -37,14 +41,14 @@
 ;; then pass that to `server/watch` and `server/unwatch` respectively.
 
 (defmethod handle-message ::sync/watch
-  [channel [_ ref-id]]
-  (when-let [ref (@!refs-to-serve ref-id)]
+  [channel [_ qvec]]
+  (when-let [ref (resolve-ref qvec)]
     (server/watch ref channel (fn [channel [op & args]]
-                                (websocket/send! channel (into [op ref-id] args))))))
+                                (websocket/send! channel (into [op qvec] args))))))
 
 (defmethod handle-message ::sync/unwatch
-  [channel [_ ref-id]]
-  (when-let [ref (@!refs-to-serve ref-id)]
+  [channel [_ qvec]]
+  (when-let [ref (resolve-ref qvec)]
     (server/unwatch ref channel)))
 
 ;; Start a websocket server with a `handle-message` and `on-close` function:
@@ -57,7 +61,6 @@
        :pack t/pack
        :unpack t/unpack
        :on-message (fn [!channel message]
-                     (prn :ch !channel :ms message)
                      (handle-message !channel message))
        :on-close (fn [channel status]
                    (server/unwatch-all channel))})))
@@ -86,7 +89,7 @@
 ;; Show our result:
 
 (show-cljs
- (let [result @(client/$watch channel :counter)]
+ (let [result @(client/$watch channel [:counter])]
    (cond (:loading? result) "loading..."
          (:error result) [:div "Error: " (:error result)]
          :else [:div.text-xl.bg-slate-600.text-white.inline-block.p-3.rounded
@@ -95,14 +98,14 @@
 ;; Increment the counter from the browser:
 (show-cljs
  [:button.p-2.rounded.bg-blue-100
-  {:on-click #(render/clerk-eval '(swap! !counter inc))} "Number go up!"])
+  {:on-click #(render/clerk-eval '(swap! !counter inc))} "Number, go up!"])
 
 
 (cljs
  (def !log
    (xf/transform (:!last-message @channel)
      (take 10)
-     (xf/into []))))
+     (xf/into ()))))
 
 ;; Collect and show messages seen by the server:
 (show-cljs
@@ -120,3 +123,10 @@
 ;; - paginating queries
 ;; - subscriptions: what they are, how they work
 ;; - xforms: ratoms and reactions as streams with transducers
+
+^::clerk/visibility {:code :hide :result :hide}
+(do
+  (defmethod resolve-ref :default [qvec]
+    (println :no-ref! qvec))
+  (defmethod handle-message :default [& args]
+    (prn :no-message-handler! args)))
