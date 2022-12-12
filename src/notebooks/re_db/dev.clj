@@ -6,8 +6,7 @@
 (defn start []
   (shadow/watch :clerk)
   (swap! config/!resource->url merge {"/js/viewer.js" "http://localhost:8008/clerk/clerk.js"})
-  (clerk/serve! {:browse? true
-                 :watch-paths ["src/notebooks"]}))
+  (clerk/serve! {:browse? true}))
 
 (comment
  (start)

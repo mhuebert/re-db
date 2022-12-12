@@ -1,5 +1,6 @@
 (ns re-db.sync.server
-  (:require [re-db.sync :as-alias sync]))
+  (:require [re-db.sync :as sync]
+            [re-db.reactive :as r]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Client subscriptions - management of stateful websocket sessions.
@@ -9,21 +10,20 @@
 ;; keep track of all subscriptions {client, #{...refs}}
 (defonce !watches (atom {}))
 
-(defn watch-ref
+(defn watch
   "Adds watch for ref, syncing changes with client via :re-db.sync/tx messages.
    Values must be re-db transactions.
    The initial message checks for presence of :re-db.sync/initial-tx on the value
    (this is to facilitate stateful refs which, once initialized, only send diffs)"
-  [client-id !ref send-fn]
+  [!ref client-id send-fn]
   (swap! !watches update client-id (fnil conj #{}) !ref)
-  (add-watch !ref client-id (fn [_ _ _ txs] (send-fn client-id [::sync/tx txs])))
-  (send-fn client-id [::sync/tx (let [txs @!ref]
-                                  (or (::sync/initial-tx (meta txs))
-                                      txs))]))
+  (add-watch !ref client-id (fn [_ _ _ value] (send-fn client-id value)))
+  (send-fn client-id (or (::sync/on-watch (meta @!ref))
+                         @!ref)))
 
-(defn unwatch-ref
+(defn unwatch
   "Removes watch for ref."
-  [client-id !ref]
+  [!ref client-id]
   (swap! !watches update client-id disj !ref)
   (remove-watch !ref client-id))
 

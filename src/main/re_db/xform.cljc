@@ -1,6 +1,7 @@
 (ns re-db.xform
-  (:refer-clojure :exclude [map into])
-  (:require [re-db.reactive :as r]
+  (:refer-clojure :exclude [into map])
+  (:require [re-db.hooks :as hooks]
+            [re-db.reactive :as r]
             [re-db.xform.reducers :as reducers]))
 
 (defn step [xform]
@@ -22,19 +23,29 @@
 
 (defn transform
   "Streams values from ref into a new ratom, applying any supplied xforms (transducers)"
-  [source & xforms]
+  [ref & xforms]
   (let [key (gensym "stream")
-        out (r/make-reaction (fn []) :eager? true :on-dispose (fn [_] (remove-watch source key)))
         f (step (apply comp xforms))
-        handle-value (fn [value]
-                       (let [v (f value)]
-                         (case v
-                           ::no-op nil
-                           ::done (remove-watch source key)
-                           (reset! out v))))]
-    (add-watch source key (fn [_ _ _ value] (handle-value value)))
-    (handle-value @source)
-    out))
+        !initialized? (volatile! false)]
+    (r/reaction
+     (let [[new-source set-source!] (hooks/use-state nil)]
+
+       (hooks/use-effect
+        ;; watch is added immediately on init, which also activates/invalidates the source .
+        (fn []
+          (add-watch ref key (fn [_ _ _ new-value] (set-source! new-value)))
+          #(remove-watch ref key)))
+
+       (let [prev (r/peek r/*owner*)
+             next-value (f (if @!initialized?
+                             new-source
+                             (do
+                               (vreset! !initialized? true)
+                               (r/peek ref))))]
+         (case next-value
+           ::no-op prev
+           ::done (do (remove-watch ref key) prev)
+           next-value))))))
 
 (defn map [f source]
   (transform source (clojure.core/map f)))
@@ -96,20 +107,29 @@
  (r/session
   (let [source (atom 0)
         pairs (transform source
-                         (before:after)
-                         (take 5)
-                         (into []))]
+                (before:after)
+                (take 5)
+                (into []))]
     (dotimes [_ 10]
       (swap! source inc))
     @pairs))
 
  (r/session
-  (let [source (atom 0)
-        evens (transform source
-                         (filter even?)
-                         (take 3)
-                         (into []))]
+  (let [source (r/reaction (hooks/use-effect
+                            (fn []
+                              (prn :reaction/init)
+                              #(prn :reaction/dispose)))
+                           0)
+        evens (transform:lazy source
+                              (filter even?)
+                              (take 3)
+                              (into []))]
+    (prn :----- 1)
+    @evens
+    (prn :----- 2)
     (dotimes [_ 10] (swap! source inc))
-    @evens))
+    (prn :----- 3)
+    @evens
+    ))
 
  )

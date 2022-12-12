@@ -18,7 +18,7 @@
 
 (defn make-listener [conn e a v]
   (r/make-reaction (fn [])
-                   :dirty? false
+                   :inactive? false
                    :meta {:pattern [e a v]}
                    :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v]))))
 

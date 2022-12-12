@@ -4,8 +4,10 @@
   {:target :esm
    :output-dir "public/clerk"
    :modules {:clerk {:entries [re-db.notebooks.local
-                               re-db.notebooks.reactivity
-                               re-db.notebooks.sync]}}
+                               re-db.notebooks.tx-reactivity
+                               re-db.notebooks.sync-simple
+                               re-db.notebooks.sync-editscript
+                               re-db.notebooks.test]}}
    :devtools {:http-port 8008
               :http-root "public"}}
   :test

@@ -23,6 +23,11 @@
           (vswap! !hook assoc :dispose dispose :prev-deps deps)))
      nil)))
 
+(defn use-on-dispose
+  ([f] (use-on-dispose f nil))
+  ([f deps]
+   (use-effect (constantly f) deps)))
+
 (defn use-memo
   "Within a reaction, returns the (cached) result of evaluating f.
    f is called once to initialize, then re-evaluated when `deps` change."
@@ -74,6 +79,17 @@
      (fn []
        (add-watch ref set-value! (fn [_ _ old-value new-value]
                                    (set-value! [old-value new-value])))
+       #(remove-watch ref set-value!)))
+    value))
+
+(defn use-watch-value
+  "Returns [old-value, new-value] when ref changes - initially [nil, value]"
+  [ref]
+  (let [[value set-value!] (use-state @ref)]
+    (use-effect
+     (fn []
+       (add-watch ref set-value! (fn [_ _ _ new-value]
+                                   (set-value! new-value)))
        #(remove-watch ref set-value!)))
     value))
 

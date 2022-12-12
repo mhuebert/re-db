@@ -4,8 +4,7 @@
             [re-db.reactive :as r]
             [re-db.subscriptions :as subs]
             [re-db.sync :as-alias sync]
-            [re-db.util :as u]
-            [re-db.xform :as xf]))
+            [re-db.util :as u]))
 
 ;; Re-DB's sync client.
 
@@ -31,8 +30,8 @@
 (defn read-result [id]
   (d/get (db-id id) :result {:loading? true}))
 
-(defn set-result-tx [id value]
-  [[:db/add (db-id id) :result value]])
+(defn set-result-tx [id result]
+  [[:db/add (db-id id) :result result]])
 
 ;; Channel lifecycle functions (to be called at appropriate stages of a long-lived server connection)
 
@@ -56,11 +55,10 @@
   (fn [channel id]
     (send-message channel [::sync/watch id])
     (let [rx (r/reaction
-              (hooks/use-effect
+              (hooks/use-on-dispose
                (fn []
-                 (fn []
-                   (swap! !watching update channel dissoc id)
-                   (send-message channel [::sync/unwatch id]))))
+                 (swap! !watching update channel dissoc id)
+                 (send-message channel [::sync/unwatch id])))
               (read-result id))]
       (swap! !watching update channel assoc id rx)
       rx)))
@@ -75,10 +73,3 @@
            (u/find-first qs :loading?)
            {:value (into [] (map :value) qs)})))))
 
-;; Server subscriptions
-
-(subs/def $ref-tx
-  "Returns a new ref, with values wrapped in a re-db.sync transaction"
-  (fn [id ref]
-    (xf/transform ref
-      (map (fn [value] (set-result-tx id {:value value}))))))

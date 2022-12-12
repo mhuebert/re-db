@@ -191,7 +191,7 @@
 
 (util/support-clj-protocols
   (deftype Reaction
-    [^:volatile-mutable f ratom ^:volatile-mutable derefs ^:volatile-mutable hooks ^:volatile-mutable dispose-fns !dirty? !eager?]
+    [^:volatile-mutable f ratom ^:volatile-mutable derefs ^:volatile-mutable hooks ^:volatile-mutable dispose-fns !inactive? !eager?]
     IWatchable*
     (get-watches [this] (get-watches ratom))
     (set-watches! [this new-watches] (set-watches! ratom new-watches))
@@ -211,7 +211,7 @@
     (on-dispose [this]
       (dispose-derefs! this)
       (dispose-hooks! this)
-      (vreset! !dirty? true)
+      (vreset! !inactive? true)
      ;; clean up the atom's watches
       (when-let [ks (seq (keys (get-watches ratom)))]
         (doseq [k ks]
@@ -224,10 +224,11 @@
     IDeref
     (-deref [this]
 
-      (when @!dirty?
-        (when-not (owner)
-          (throw (ex-info "an inactive reaction cannot be dereferenced without a reactive context. wrap in r/session for immediate disposal." {:reaction this})))
-        (invalidate! this))
+      (when (and @!inactive? )
+        (if (owner)
+          (invalidate! this)
+          (println "WARN: an inactive reaction cannot be computed without a reactive context. wrap in r/session for immediate disposal."
+                   {:reaction this})))
 
       (when-not (identical? *owner* this)
         (collect-deref! this))
@@ -248,7 +249,7 @@
 
      ;; if the reaction is not yet initialized, do it here (before adding the watch,
      ;; so that the watch-fn is not called here)
-      (when @!dirty? (invalidate! this))
+      (when @!inactive? (invalidate! this))
 
       (add-watch ratom key f)
       this)
@@ -263,7 +264,7 @@
     ICompute
     (compute [this] (f))
     (invalidate! [this]
-      (vreset! !dirty? false)
+      (vreset! !inactive? false)
       (let [new-val (macros/with-owner this
                       (macros/with-hook-support!
                        (macros/with-deref-capture! this
@@ -291,15 +292,15 @@
    (reduce conj-some (conj-some coll x) args)))
 
 (defn make-reaction [compute-fn & {:as opts
-                                   :keys [init meta on-dispose dirty? eager?]
-                                   :or {dirty? true
+                                   :keys [init meta on-dispose inactive? eager?]
+                                   :or {inactive? true
                                         eager? false}}]
   (cond-> (->Reaction compute-fn
                       (atom init meta)
                       empty-derefs
                       empty-hooks
                       (if on-dispose [on-dispose] empty-dispose-fns)
-                      (volatile! dirty?)
+                      (volatile! inactive?)
                       (volatile! eager?))
           eager? invalidate!))
 
@@ -309,7 +310,7 @@
   (let [!e (.-!eager? rx)]
     (when-not @!e
       (vreset! !e true)
-      (when @(.-!dirty? rx)
+      (when @(.-!inactive? rx)
         (invalidate! rx))))
   rx)
 
@@ -318,7 +319,7 @@
 ;; clean up afterwards
 
 (defn make-session []
-  (make-reaction (fn []) :dirty? false))
+  (make-reaction (fn []) :inactive? false))
 
 (comment
  ;; using a session
@@ -339,7 +340,10 @@
 
 #?(:clj
    (defmethod print-method re_db.reactive.Reaction
-     [^re_db.reactive.Reaction m w]
-     (.write w (str "Reaction[" (:display-name (meta m)) "]"))
-     #_(#'clojure.core/print-object (meta m) w)
-     ))
+     [^re_db.reactive.Reaction rx w]
+     (#'clojure.core/print-meta rx w)
+     (.write w "#")
+     (.write w (.getName re_db.reactive.Reaction))
+     (#'clojure.core/print-map (merge {:eager? @(.-!eager? rx)
+                                       :inactive? @(.-!inactive? rx)}
+                                      (select-keys (meta rx) [:display-name])) #'clojure.core/pr-on w)))

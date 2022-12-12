@@ -69,7 +69,6 @@
           (defn ~name [& args#] (subscription (into ['~id] args#)))))))
 
 (comment
- (clear-subscription-cache!)
 
  (do
    (require '[re-db.hooks :as hooks])
@@ -128,7 +127,7 @@
 
  (r/dispose! (subscription [:atom2]))
 
- )
+ (clear-subscription-cache!))
 
 ;; TODO - why is 'watch' called twice when redefining a subscription
 ;;  if we take out the manual notify-watches, then reactions aren't notified at all.

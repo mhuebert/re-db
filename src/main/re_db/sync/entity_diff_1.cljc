@@ -54,25 +54,24 @@
    Currently recognizes only a single entity-map, or a list of entity-maps. Any other shape
    will be shipped as-is."
   [id [old-result new-result]]
-  (let [db-id {:re-db.sync/watch-result id}
+  (let [db-id {::sync/watch-result id}
         {new-value :value new-error :error} new-result
         shape (cond new-error :error
                     (:db/id new-value) :entities/one
                     (and (sequential? new-value)
                          (:db/id (first new-value))) :entities/many
-                    :else :value)
-        init-tx [[:db/add db-id :result new-result]]]
-    (with-meta (case shape
-                 (:value :error) init-tx
-                 :entities/one [(diff-entity (:value old-result) (:value new-result))
-                                [:db/add db-id :result (update new-result :value (comp entity-pointer :db/id))]]
-                 :entities/many (conj (diff-entities (:value old-result) (:value new-result))
-                                      [:db/add db-id :result (update new-result :value #(mapv (comp entity-pointer :db/id) %))]))
-               {::sync/initial-tx init-tx})))
+                    :else :value)]
+    (with-meta [::sync/tx (case shape
+                            (:value :error) [[:db/add db-id :result new-result]]
+                            :entities/one [(diff-entity (:value old-result) (:value new-result))
+                                           [:db/add db-id :result (update new-result :value (comp entity-pointer :db/id))]]
+                            :entities/many (conj (diff-entities (:value old-result) (:value new-result))
+                                                 [:db/add db-id :result (update new-result :value #(mapv (comp entity-pointer :db/id) %))]))]
+               {::sync/on-watch [::sync/tx [[:db/add db-id :result new-result]]]})))
 
 (defn send-error [client-id id send-fn error]
-  (send-fn client-id [:re-db.sync/tx
-                      [[:db/add {:re-db.sync/watch-result id} :result {:error error}]]]))
+  (send-fn client-id [::sync/tx
+                      [[:db/add {::sync/watch-result id} :result {:error error}]]]))
 
 ;; currently only used for tests
 (s/def $diff
