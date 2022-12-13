@@ -1,4 +1,3 @@
-^{:nextjournal.clerk/visibility {:code :hide :result :hide}}
 (ns re-db.notebooks.sync-editscript
   (:require [clojure.pprint :refer [pprint]]
             [editscript.core :as editscript]
@@ -7,47 +6,49 @@
             [re-db.api :as db]
             [re-db.integrations.reagent]
             [re-db.notebooks.sync-simple :as sync-simple]
-            [re-db.reactive :as r]
             [re-db.subscriptions :as subs]
             [re-db.sync :as sync]
             [re-db.sync.client :as client]
             [re-db.xform :as xf]
-            #?@(:cljs [[nextjournal.clerk.render :as render]])))
+            #?(:cljs [nextjournal.clerk.render :as render])))
 
-;; ## Diff and patch
+;## Diff and patch
+;
+;Let's improve syncing to send diffs instead of a full copy of data that changes.
+;
+;Using the [editscript](https://github.com/juji-io/editscript) library, we can write
+;a subscription that transforms a ref into a stream of "edits" which we can re-apply
+;on the client. This requires making up a new operation, which we'll call `::sync/editscript.edits`
 
-;; Let's improve syncing to send diffs instead of a full copy of data that changes.
+(subs/defonce $edits
+              (fn [qvec !ref]
+                (xf/transform !ref
+                  (xf/before:after) ;; first turn the ref into [before, after] pairs
+                  (map (fn [[before after]]
+                         (-> [::sync/editscript.edits qvec (-> (editscript/diff before after)
+                                                               (editscript/get-edits))]
+                             ;; the ::sync/snapshot message is sent to clients immediately upon subscribing,
+                             ;; to set initial state
+                             (with-meta {::sync/snapshot [::sync/snapshot qvec after]})))))))
 
-;; Using the [editscript](https://github.com/juji-io/editscript) library, we can write
-;; a subscription that transforms a ref into a stream of "edits" which we can re-apply
-;; on the client. This requires making up a new operation, which we'll call `::sync/editscript.edits`
 
-(subs/def $edits
-  (fn [!ref]
-    (xf/transform !ref
-      (xf/before:after) ;; first turn the ref into [before, after] pairs
-      (map (fn [[before after]]
-             (-> [::sync/editscript.edits (-> (editscript/diff before after)
-                                              (editscript/get-edits))]
-                 ;; the ::sync/on-watch message is sent to clients immediately upon subscribing,
-                 ;; to set initial state
-                 (with-meta {::sync/on-watch [::sync/value after]})))))))
 
 ;; Using the websocket server from our `simple-sync` notebook,
 ;; add a handler for the `::sync/editscript.edits` operation.
 
-(defmethod sync-simple/handle-message ::sync/editscript.edits
-  [channel [_ ref-id edits]]
-  (let [before (:value (client/read-result ref-id))
-        after (editscript/patch before (editscript/edits->script edits))]
-    (db/transact! (client/set-result-tx ref-id {:value after}))))
+(sync-simple/register ::sync/editscript.edits
+  (fn [[_ qvec edits] _]
+    (let [before (:value (client/read-result qvec))
+          after (editscript/patch before (editscript/edits->script edits))]
+      (db/transact! (client/set-result-tx qvec {:value after})))))
+
 
 ;; For an example, let's modify a map:
 
 (defonce !list (atom ()))
 
-(defmethod sync-simple/resolve-ref :list [_]
-  ($edits !list))
+(sync-simple/register :list
+  (fn [qvec _] ($edits qvec !list)))
 
 (show-cljs
  (let [result @(client/$watch sync-simple/channel [:list])]

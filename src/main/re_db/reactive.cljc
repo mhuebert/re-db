@@ -1,9 +1,14 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [-peek peek atom])
-  (:require [applied-science.js-interop :as j]
-            [re-db.util :as util]
+  (:require [re-db.util :as util]
             [re-db.macros :as macros])
   #?(:cljs (:require-macros re-db.reactive)))
+
+;; clear subscriptions before re-evaluating this namespace
+;; to avoid problems with redefined protocols
+(when-let [clear-subs (resolve 're-db.subscriptions/clear-subscription-cache!)]
+  (@clear-subs))
+
 
 ;; TODO - write tests for re-registering reactions
 
@@ -224,14 +229,10 @@
     IDeref
     (-deref [this]
 
-      (when (and @!inactive? )
-        (if (owner)
-          (invalidate! this)
-          (println "WARN: an inactive reaction cannot be computed without a reactive context. wrap in r/session for immediate disposal."
-                   {:reaction this})))
-
       (when-not (identical? *owner* this)
         (collect-deref! this))
+
+      (when @!inactive? (invalidate! this))
 
       (peek ratom))
 
@@ -345,5 +346,6 @@
      (.write w "#")
      (.write w (.getName re_db.reactive.Reaction))
      (#'clojure.core/print-map (merge {:eager? @(.-!eager? rx)
-                                       :inactive? @(.-!inactive? rx)}
+                                       :inactive? @(.-!inactive? rx)
+                                       :peek (peek rx)}
                                       (select-keys (meta rx) [:display-name])) #'clojure.core/pr-on w)))

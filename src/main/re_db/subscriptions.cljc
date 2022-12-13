@@ -1,12 +1,12 @@
 (ns re-db.subscriptions
   "Subscriptions: named reactive computations cached globally for deduplication of effort"
-  (:refer-clojure :exclude [def])
+  (:refer-clojure :exclude [def defonce])
   (:require [re-db.reactive :as r :refer [add-on-dispose! dispose!]])
   #?(:cljs (:require-macros re-db.subscriptions)))
 
-(defonce !subscription-defs (atom {}))
+(clojure.core/defonce !subscription-defs (atom {}))
 ;; map of {svec, sub}
-(defonce !subscription-cache (atom {}))
+(clojure.core/defonce !subscription-cache (atom {}))
 
 (defn subscription
   "Finds or creates a subscription for the given svec, a vector of [id & args]"
@@ -67,6 +67,12 @@
    (let [id (symbol (str *ns*) (str name))]
      `(do (register '~id ~f)
           (defn ~name [& args#] (subscription (into ['~id] args#)))))))
+
+(defmacro defonce
+  ([name doc f] `(~'re-db.subscriptions/defonce ~name nil ~f))
+  ([name f]
+   `(when-not (@!subscription-defs '~(symbol (str *ns*) (str name)))
+      (~'re-db.subscriptions/def ~name ~f))))
 
 (comment
 

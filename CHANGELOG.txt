@@ -14,15 +14,19 @@ Breaking changes:
 - in re-db.sync.server:
   - renamed `watch-ref` to `watch`
   - renamed `unwatch-ref` to `unwatch`
-  - if a ref can specify `:re-db.sync/on-watch` metadata on its value,
-    for a payload to be sent as the first message to a client upon watching it
+  - if a ref's value has `:re-db.sync/snapshot` metadata, it will be sent
+    as a starting value when a new client starts a watch.
 - moved transit code to `re-db.sync.transit`
 - moved diffing code to `re-db.sync.entity-diff-1`
 - `re-db.subscriptions/subscription` accepts optional not-found parameter,
   otherwise throws if id is not registered.
+- added `re-db.subscriptions/defonce`
 - changed the format of server->client messages to `[operation ref-id & args]`
 - added `on-dispose` hook
 - `re-db.xform/transform` is now lazy
+- reactions now permit invalidation outside a reactive context.
+  this was due to frequent issues with inadvertent dereferencing (eg. often by Clerk, but not only).
+  Remains an open question how to handle these lifecycles well.
 
 
 Other changes:

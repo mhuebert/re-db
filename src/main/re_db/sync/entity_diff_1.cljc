@@ -67,7 +67,7 @@
                                            [:db/add db-id :result (update new-result :value (comp entity-pointer :db/id))]]
                             :entities/many (conj (diff-entities (:value old-result) (:value new-result))
                                                  [:db/add db-id :result (update new-result :value #(mapv (comp entity-pointer :db/id) %))]))]
-               {::sync/on-watch [::sync/tx [[:db/add db-id :result new-result]]]})))
+               {::sync/snapshot [::sync/tx [[:db/add db-id :result new-result]]]})))
 
 (defn send-error [client-id id send-fn error]
   (send-fn client-id [::sync/tx

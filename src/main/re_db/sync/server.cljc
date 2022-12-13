@@ -18,7 +18,7 @@
   [!ref client-id send-fn]
   (swap! !watches update client-id (fnil conj #{}) !ref)
   (add-watch !ref client-id (fn [_ _ _ value] (send-fn client-id value)))
-  (send-fn client-id (or (::sync/on-watch (meta @!ref))
+  (send-fn client-id (or (::sync/snapshot (meta @!ref))
                          @!ref)))
 
 (defn unwatch
