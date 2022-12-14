@@ -9,6 +9,7 @@
             [re-db.subscriptions :as subs]
             [re-db.sync :as sync]
             [re-db.sync.client :as client]
+            [re-db.sync.registry :refer [register]]
             [re-db.xform :as xf]
             #?(:cljs [nextjournal.clerk.render :as render])))
 
@@ -40,8 +41,8 @@
 
 ;; Here is the handler for `::sync/editscript.edits`:
 
-(sync-simple/register ::sync/editscript.edits
-  (fn [[_ qvec edits] _]
+(register ::sync/editscript.edits
+  (fn [_ qvec edits]
     (let [before (:value (client/read-result qvec))
           after (editscript/patch before (editscript/edits->script edits))]
       (db/transact! (client/set-result-tx qvec {:value after})))))
@@ -51,8 +52,8 @@
 
 (defonce !list (atom (list 1 2 3 4 5)))
 
-(sync-simple/register :list
-  (fn [qvec _] ($edits qvec !list)))
+(register :list
+  (fn [ctx] ($edits (:mvec ctx) !list)))
 
 (show-cljs
  (let [result @(client/$watch sync-simple/channel [:list])]

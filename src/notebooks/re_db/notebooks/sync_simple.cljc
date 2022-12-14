@@ -6,7 +6,9 @@
             [re-db.api :as db]
             [re-db.integrations.reagent]
             [re-db.notebooks.tools.websocket :as websocket]
+            [re-db.subscriptions :as subs]
             [re-db.sync :as sync]
+            [re-db.sync.registry :refer [register handle]]
             [re-db.sync.client :as client]
             [re-db.sync.server :as server]
             [re-db.sync.transit :as t]
@@ -27,22 +29,7 @@
 ;; For re-db instances to tell each other what data they're looking for, they'll send
 ;; messages in the following shape: `[:name-of-query & args]` - a vector beginning with an
 ;; identifier, followed by arguments. We call this a "message vector" or `mvec` in code.
-
-;; To "handle" message vectors, we'll associate identifiers (the first position of the mvec)
-;; with handler functions in an atom that we can `register` to when adding support for
-;; new message types.
-
-(defonce !handlers (atom {}))
-(defn register [& {:as handlers}] (swap! !handlers merge handlers))
-
-;; A `handle` function resolves an mvec to its handler function, then calls the function,
-;; passing in the mvec and a context map.
-
-(defn handle [mvec context]
-  (let [handler (@!handlers (mvec 0))]
-    (if handler
-      (handler mvec context)
-      (println (str "Handler not found for: " mvec)))))
+;; Code for registering and invoking handlers can be found in `re-db.sync.registry`.
 
 ;; In Clojure, the `IWatchable` / `clojure.lang.IRef` protocol is most often encountered with
 ;; atoms, but can be implemented for any type. It lets us reliably subscribe to changes
@@ -53,35 +40,33 @@
 
 (defonce !counter (atom 0))
 
-;; To serve our `!counter` atom, we'll implement a resolver for `:counter` like so:
+;; To serve our `!counter` atom, we'll implement a resolver for `:counter`.
 
 (register :counter
-  (fn [mvec _] (sync/$snapshots mvec !counter)))
+  (fn [context]
+    (sync/$snapshots (:mvec context) !counter)))
 
 ;; Note that we wrapped our atom in `sync/$snapshots`. This is a **subscription** which transforms 
 ;; `!counter`, wrapping each successive value in a `[::sync/snapshot ...]` message.
-;;
-;; ```clj
-;; (re-db.subscriptions/def $snapshots
-;;  (fn [mvec !ref] (xf/map (fn [v] [::sync/snapshot mvec v]) !ref)))
-;; ```
-;;
+
 ;; Our handler for `::sync/snapshot` resets a query result by transacting to the local re-db:
 
 (register ::sync/snapshot
-  (fn [[_ mvec value] _]
-    (db/transact! (client/set-result-tx mvec {:value value}))))
+  (fn [context qvec value]
+    (db/transact! (client/set-result-tx qvec {:value value}))))
 
 ;; `::sync/watch` and `::sync/unwatch` delegate to `re-db.sync.server` after resolving their ref
 ;; (also a message vector, must resolve to some watchable thing)
 
 (register
-  ::sync/watch (fn [[_ ref:mvec] context]
-                 (when-let [!ref (handle ref:mvec context)]
-                   (server/watch !ref (:channel context) websocket/send!)))
-  ::sync/unwatch (fn [[_ ref:mvec] context]
-                   (when-let [!ref (handle ref:mvec context)]
-                     (server/unwatch !ref (:channel context)))))
+  ::sync/watch (fn [context qvec]
+                 (if-let [!ref (handle context qvec)]
+                   (server/watch !ref (:channel context) websocket/send!)
+                   (println "No ref found" qvec)))
+  ::sync/unwatch (fn [context qvec]
+                   (if-let [!ref (handle context qvec)]
+                     (server/unwatch !ref (:channel context))
+                     (println "No ref found" qvec))))
 
 ;; Let's start a websocket server, passing in our `handle-message` function for messages and
 ;; `server/unwatch-all` for close events. This is clj-only. (We're using a tiny websocket server
@@ -95,7 +80,7 @@
        :pack t/pack
        :unpack t/unpack
        :on-message (fn [channel mvec]
-                     (handle mvec {:channel channel}))
+                     (handle {:channel channel} mvec))
        :on-close (fn [channel status]
                    (server/unwatch-all channel))})))
 
@@ -112,7 +97,7 @@
                                            ;; websocket should handle queued messages
                                            ;; internally.
                                            (client/on-open !channel (:send @!channel)))
-                                :on-message (fn [channel message] (handle message {:channel channel}))
+                                :on-message (fn [channel message] (handle {:channel channel} message))
                                 :on-close client/on-close})))
 
 ;; To watch a query, we use `re-db.client/$watch` subscription, passing it the
