@@ -12,29 +12,33 @@
             [re-db.xform :as xf]
             #?(:cljs [nextjournal.clerk.render :as render])))
 
-;## Diff and patch
-;
-;Let's improve syncing to send diffs instead of a full copy of data that changes.
-;
-;Using the [editscript](https://github.com/juji-io/editscript) library, we can write
-;a subscription that transforms a ref into a stream of "edits" which we can re-apply
-;on the client. This requires making up a new operation, which we'll call `::sync/editscript.edits`
+;; ## Diff and patch
+;;
+;; Let's improve syncing to send diffs instead of a full copy of data that changes.
+;;
+;; Using the [editscript](https://github.com/juji-io/editscript) library, we can write
+;; a subscription that transforms a ref into a stream of "edits" which we can re-apply
+;; on the client.
+;;
+;; Below we define a subscription, `$edits`, which takes a stream of values and creates
+;; diffs between each successive pair. The diff is wrapped as a message, `[::sync/editscript.edits X]`,
+;; which we'll have to implement in the client.
 
 (subs/defonce $edits
-              (fn [qvec !ref]
-                (xf/transform !ref
-                  (xf/before:after) ;; first turn the ref into [before, after] pairs
-                  (map (fn [[before after]]
-                         (-> [::sync/editscript.edits qvec (-> (editscript/diff before after)
-                                                               (editscript/get-edits))]
-                             ;; the ::sync/snapshot message is sent to clients immediately upon subscribing,
-                             ;; to set initial state
-                             (with-meta {::sync/snapshot [::sync/snapshot qvec after]})))))))
+  (fn [qvec !ref]
+    (xf/transform !ref
+      (xf/before:after) ;; first turn the ref into [before, after] pairs
+      (map (fn [[before after]]
+             (-> [::sync/editscript.edits qvec (-> (editscript/diff before after)
+                                                   (editscript/get-edits))]
+                 ;; the ::sync/snapshot message is sent to clients immediately upon subscribing,
+                 ;; to set initial state
+                 (with-meta {::sync/snapshot [::sync/snapshot qvec after]})))))))
 
+;; Each diff contains `::sync/snapshot` metadata. This will be sent when a client first starts watching
+;; the stream, to set its initial value.
 
-
-;; Using the websocket server from our `simple-sync` notebook,
-;; add a handler for the `::sync/editscript.edits` operation.
+;; Here is the handler for `::sync/editscript.edits`:
 
 (sync-simple/register ::sync/editscript.edits
   (fn [[_ qvec edits] _]
@@ -43,9 +47,9 @@
       (db/transact! (client/set-result-tx qvec {:value after})))))
 
 
-;; For an example, let's modify a map:
+;; For an example, let's modify a list:
 
-(defonce !list (atom ()))
+(defonce !list (atom (list 1 2 3 4 5)))
 
 (sync-simple/register :list
   (fn [qvec _] ($edits qvec !list)))
@@ -66,3 +70,5 @@
 
 (show-cljs [:div.whitespace-pre-wrap.code.text-xs
             (with-out-str (pprint @sync-simple/!log))])
+
+;; Note how we're only sending the full value once, and individual values on subsequent changes.

@@ -72,7 +72,7 @@
   (fn [[_ mvec value] _]
     (db/transact! (client/set-result-tx mvec {:value value}))))
 
-;; ::sync/watch and ::sync/unwatch delegate to `re-db.sync.server` after resolving their ref
+;; `::sync/watch` and `::sync/unwatch` delegate to `re-db.sync.server` after resolving their ref
 ;; (also a message vector, must resolve to some watchable thing)
 
 (register
@@ -134,20 +134,11 @@
 #?(:cljs
    (def !log
      (xf/transform (:!last-message @channel)
-       (take 10)
        (keep identity)
-       (xf/into ()))))
+       (xf/sliding-window 10))))
 
 ;; Show the log using `pprint`:
 
 (show-cljs
  [:div.whitespace-pre-wrap.code.text-xs
   (with-out-str (pprint @!log))])
-
-;; TODOs
-
-;; - entity sync: sending re-db entity references across the wire
-;; - reactive db queries (which invalidate based on a tx-log)
-;; - paginating queries
-;; - subscriptions: what they are, how they work
-;; - xforms: ratoms and reactions as streams with transducers
