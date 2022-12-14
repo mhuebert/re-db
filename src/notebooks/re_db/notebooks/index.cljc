@@ -1,4 +1,5 @@
 (ns re-db.notebooks.index
+  "Root namespace for all cljc notebooks (including notebooks here is required for using cljs in the notebook)"
   (:require [nextjournal.clerk.viewer :as v]
             [re-db.notebooks.local]
             [re-db.notebooks.sync-editscript]
@@ -8,15 +9,13 @@
             [re-db.notebooks.xform]
             [re-db.reactive :as r]))
 
+;; TODO
 
-
-;; TODOs
-
-;; - entity sync: sending re-db entity references across the wire
-;; - reactive db queries (which invalidate based on a tx-log)
-;; - paginating queries
-;; - subscriptions: what they are, how they work
-;; - xforms: ratoms and reactions as streams with transducers
+;; entity-sync:   explain how re-db entities are shipped from server to client
+;; entity-diff:   show how we send minimal diffs to the client & merge results in the local cache
+;; pagination:    figure out how to do pagination in re-db
+;; subscriptions: explain/demonstrate
+;; xforms:        deep dive on using transducers with reactions/ratoms
 
 (comment
  #_(v/reset-viewers! :default
