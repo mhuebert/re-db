@@ -417,7 +417,6 @@
              (ids (d/where [[:children "pete"]])))
           "look up via cardinality/many index")
 
-
       (testing "remove value from cardinality/many attribute"
         (d/transact! [[:db/retract "fred" :children "sally"]])
         (is (= nil (ids (d/where [[:children "sally"]])))
@@ -426,6 +425,10 @@
             "index remains for other value")
         (is (= #{"pete"} (d/get "fred" :children))
             "attribute has correct value"))
+
+      (testing "retracting entity with cardinality/many attribute"
+        (d/transact! [[:db/retractEntity "fred"]])
+        (is (= nil (d/get "fred"))))
 
       (d/transact! [{:db/id "fred" :children #{"fido"}}])
       (is (= #{"fido"} (d/get "fred" :children))
