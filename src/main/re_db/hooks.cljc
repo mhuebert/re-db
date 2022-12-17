@@ -53,7 +53,7 @@
                                                (r/without-deref-capture (value old-value)))
                                              value)]
                              (vswap! !hook assoc :value new-value)
-                             (r/invalidate! owner)
+                             (r/compute! owner)
                              new-value))))
     ((juxt :value :update-fn) @!hook)))
 

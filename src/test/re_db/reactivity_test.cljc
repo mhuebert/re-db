@@ -10,7 +10,7 @@
             [re-db.schema :as schema]
             [re-db.read :as read]
             [re-db.test-helpers :refer [throws]]
-            [re-db.subscriptions :as s]
+            [re-db.memo :as memo]
             [re-db.hooks :as hooks]
             #?@(:cljs [[reagent.core :as reagent :refer [track!]]
                        [reagent.dom :as rdom]
@@ -204,20 +204,18 @@
          (into #{} (map :name) (api/where [:name])))))
 
 (deftest subscriptions
-  (s/clear-subscription-cache!)
   (r/session
 
    ;; source atom
    (def a (r/atom 0))
 
    ;; consumer subscriptions
-   (s/def $a #(r/reaction @a))
-   (s/register :a (fn [] (r/reaction @a)))
+
+   (memo/def-memo $a #(r/reaction @a))
    (swap! a inc)
 
    (is (= @a
-          @($a)
-          @(s/subscription [:a])))))
+          @($a)))))
 
 (deftest disposal
 
@@ -255,14 +253,14 @@
             (let [[v v!] (hooks/use-volatile 0)]
               (v! inc)))]
     (is (= (r/session @rx) 1))
-    (r/invalidate! rx)
+    (r/compute! rx)
     (is (= @rx 1)
         "Without an owner resent, a reaction disposes itself after every read.
         It begins again with fresh state.")
 
     (r/reaction!
      (is (= @rx 1))
-     (r/invalidate! rx)
+     (r/compute! rx)
      (is (= @rx 2) "With an owner present, a reaction persists across time."))))
 
 (comment

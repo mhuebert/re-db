@@ -1,30 +1,27 @@
 (ns re-db.query
-  (:require [re-db.read :refer [*conn*]]
-            [re-db.reactive :as r]
-            [re-db.subscriptions :as subs]))
-
-;; a lightweight wrapper around r/reaction - unsure if this API should exist
-
-(defn compute-f [id conn f]
-  (binding [*conn* conn]
-    (try {:value (f)}
-         (catch #?(:clj Exception :cljs js/Error) e
-           (prn :error-computing-query id (ex-message e))
-           {:error (ex-message e)}))))
+  (:require [re-db.api]
+            [re-db.memo]
+            [re-db.reactive])
+  #?(:cljs (:require-macros re-db.query)))
 
 (defn register
-  "Defines a reactive query function which tracks read-patterns (e-a-v) and recomputes when
-   matching datoms are transacted to a Datomic connection (passed to the subscription/sub
-   functions below)."
+
   [id f]
-  (subs/register id
-    (fn [conn args]
-      (r/reaction (compute-f id conn #(apply f args))))))
+  (throw (ex-info (str `register " is deprecated; use `defn-query` instead") {:id id})))
 
-(defn patterns [q] (->> (r/get-derefs q)
-                        (keep (comp :pattern meta))))
+(defn query [& args] (throw (ex-info (str `query " is deprecated; use `defn-query` instead") {:args args})))
 
-(defn query
-  ([qvec] (query *conn* qvec))
-  ([conn qvec]
-   (subs/subscription [(first qvec) conn (rest qvec)])))
+(defmacro defn-query
+  "Defines a memoized query fn which tracks read-patterns (e-a-v) for reads via `re-db.api` and recomputes when
+   matching datoms are transacted to a Datomic connection, which must be the first argument to the function.
+
+   (defn-query $movie-by-title [conn title] (re-db.api/where ...))"
+  [name & args]
+  `(re-db.memo/def-memo ~name
+     (let [f# (fn ~@args)]
+       (fn [conn# & args#]
+         (re-db.reactive/reaction
+          (re-db.api/with-conn conn#
+            (try {:value (apply f# conn# args#)}
+                 (catch ~(if (:ns &env) 'js/Error 'Exception)
+                        e# {:error (ex-message e#)}))))))))

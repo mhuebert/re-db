@@ -10,17 +10,18 @@
 
             [re-db.api :as re]
             [re-db.query :as q]
+            [re-db.memo :as m]
             [re-db.reactive :as r]
             [re-db.hooks :as hooks]
             [re-db.protocols :as rp]
-            [re-db.subscriptions :as subs]
+            [re-db.memo :as subs]
             [clojure.test :as test :refer [is are deftest testing]]
             [re-db.schema :as schema]
             [re-db.read :as read]
             [clojure.string :as str]
             [clojure.walk :as walk]))
 
-(subs/clear-subscription-cache!)
+
 (read/clear-listeners!)
 
 (defn noids [e]
@@ -118,18 +119,17 @@
 
 (deftest db-queries
 
-  (transact! initial-data)
+  (q/defn-query $emo-movies [conn emo-name]
+                (->> (re/entity [:emotion/name emo-name])
+         :movie/_emotions
+         (mapv :movie/title)
+         set))
 
-  (q/register :emo-movies
-    (fn [emo-name]
-      (->> (re/entity [:emotion/name emo-name])
-           :movie/_emotions
-           (mapv :movie/title)
-           set)))
+  (transact! initial-data)
 
   (r/session
    (let [sad-queries (mapv (fn [{:keys [id conn]}]
-                             [id (q/query conn [:emo-movies "sad"])])
+                             [id ($emo-movies conn "sad")])
                            databases)
          toggle-emotion! #(let [sad? (re/with-conn (:conn (first databases))
                                        (contains? (->> (re/get [:movie/title "Commando"] :movie/emotions)

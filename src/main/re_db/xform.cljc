@@ -48,23 +48,6 @@
                           next-step)]
          next-value)))))
 
-(comment
- (defn transform:eager
-   "Streams values from ref into a new ratom, applying any supplied xforms (transducers)"
-   [source & xforms]
-   (let [key (gensym "stream")
-         out (r/make-reaction (fn []) :eager? true :on-dispose (fn [_] (remove-watch source key)))
-         f (step (apply comp xforms))
-         handle-value (fn [value]
-                        (let [v (f value)]
-                          (case v
-                            ::no-op nil
-                            ::done (remove-watch source key)
-                            (reset! out v))))]
-     (add-watch source key (fn [_ _ _ value] (handle-value value)))
-     (handle-value @source)
-     out)))
-
 (defn map [f source]
   (transform source (clojure.core/map f)))
 

@@ -1,15 +1,14 @@
 (ns re-db.notebooks.sync-editscript
-  (:require [clojure.pprint :refer [pprint]]
+  (:require [clojure.core.match :refer [match]]
+            [clojure.pprint :refer [pprint]]
             [editscript.core :as editscript]
             [mhuebert.clerk-cljs :refer [show-cljs]]
             [nextjournal.clerk :as-alias clerk]
-            [re-db.api :as db]
             [re-db.integrations.reagent]
-            [re-db.notebooks.sync-simple :as sync-simple]
-            [re-db.subscriptions :as subs]
+            [re-db.memo :as memo]
+            [re-db.notebooks.tools.websocket :as ws]
+            [re-db.reactive :as r]
             [re-db.sync :as sync]
-            [re-db.sync.client :as client]
-            [re-db.sync.registry :refer [register]]
             [re-db.xform :as xf]
             #?(:cljs [nextjournal.clerk.render :as render])))
 
@@ -20,43 +19,42 @@
 ;; Using the [editscript](https://github.com/juji-io/editscript) library, we can write
 ;; a subscription that transforms a ref into a stream of "edits" which we can re-apply
 ;; on the client.
-;;
-;; Below we define a subscription, `$edits`, which takes a stream of values and creates
-;; diffs between each successive pair. The diff is wrapped as a message, `[::sync/editscript.edits X]`,
-;; which we'll have to implement in the client.
 
-(subs/defonce $edits
-  (fn [qvec !ref]
+(memo/once
+  (memo/defn-memo $edits [!ref]
     (xf/transform !ref
       (xf/before:after) ;; first turn the ref into [before, after] pairs
       (map (fn [[before after]]
-             (-> [::sync/editscript.edits qvec (-> (editscript/diff before after)
-                                                   (editscript/get-edits))]
-                 ;; the ::sync/snapshot message is sent to clients immediately upon subscribing,
-                 ;; to set initial state
-                 (with-meta {::sync/snapshot [::sync/snapshot qvec after]})))))))
+             {:sync/editscript:patch (-> (editscript/diff before after)
+                                         (editscript/get-edits))
+              :sync/init {:value after}})))))
 
-;; Each diff contains `::sync/snapshot` metadata. This will be sent when a client first starts watching
-;; the stream, to set its initial value.
-
-;; Here is the handler for `::sync/editscript.edits`:
-
-(register ::sync/editscript.edits
-  (fn [_ qvec edits]
-    (let [before (:value (client/read-result qvec))
-          after (editscript/patch before (editscript/edits->script edits))]
-      (db/transact! (client/set-result-tx qvec {:value after})))))
-
+(def result-handlers
+  {:sync/editscript:patch
+   (fn [result edits]
+     {:value (editscript/patch (:value result) (editscript/edits->script edits))})})
 
 ;; For an example, let's modify a list:
 
 (defonce !list (atom (list 1 2 3 4 5)))
 
-(register :list
-  (fn [ctx] ($edits (:mvec ctx) !list)))
+#?(:clj
+   (defonce server
+     (ws/serve {:port 9061
+                :path "/ws"
+                :resolve-ref (fn [context descriptor]
+                               (match descriptor :list ($edits !list)))})))
 
 (show-cljs
- (let [result @(client/$watch sync-simple/channel [:list])]
+ (defonce channel (ws/connect {:port 9061
+                               :path "/ws"
+                               :result-handlers #'result-handlers})))
+
+;; get rid of add-watch, remove-watch as global messages?
+
+
+(show-cljs
+ (let [result @(sync/$watch channel :list)]
    (cond (:loading? result) "loading..."
          (:error result) [:div "Error: " (:error result)]
          :else [:div.text-xl.bg-slate-600.text-white.inline-block.p-3.rounded
@@ -67,9 +65,14 @@
   {:on-click #(render/clerk-eval '(swap! !list conj (rand-int 20)))}
   "List, grow!"])
 
+(memo/once
+  (memo/defn-memo $log [!ref n]
+    (xf/transform !ref (keep identity) (xf/sliding-window n))))
+
 ;; Message log:
 
-(show-cljs [:div.whitespace-pre-wrap.code.text-xs
-            (with-out-str (pprint @sync-simple/!log))])
+(show-cljs
+ [:div.whitespace-pre-wrap.code.text-xs
+  (with-out-str (pprint @($log (:!last-message @channel) 10)))])
 
 ;; Note how we're only sending the full value once, and individual values on subsequent changes.

@@ -27,9 +27,8 @@ Breaking changes:
 - reactions now permit invalidation outside a reactive context.
   this was due to frequent issues with inadvertent dereferencing (eg. often by Clerk, but not only).
   Remains an open question how to handle these lifecycles well.
-
+- removed `re-db.subscriptions`, replaced with `re-db.memo` which does not use global state
+- removed `migrate-watches`, added `become`
 
 Other changes:
-
-- migrate-watches adds watches before dereferencing the destination rx
 - reagent integration is now cljc

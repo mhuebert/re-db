@@ -1,7 +1,7 @@
 (ns re-db.sync.entity-diff-1
-  (:require [re-db.subscriptions :as s]
+  (:require [re-db.memo :as memo]
             [re-db.sync :as-alias sync]
-            [re-db.sync.transit :refer [entity-pointer]]
+            [re-db.transit :refer [entity-pointer]]
             [re-db.xform :as xf]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -51,38 +51,38 @@
   "Replaces entities in result (detected via presence of :db/id) with instances of ->Entity,
    returns new result and list of transactions containing entity data.
 
-   Currently recognizes only a single entity-map, or a list of entity-maps. Any other shape
+   Recognizes only a single entity-map, or a list of entity-maps. Any other shape
    will be shipped as-is."
   [id [old-result new-result]]
-  (let [db-id {::sync/watch-result id}
+  (let [db-id {:sync/watch-result id}
         {new-value :value new-error :error} new-result
         shape (cond new-error :error
                     (:db/id new-value) :entities/one
                     (and (sequential? new-value)
                          (:db/id (first new-value))) :entities/many
                     :else :value)]
-    (with-meta [::sync/tx (case shape
-                            (:value :error) [[:db/add db-id :result new-result]]
-                            :entities/one [(diff-entity (:value old-result) (:value new-result))
-                                           [:db/add db-id :result (update new-result :value (comp entity-pointer :db/id))]]
-                            :entities/many (conj (diff-entities (:value old-result) (:value new-result))
-                                                 [:db/add db-id :result (update new-result :value #(mapv (comp entity-pointer :db/id) %))]))]
-               {::sync/snapshot [::sync/tx [[:db/add db-id :result new-result]]]})))
+    (with-meta [:sync/tx (case shape
+                           (:value :error) [[:db/add db-id :result new-result]]
+                           :entities/one [(diff-entity (:value old-result) (:value new-result))
+                                          [:db/add db-id :result (update new-result :value (comp entity-pointer :db/id))]]
+                           :entities/many (conj (diff-entities (:value old-result) (:value new-result))
+                                                [:db/add db-id :result (update new-result :value #(mapv (comp entity-pointer :db/id) %))]))]
+               {:sync/snapshot [:sync/tx [[:db/add db-id :result new-result]]]})))
 
 (defn send-error [client-id id send-fn error]
-  (send-fn client-id [::sync/tx
-                      [[:db/add {::sync/watch-result id} :result {:error error}]]]))
+  (send-fn client-id [:sync/tx
+                      [[:db/add {:sync/watch-result id} :result {:error error}]]]))
 
 ;; currently only used for tests
-(s/def $diff
-  (fn [ref]
-    (xf/transform ref
-                  (xf/before:after)
-                  (map diff))))
+(memo/defn-memo $diff
+  [ref]
+  (xf/transform ref
+    (xf/before:after)
+    (map diff)))
 
-(s/def $diff-tx
-  ;; transactions of diffs of successive values of ref
-  (fn [id ref]
-    (xf/transform ref
-                  (xf/before:after)
-                  (map #(diff-tx id %)))))
+(memo/defn-memo $diff-tx
+  "transactions of diffs of successive values of ref"
+  [id ref]
+  (xf/transform ref
+    (xf/before:after)
+    (map #(diff-tx id %))))

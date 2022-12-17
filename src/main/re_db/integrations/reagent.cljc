@@ -4,11 +4,16 @@
 
 #?(:cljs
    (extend-type ratom/Reaction
-     r/IDispose
-     (r/get-dispose-fns [^ratom/Reaction this]
-       (vec (.-on-dispose-arr this)))
-     (r/set-dispose-fns! [^ratom/Reaction this new-fns]
-       (set! (.-on-dispose-arr this) (to-array new-fns)))))
+     r/ICountReferences
+     (r/dispose! [this] (ratom/dispose! this))
+     (r/add-on-dispose! [this f] (ratom/add-on-dispose! this f))
+     (r/get-watches [^ratom/Reaction this] (.-watches this))
+     (r/set-watches! [^ratom/Reaction this watches] (set! (.-watches this) watches))
+     (r/independent? [^ratom/Reaction this] (.-independent? this))
+     (r/independent! [^ratom/Reaction this]
+       (set! (.-independent? this) true)
+      @this
+      this)))
 
 #?(:cljs
    (extend-type r/Reaction

@@ -1,4 +1,4 @@
-(ns re-db.sync.transit
+(ns re-db.transit
   (:require [cognitect.transit :as t]
             [re-db.api :as d])
   #?(:clj (:import (java.io ByteArrayOutputStream ByteArrayInputStream))))

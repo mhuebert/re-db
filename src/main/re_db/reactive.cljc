@@ -1,68 +1,161 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [-peek peek atom])
-  (:require [re-db.util :as util]
-            [re-db.macros :as macros])
+  (:require [re-db.macros :as macros]
+            [re-db.util :as util])
   #?(:cljs (:require-macros re-db.reactive)))
 
-;; clear subscriptions before re-evaluating this namespace
-;; to avoid problems with redefined protocols
-(when-let [clear-subs (resolve 're-db.subscriptions/clear-subscription-cache!)]
-  (@clear-subs))
+(defprotocol ICountReferences
+  "Protocol for types that track watches and dispose when unwatched.
 
+   An instance can be independent, which means it remains active regardless of watched status
+   and will never be automatically disposed."
+  (get-watches [this])
+  (set-watches! [this new-watches])
+  (add-on-dispose! [this f])
+  (dispose! [this])
+  (independent! [this] "Compute immediately and remain active even when unwatched")
+  (independent? [this]))
 
-;; TODO - write tests for re-registering reactions
+(extend-protocol ICountReferences
+  #?(:clj Object :cljs object)
+  (get-watches [this] this)
+  (set-watches! [this new-watches] this)
+  (add-on-dispose! [this f] this)
+  (dispose! [this] this)
+  (independent! [this] this)
+  (independent? [this] true))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Invalidation - for recomputing reactive sources
-
-(defprotocol ICompute
-  (compute [this])
-  (invalidate! [this]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Disposal - for side effecting cleanup
-
-(defprotocol IDispose
-  (get-dispose-fns [this])
-  (set-dispose-fns! [this fns])
-  (on-dispose [this]))
-
+(def empty-watches {})
 (def empty-dispose-fns [])
 
-(defn dispose! [this]
-  (on-dispose this)
-  (let [dispose-fns (get-dispose-fns this)]
-    (set-dispose-fns! this [])
-    (doseq [f dispose-fns] (f this)))
-  nil)
-
-(defn add-on-dispose!
-  ([this f]
-   (set-dispose-fns! this (conj (get-dispose-fns this) f)))
-  ([this f & fns] (set-dispose-fns! this (apply conj (get-dispose-fns this) f fns))))
+(defn notify-watches [ref old-val new-val]
+  (doseq [[k f] (get-watches ref)] (f k ref old-val new-val)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Ownership - for multiple purposes: dependency tracking, disposal, hooks,
 
-(def ^:dynamic *owner* nil)
+(def ^:dynamic *owner*
+  "Owner of the current reactive computation"
+  nil)
 
 #?(:cljs (defonce get-reagent-context (constantly nil)))
 
 (defn owner []
-  (or *owner* #?(:cljs (get-reagent-context))))
+  #?(:clj  *owner*
+     :cljs (or *owner* (get-reagent-context))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Access to 'watches' field for copying watches
 
-(defprotocol IWatchable*
-  (get-watches [this])
-  (set-watches! [this new-watches])
-  (notify-watches! [this old-val new-val]))
+(declare ^:dynamic *captured-derefs*)
+
+(defprotocol IPeek
+  "for reading reactive values without triggering a dependency relationship.
+   Note: this does not trigger computation of disposed/inactive sources."
+  (-peek [this]))
+
+(defn peek [this]
+  (if (satisfies? IPeek this) (-peek this) (macros/without-deref-capture @this)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Deref Capture - for dependency on reactive sources
 
-(defprotocol ICaptureDerefs
+(defn become
+  "Moves all watches from `old-ref` to a new ref, and calls `notify-watches` if the
+   value has changed. The new ref is created via `init-fn` after the old ref is disposed."
+  ;; https://gbracha.blogspot.com/2009/07/miracle-of-become.html
+  [old-ref init-fn]
+  (let [old-watches (get-watches old-ref)
+        old-val (peek old-ref)]
+    (dispose! old-ref)
+    (let [to (init-fn old-val)]
+      (doseq [[consumer f] old-watches]
+        (add-watch to consumer f))
+      (let [new-val @to]
+        (when (not= old-val new-val)
+          (notify-watches to old-val new-val)))
+      to)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Reactive Atom - for holding values, with reference tracking and disposal
+
+(declare collect-deref!)
+
+(util/support-clj-protocols
+  (deftype RAtom [^:volatile-mutable state
+                  ^:volatile-mutable watches
+                  ^:volatile-mutable meta
+                  ^:volatile-mutable dispose-fns
+                  ^:volatile-mutable independent]
+    ICountReferences
+    (get-watches [this] watches)
+    (set-watches! [this! new-watches] (set! watches new-watches))
+    (independent? [this] independent)
+    (independent! [this]
+      (when-not independent
+        (set! independent true)))
+    (add-on-dispose! [this f]
+      (macros/set-swap! dispose-fns conj f))
+    (dispose! [this]
+      (doseq [f dispose-fns] (f this))
+      (macros/set-swap! dispose-fns empty))
+    IMeta
+    (-meta [this] meta)
+    IPeek
+    (-peek [this] state)
+    IDeref
+    (-deref [this]
+      (collect-deref! this)
+      state)
+    IReset
+    (-reset! [this new-val]
+      (let [old-val state]
+        (set! state new-val)
+        (notify-watches this old-val new-val)
+        new-val))
+    ISwap
+    (-swap! [this f] (reset! this (f state)))
+    (-swap! [this f x] (reset! this (f state x)))
+    (-swap! [this f x y] (reset! this (f state x y)))
+    (-swap! [this f x y args] (reset! this (apply f state x y args)))
+    IWatchable
+    (-add-watch [this key f]
+      (macros/set-swap! watches assoc key f)
+      this)
+    (-remove-watch [this key]
+      (macros/set-swap! watches dissoc key)
+      (when (and (empty? watches) (not independent))
+        (dispose! this))
+      this)))
+
+(defn atom
+  ([initial-value]
+   (->RAtom initial-value {} {} [] false))
+  ([initial-value & {:keys [meta independent on-dispose]
+                     :or {meta {}
+                          independent false}}]
+   (->RAtom initial-value
+            empty-watches
+            meta
+            (cond-> empty-dispose-fns
+                    on-dispose
+                    (conj on-dispose))
+            independent)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defprotocol ICompute
+  "Protocol for reactive sources that compute their own value"
+  (compute! [this] "(re)compute the value of this")
+  (inactive? [this] "the instance does not have a valid value and must be (re)computed"))
+
+(extend-protocol ICompute
+  #?(:clj Object :cljs object)
+  (compute! [this] this)
+  (inactive? [this] false))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Deref Tracking - for implicitly recording dependencies via `deref`
+
+(defprotocol ITrackDerefs
+  "for dependency on reactive sources"
   (get-derefs [this])
   (set-derefs! [this new-derefs]))
 
@@ -78,7 +171,7 @@
   (let [derefs (get-derefs consumer)
         [added removed] (util/set-diff (util/guard derefs seq)
                                        (util/guard new-derefs seq))]
-    (doseq [producer added] (add-watch producer consumer (fn [_ _ _ _] (invalidate! consumer))))
+    (doseq [producer added] (add-watch producer consumer (fn [_ _ _ _] (compute! consumer))))
     (doseq [producer removed] (remove-watch producer consumer))
     (set-derefs! consumer new-derefs)
     consumer))
@@ -91,20 +184,9 @@
   (->> @*captured-derefs*
        (into #{} (map (comp :pattern meta)))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Peek - for reading a reactive value without triggering a dependency
-
-(defprotocol IPeek
-  (-peek [this]))
-
-(defn peek [this]
-  (if (satisfies? IPeek this) (-peek this) (macros/without-deref-capture @this)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Hooks - for composable side-effects within reactions (modeled on React hooks).
-;; See `re-db.hooks` for API.
-
 (defprotocol IHook
+  "for composable side-effects within reactions (modeled on React hooks).
+   See re-db.hooks for the api."
   (get-hooks [this])
   (set-hooks! [this hooks]))
 
@@ -138,38 +220,58 @@
             :let [dispose (:dispose @hook)]]
       (when dispose (dispose)))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Reactive Atom - simplest building-block
-
-(defn notify-watches [ref old-val new-val watches]
-  (doseq [[k f] watches] (f k ref old-val new-val)))
-
-(defprotocol IUpdateMeta
-  (update-meta! [x f] [x f a] [x f a b]))
 
 (util/support-clj-protocols
-  (deftype RAtom [^:volatile-mutable state ^:volatile-mutable watches ^:volatile-mutable meta]
-    IWatchable*
+  (deftype Reaction
+    [^:volatile-mutable f
+     ^:volatile-mutable state
+     ^:volatile-mutable derefs
+     ^:volatile-mutable hooks
+     ^:volatile-mutable dispose-fns
+     ^:volatile-mutable watches
+     ^:volatile-mutable metadata
+     ^:volatile-mutable inactive
+     ^:volatile-mutable independent]
+    ICountReferences
     (get-watches [this] watches)
-    (set-watches! [this! new-watches] (set! watches new-watches))
-    (notify-watches! [this old-val new-val] (notify-watches this old-val new-val watches))
+    (set-watches! [this new-watches] (set! watches new-watches))
+    (independent? [this] independent)
+    (independent! [this]
+      (when-not independent
+        (set! independent true)
+        (compute! this))
+      this)
+    (add-on-dispose! [this f]
+      (macros/set-swap! dispose-fns conj f))
+    (dispose! [this]
+      (dispose-derefs! this)
+      (dispose-hooks! this)
+      (set! inactive true)
+      (doseq [f dispose-fns] (f this))
+      (macros/set-swap! dispose-fns empty))
     IMeta
-    (-meta [this] meta)
-    IUpdateMeta
-    (update-meta! [this f] (set! meta (f meta)) this)
-    (update-meta! [this f a] (set! meta (f meta a)) this)
-    (update-meta! [this f a b] (set! meta (f meta a b)) this)
-    IPeek
-    (-peek [this] state)
+    (-meta [this] metadata)
+    IHook
+    (get-hooks [this] hooks)
+    (set-hooks! [this new-hooks] (set! hooks new-hooks))
+
     IDeref
     (-deref [this]
-      (collect-deref! this)
+
+      (when-not (identical? *owner* this)
+        (collect-deref! this))
+
+      (when inactive (compute! this))
+
       state)
+
+    IPeek
+    (-peek [this] state)
     IReset
     (-reset! [this new-val]
       (let [old-val state]
         (set! state new-val)
-        (notify-watches! this old-val new-val)
+        (notify-watches this old-val new-val)
         new-val))
     ISwap
     (-swap! [this f] (reset! this (f state)))
@@ -178,149 +280,58 @@
     (-swap! [this f x y args] (reset! this (apply f state x y args)))
     IWatchable
     (-add-watch [this key f]
+
+     ;; if the reaction is not yet initialized, do it here (before adding the watch,
+     ;; so that the watch-fn is not called here)
+      (when inactive (compute! this))
+
       (macros/set-swap! watches assoc key f)
       this)
     (-remove-watch [this key]
       (macros/set-swap! watches dissoc key)
-      this)))
-
-(defn atom
-  ([initial-value]
-   (->RAtom initial-value {} {}))
-  ([initial-value meta]
-   (->RAtom initial-value {} meta)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Reaction - reactive source derived from a `compute` function which "captures" dependencies
-;;   dereferenced during evaluation. (modeled on Reagent reactions)
-
-(util/support-clj-protocols
-  (deftype Reaction
-    [^:volatile-mutable f ratom ^:volatile-mutable derefs ^:volatile-mutable hooks ^:volatile-mutable dispose-fns !inactive? !eager?]
-    IWatchable*
-    (get-watches [this] (get-watches ratom))
-    (set-watches! [this new-watches] (set-watches! ratom new-watches))
-    (notify-watches! [this old-val new-val] (notify-watches this old-val new-val (get-watches ratom)))
-    IMeta
-    (-meta [this] (meta ratom))
-    IUpdateMeta
-    (update-meta! [this f] (update-meta! ratom f))
-    (update-meta! [this f a] (update-meta! ratom f a))
-    (update-meta! [this f a b] (update-meta! ratom f a b))
-    IHook
-    (get-hooks [this] hooks)
-    (set-hooks! [this new-hooks] (set! hooks new-hooks))
-    IDispose
-    (get-dispose-fns [this] dispose-fns)
-    (set-dispose-fns! [this new-dispose-fns] (set! dispose-fns new-dispose-fns))
-    (on-dispose [this]
-      (dispose-derefs! this)
-      (dispose-hooks! this)
-      (vreset! !inactive? true)
-     ;; clean up the atom's watches
-      (when-let [ks (seq (keys (get-watches ratom)))]
-        (doseq [k ks]
-          (when (identical? (type k) Reaction)
-            (prn "Disposing a reaction that is a dependency of another reaction"
-                 :this (peek ratom)
-                 :other (peek k)))
-          (remove-watch ratom k))))
-
-    IDeref
-    (-deref [this]
-
-      (when-not (identical? *owner* this)
-        (collect-deref! this))
-
-      (when @!inactive? (invalidate! this))
-
-      (peek ratom))
-
-    IPeek
-    (-peek [this] (-peek ratom))
-    IReset
-    (-reset! [this new-val] (reset! ratom new-val))
-    ISwap
-    (-swap! [this f] (reset! ratom (f (peek ratom))))
-    (-swap! [this f x] (reset! ratom (f (peek ratom) x)))
-    (-swap! [this f x y] (reset! ratom (f (peek ratom) x y)))
-    (-swap! [this f x y args] (reset! ratom (apply f (peek ratom) x y args)))
-    IWatchable
-    (-add-watch [this key f]
-
-     ;; if the reaction is not yet initialized, do it here (before adding the watch,
-     ;; so that the watch-fn is not called here)
-      (when @!inactive? (invalidate! this))
-
-      (add-watch ratom key f)
-      this)
-    (-remove-watch [this key]
-      (remove-watch ratom key)
-      (when (and (empty? (get-watches ratom)) (not @!eager?))
+      (when (and (empty? watches) (not independent))
         (dispose! this))
       this)
-    ICaptureDerefs
+    ITrackDerefs
     (get-derefs [this] derefs)
     (set-derefs! [this new-derefs] (set! derefs new-derefs))
     ICompute
-    (compute [this] (f))
-    (invalidate! [this]
-      (vreset! !inactive? false)
+    (inactive? [this] inactive)
+    (compute! [this]
+      (set! inactive false)
       (let [new-val (macros/with-owner this
                       (macros/with-hook-support!
                        (macros/with-deref-capture! this
                          (f))))]
-        (when (not= (peek ratom) new-val)
-          (reset! ratom new-val))
+        (when (not= state new-val)
+          (reset! this new-val))
         this))))
 
-(defn migrate-watches!
-  "Utility for transparently swapping out a watchable while keeping watches informed"
-  [watches old-val to]
-  (when (seq watches)
-    (doseq [[consumer f] watches]
-      (add-watch to consumer f))
-    (let [new-val @to]
-      (when (not= old-val new-val)
-        (notify-watches! to old-val new-val))))
-  to)
-
-(defn conj-some
-  "Conj non-nil values to coll"
-  ([coll x]
-   (cond-> coll (some? x) (conj x)))
-  ([coll x & args]
-   (reduce conj-some (conj-some coll x) args)))
-
 (defn make-reaction [compute-fn & {:as opts
-                                   :keys [init meta on-dispose inactive? eager?]
-                                   :or {inactive? true
-                                        eager? false}}]
+                                   :keys [init
+                                          meta
+                                          on-dispose
+                                          inactive
+                                          independent]
+                                   :or {inactive true
+                                        independent false}}]
   (cond-> (->Reaction compute-fn
-                      (atom init meta)
+                      init
                       empty-derefs
                       empty-hooks
                       (if on-dispose [on-dispose] empty-dispose-fns)
-                      (volatile! inactive?)
-                      (volatile! eager?))
-          eager? invalidate!))
-
-(defn eager!
-  "Computes a reaction immediately and remains active until explicitly disposed."
-  [#?(:clj ^re_db.reactive.Reaction rx :cljs ^Reaction rx)]
-  (let [!e (.-!eager? rx)]
-    (when-not @!e
-      (vreset! !e true)
-      (when @(.-!inactive? rx)
-        (invalidate! rx))))
-  rx)
+                      empty-watches
+                      meta
+                      inactive
+                      independent)
+          independent compute!))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
 ;; clean up afterwards
 
 (defn make-session []
-  (make-reaction (fn []) :inactive? false))
+  (make-reaction (fn []) :inactive false))
 
 (comment
  ;; using a session
@@ -337,7 +348,7 @@
 (defmacro session [& body] `(macros/session ~@body))
 (defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
 (defmacro reaction [& body] (macros/reaction* &form &env body))
-(defmacro reaction! [& body] (concat (macros/reaction* &form &env body) [:eager? true]))
+(defmacro reaction! [& body] (concat (macros/reaction* &form &env body) [:independent true]))
 
 #?(:clj
    (defmethod print-method re_db.reactive.Reaction
@@ -345,7 +356,7 @@
      (#'clojure.core/print-meta rx w)
      (.write w "#")
      (.write w (.getName re_db.reactive.Reaction))
-     (#'clojure.core/print-map (merge {:eager? @(.-!eager? rx)
-                                       :inactive? @(.-!inactive? rx)
+     (#'clojure.core/print-map (merge {:independent (independent? rx)
+                                       :inactive (inactive? rx)
                                        :peek (peek rx)}
                                       (select-keys (meta rx) [:display-name])) #'clojure.core/pr-on w)))

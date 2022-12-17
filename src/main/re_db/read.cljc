@@ -17,10 +17,9 @@
 (defn clear-listeners! [] (swap! !listeners empty))
 
 (defn make-listener [conn e a v]
-  (r/make-reaction (fn [])
-                   :inactive? false
-                   :meta {:pattern [e a v]}
-                   :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v]))))
+  (doto (r/atom nil :meta {:pattern [e a v]})
+    (r/add-on-dispose!
+     (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))))
 
 (defn handle-report!
   "Invalidate readers for a tx-report from conn based on datoms transacted"
@@ -46,7 +45,7 @@
                tx-report)
             invalidated @result]
         #_(prn :invalidating (mapv (comp :pattern meta) invalidated))
-        (doseq [listener invalidated] (r/notify-watches! listener 0 1))
+        (doseq [listener invalidated] (r/notify-watches listener 0 1))
         (assoc tx-report ::handled (count invalidated)))
       tx-report)))
 

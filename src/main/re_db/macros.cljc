@@ -47,9 +47,9 @@
   (reaction* &form &env body))
 
 (defmacro reaction!
-  "Returns an eager reaction: computes immediately, remains active until explicitly disposed."
+  "Returns an independent reaction: computes immediately, remains active until explicitly disposed."
   [& body]
-  (concat (reaction* &form &env body) [:eager? true]))
+  (concat (reaction* &form &env body) [:independent true]))
 
 (defmacro session
   "Evaluate body in a reaction which is immediately disposed"
