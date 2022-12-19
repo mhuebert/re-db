@@ -63,9 +63,8 @@
 
 ;; Show the log using `pprint`:
 
-(memo/once
- (memo/defn-memo $log [!ref n]
-                 (xf/transform !ref (keep identity) (xf/sliding-window n))))
+(memo/defn-memo $log [!ref n]
+  (xf/transform !ref (keep identity) (xf/sliding-window n)))
 
 (show-cljs
  [:div.whitespace-pre-wrap.code.text-xs

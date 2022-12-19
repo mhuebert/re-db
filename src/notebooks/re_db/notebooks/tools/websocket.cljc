@@ -27,7 +27,7 @@
        (sync/watch channel ref-descriptor !ref)
        (println "No ref found" ref-descriptor)))
    :sync/unwatch
-   (fn [{:as context :keys [resolve-ref channel]} context ref-descriptor]
+   (fn [{:as context :keys [resolve-ref channel]} ref-descriptor]
      (if-let [!ref (resolve-ref context ref-descriptor)]
        (sync/unwatch channel !ref)
        (println "No ref found" ref-descriptor)))})
@@ -36,6 +36,7 @@
 ;; passing in the mvec and a context map.
 
 (defn handle-message [context mvec]
+  (prn :mvec mvec)
   (if-let [handler ((:handlers context) (mvec 0))]
     (apply handler context (rest mvec))
     (println (str "Handler not found for: " mvec))))

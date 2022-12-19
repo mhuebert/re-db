@@ -5,6 +5,7 @@
             [re-db.notebooks.sync-editscript]
             [re-db.notebooks.sync-values]
             [re-db.notebooks.test]
+            [re-db.notebooks.test2]
             [re-db.notebooks.tx-reactive]
             [re-db.notebooks.xform]
             [re-db.reactive :as r]))

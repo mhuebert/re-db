@@ -20,7 +20,7 @@
            :clerk {:extra-paths ["src/notebooks"]
                    :extra-deps {io.github.mhuebert/clerk-cljs
                                 {#_#_:local/root "../clerk-cljs"
-                                 :git/sha "fc3dae5dd80bc5bfb79569db8ffea8f6b9e454a7"}
+                                 :git/sha "c00e16de5e7022e0630350b0b0214a596ae87825"}
                                 org.clojure/core.async {:mvn/version "1.6.673"}
                                 http-kit/http-kit {:mvn/version "2.6.0"}
                                 ring/ring {:mvn/version "1.9.6"}
