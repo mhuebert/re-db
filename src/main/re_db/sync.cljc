@@ -28,10 +28,10 @@
    sent when starting a watch."
   [channel descriptor !ref]
   (swap! !watches update channel (fnil conj #{}) !ref)
-  (add-watch !ref channel (fn [_ _ _ value] (send channel [:sync/watched-result descriptor
+  (add-watch !ref channel (fn [_ _ _ value] (send channel [:sync.client/handle-result descriptor
                                                            (dissoc value :sync/init)])))
   (let [v @!ref]
-    (send channel [:sync/watched-result
+    (send channel [:sync.client/handle-result
                    descriptor
                    (or (:sync/init v)
                        (dissoc v :sync/init))])))
@@ -63,21 +63,34 @@
 (defn read-result [qvec]
   (d/get (db-id qvec) :result {:loading? true}))
 
-(defn resolve-message [resolvers prev id m]
-  (reduce-kv (fn [out k v]
-               (if-let [f (resolvers k)]
-                 (let [result (f prev v)]
-                   (-> (merge out result)
-                       (dissoc k)
-                       (assoc :txs ((fnil into [])
-                                    (:txs out)
-                                    (:txs result)))))
-                 out))
-             m
-             (dissoc m :value :error :txs)))
+(defn- merge-result [result1 result2]
+  (let [txs (:txs result2)
+        m (not-empty (dissoc result2 :txs))]
+    (cond-> result1
+            txs (update :txs (fnil into []) txs)
+            m (merge m))))
 
-(defn handle-message [resolvers id message]
-  (let [{:as result :keys [txs]} (resolve-message resolvers (read-result id) id message)
+(defn resolve-message [result-handlers prev result]
+  (reduce-kv (fn [result k v]
+               (if-let [f (get result-handlers k)]
+                 (merge-result result (f prev v))
+                 (if (= k :txs)
+                   (update result :txs (fnil into []) v)
+                   (assoc result k v))))
+             {}
+             result))
+
+(comment
+ (resolve-message {:prefix (fn [{:keys [value]} prefix]
+                             {:value (str prefix value)
+                              :txs [[:db/add \a \b \c]]})}
+                  {:value "Hello"}
+                  {:prefix "PRE-"}))
+
+(defn transact-result [result-handlers id message]
+
+  (let [prev-result (read-result id)
+        {:as result :keys [txs]} (resolve-message result-handlers prev-result message)
         result (not-empty (dissoc result :txs))
         txs (cond-> []
                     result (conj [:db/add (db-id id) :result result])
@@ -87,7 +100,8 @@
 (memo/defn-memo $values
   "Stream of :sync/snapshot events associating `id` with values of `!ref`"
   [!ref]
-  (xf/map (fn [value] {:value value}) !ref))
+  (xf/transform !ref
+    (map (fn [value] {:value value}))))
 
 
 ;; Channel lifecycle functions (to be called at appropriate stages of a long-lived server connection)
@@ -96,7 +110,7 @@
   "Call when a (server) channel opens to initiate watches"
   [channel]
   (doseq [[qvec _] (@!watching channel)]
-    (send channel [:sync/watch qvec])))
+    (send channel [:sync.server/watch qvec])))
 
 (defn on-close
   "Call when a (client) channel closes top stop watches"
@@ -108,15 +122,38 @@
 (memo/defn-memo $watch
   "Watch a server-side value (by id). Returns map containing one of {:value, :error, :loading?}"
   [channel qvec]
-  (send channel [:sync/watch qvec])
+  (send channel [:sync.server/watch qvec])
   (let [rx (r/reaction
             (hooks/use-on-dispose
              (fn []
                (swap! !watching update channel dissoc qvec)
-               (send channel [:sync/unwatch qvec])))
+               (send channel [:sync.server/unwatch qvec])))
             (read-result qvec))]
     (swap! !watching update channel assoc qvec rx)
     rx))
+
+(defn watch-handlers [& {:keys [result-handlers
+                                resolve-ref]
+                         :or {result-handlers {}
+                              resolve-ref {}}}]
+  {:sync.client/handle-result
+   (fn [_ id target]
+     (transact-result result-handlers id target))
+   :sync.server/watch
+   (fn [{:keys [channel]} ref-id]
+     (if-let [!ref (resolve-ref ref-id)]
+       (watch channel ref-id !ref)
+       (println "No ref found" ref-id)))
+   :sync.server/unwatch
+   (fn [{:as context :keys [channel]} ref-id]
+     (if-let [!ref (resolve-ref ref-id)]
+       (unwatch channel !ref)
+       (println "No ref found" ref-id)))})
+
+(defn handle-message [handlers context mvec]
+  (if-let [handler (handlers (mvec 0))]
+    (apply handler context (rest mvec))
+    (println (str "Handler not found for: " mvec))))
 
 (comment
  ;; convenience subscription -  should go somewhere else

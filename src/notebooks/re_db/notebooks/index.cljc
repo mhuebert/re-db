@@ -2,7 +2,7 @@
   "Root namespace for all cljc notebooks (including notebooks here is required for using cljs in the notebook)"
   (:require [nextjournal.clerk.viewer :as v]
             [re-db.notebooks.local]
-            [re-db.notebooks.sync-editscript]
+            [re-db.notebooks.sync-edits]
             [re-db.notebooks.sync-values]
             [re-db.notebooks.test]
             [re-db.notebooks.test2]

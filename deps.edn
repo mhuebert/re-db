@@ -10,8 +10,8 @@
            :datahike {:extra-deps {io.replikativ/datahike {:mvn/version "0.5.1504"}}}
            :datalevin {:jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                                   "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]
-                       :extra-deps {datalevin/datalevin {:mvn/version "0.6.14"}}}
-           :dev {:extra-deps {thheller/shadow-cljs {:mvn/version "2.20.13"}
+                       :extra-deps {datalevin/datalevin {:mvn/version "0.7.7"}}}
+           :dev {:extra-deps {thheller/shadow-cljs {:mvn/version "2.20.16"}
                               com.bhauman/cljs-test-display {#_#_:mvn/version "0.1.1"
                                                              :git/sha "76905766a8c13a95f2fb93ed2a54fa7b2343db20"
                                                              :git/url "https://github.com/mhuebert/cljs-test-display"}}}
@@ -20,7 +20,7 @@
            :clerk {:extra-paths ["src/notebooks"]
                    :extra-deps {io.github.mhuebert/clerk-cljs
                                 {#_#_:local/root "../clerk-cljs"
-                                 :git/sha "c00e16de5e7022e0630350b0b0214a596ae87825"}
+                                 :git/sha "ededa9e9d0508b31edce5cd33c336f204593a35b"}
                                 org.clojure/core.async {:mvn/version "1.6.673"}
                                 http-kit/http-kit {:mvn/version "2.6.0"}
                                 ring/ring {:mvn/version "1.9.6"}

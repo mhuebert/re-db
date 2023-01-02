@@ -1,71 +1,59 @@
 ^{:nextjournal.clerk/visibility {:code :hide :result :hide}}
 (ns re-db.notebooks.sync-values
-  (:require [clojure.core.match :refer [match]]
-            [clojure.pprint :refer [pprint]]
+  (:require [clojure.pprint :refer [pprint]]
             [mhuebert.clerk-cljs :refer [show-cljs]]
             [nextjournal.clerk :as-alias clerk]
             [re-db.integrations.reagent]
+            [re-db.memo :as memo]
             [re-db.notebooks.tools.websocket :as ws]
             [re-db.sync :as sync]
             [re-db.xform :as xf]
-            [re-db.hooks :as hooks]
-            [re-db.memo :as memo]
-            #?(:cljs [nextjournal.clerk.render :as render])
-            [re-db.reactive :as r]))
+            #?(:cljs [nextjournal.clerk.render :as render])))
 
-;; resolve-ref: from a descriptor (+ context) to a stream
+;; In this namespace we'll sync the contents of an atom, !list.
+(defonce !list (atom ()))
 
-;; # Sync
+;; $values is a memoized transform of a ref which wraps values in a {:value _} map.
 
-;; This namespace demonstrates how to sync data from a server to client using
-;; `re-db.sync.server` and `re-db.sync.client`. We'll use _subscriptions_ to let multiple
-;; clients re-use the same data streams, and _transducers_ to flexibly transform these
-;; streams.
+(memo/defn-memo $values [ref]
+  (xf/transform ref
+    (map (fn [v] {:value v}))))
 
-;; For example purposes, we've implemented a basic websocket connection for passing
-;; _messages_ between a client and server (see `re-db.notebooks.tools.websocket`).
+(show-cljs
+  (let [my-atom (atom 1)]
+    {:atom @my-atom
+     :$values @($values my-atom)}))
 
-;; ## Watch and Unwatch
-
-
-(defonce !counter (atom 0))
-
-;; Let's start a websocket server, passing in our `handle-message` function for messages and
-;; `sync/unwatch-all` for close events. This is clj-only. (We're using a tiny websocket server
-;; implemented on top of http-kit in `re-db.notebooks.tools.websocket`)
-
+;; A websocket server (clj, runs on the jvm):
 #?(:clj
-   (defonce server
+   (def server
      (ws/serve {:port 9060
-                :path "/ws"
-                :resolve-ref (fn [context descriptor]
-                               (match descriptor :counter (sync/$values !counter)))})))
+                :handlers (merge
+                           (sync/watch-handlers :resolve-ref {:list ($values !list)})
+                           {:conj! (fn [_] (swap! !list conj (rand-int 100)))})})))
 
+;; A websocket channel (cljs, runs in the browser):
 (show-cljs
- (defonce channel (ws/connect {:port 9060
-                               :path "/ws"})))
+  (defonce channel
+    (ws/connect {:port 9060
+                 :handlers (sync/watch-handlers)})))
 
-;; To watch a query, we use `re-db.client/$watch` subscription, passing it the
-;; mvec `[:counter]`. It returns a map containing one of `:loading?`, `:error` or `:value`.
-
+;; Show the result of watching `:list` (as exposed in `!refs`):
 (show-cljs
+  (let [result @(sync/$watch channel :list)]
 
- (let [result @(sync/$watch channel :counter)]
-   (cond (:loading? result) "loading..."
-         (:error result) [:div "Error: " (:error result)]
-         :else [:div.text-xl.bg-slate-600.text-white.inline-block.p-3.rounded
-                [:span.font-bold (:value result)]])))
+    (render/inspect (or (:value result) result))))
 
-;; Try incrementing the counter (on click, it uses `clerk-eval` to run code in the JVM environment)
+;; Modify the list:
 (show-cljs
- [:button.p-2.rounded.bg-blue-100
-  {:on-click #(render/clerk-eval '(swap! !counter inc))} "Number, go up!"])
-
-;; Show the log using `pprint`:
+  [:button.p-2.rounded.bg-blue-100
+   {:on-click #(sync/send channel [:conj!])}
+   "List, grow!"])
 
 (memo/defn-memo $log [!ref n]
   (xf/transform !ref (keep identity) (xf/sliding-window n)))
 
+;; Show a log of events:
 (show-cljs
- [:div.whitespace-pre-wrap.code.text-xs
-  (with-out-str (pprint @($log (:!last-message @channel) 10)))])
+  [:div.whitespace-pre-wrap.code.text-xs
+   (with-out-str (pprint @($log (:!last-message @channel) 10)))])

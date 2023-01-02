@@ -24,29 +24,18 @@
 (defn transform
   "Streams values from ref into a new ratom, applying any supplied xforms (transducers)"
   [ref & xforms]
-  (let [key (gensym "stream")
-        f (step (apply comp xforms))
-        !initialized? (volatile! false)]
+  (let [f (step (apply comp xforms))]
     (r/reaction
-     (let [[new-source set-source!] (hooks/use-state nil)]
-
+     (let [this r/*owner*]
        (hooks/use-effect
-        ;; watch is added immediately on init, which also activates/invalidates the source .
         (fn []
-          (add-watch ref key (fn [_ _ _ new-value] (set-source! new-value)))
-          #(remove-watch ref key)))
-
-       (let [prev (r/peek r/*owner*)
-             next-step (f (if @!initialized?
-                            new-source
-                            (do
-                              (vreset! !initialized? true)
-                              (r/peek ref))))
-             next-value (case next-step
-                          ::no-op prev
-                          ::done (do (remove-watch ref key) prev)
-                          next-step)]
-         next-value)))))
+          (add-watch ref this (fn [_ _ _ _] (r/compute! this)))
+          #(remove-watch ref this)))
+       (let [next-step (f (r/peek ref))]
+         (case next-step
+           ::no-op (r/peek this)
+           ::done (do (remove-watch ref this) (r/peek this))
+           next-step))))))
 
 (defn map [f source]
   (transform source (clojure.core/map f)))

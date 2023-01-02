@@ -9,8 +9,32 @@
   (shadow/watch :clerk)
   (swap! config/!resource->url merge {"/js/viewer.js" "http://localhost:8008/clerk/clerk.js"})
   (clerk/serve! {:browse? true
-                 :watch-paths ["src/notebooks"]}))
+                 :watch-paths ["src/notebooks"]})
+
+  (eval '(do (in-ns 'nextjournal.clerk.analyzer)
+            (defn hash-codeblock [->hash {:as codeblock :keys [hash form id deps vars]}]
+              (let [->hash' (if (and (not (ifn? ->hash)) (seq deps))
+                              (binding [*out* *err*]
+                                (println "->hash must be `ifn?`" {:->hash ->hash :codeblock codeblock})
+                                identity)
+                              ->hash)
+                    hashed-deps (into #{} (map ->hash') deps)]
+                (sha1-base58 (binding [*print-length* nil]
+                               (pr-str (set/union (conj hashed-deps id)
+                                                  vars)))))))))
 
 (comment
  (start)
- (clerk/clear-cache!))
+ (clerk/clear-cache!)
+
+ (do (in-ns 'nextjournal.clerk.analyzer)
+     (defn hash-codeblock [->hash {:as codeblock :keys [hash form id deps vars]}]
+       (let [->hash' (if (and (not (ifn? ->hash)) (seq deps))
+                       (binding [*out* *err*]
+                         (println "->hash must be `ifn?`" {:->hash ->hash :codeblock codeblock})
+                         identity)
+                       ->hash)
+             hashed-deps (into #{} (map ->hash') deps)]
+         (sha1-base58 (binding [*print-length* nil]
+                        (pr-str (set/union (conj hashed-deps id)
+                                           vars))))))))
