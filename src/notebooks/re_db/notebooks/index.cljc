@@ -3,10 +3,10 @@
   (:require [nextjournal.clerk.viewer :as v]
             [re-db.notebooks.local]
             [re-db.notebooks.sync-edits]
+            [re-db.notebooks.sync-tx]
             [re-db.notebooks.sync-values]
             [re-db.notebooks.test]
             [re-db.notebooks.test2]
-            [re-db.notebooks.tx-reactive]
             [re-db.notebooks.xform]
             [re-db.reactive :as r]))
 
