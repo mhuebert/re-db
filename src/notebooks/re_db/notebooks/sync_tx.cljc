@@ -24,20 +24,25 @@
   (->> (mem/transact! conn txs)
        (read/handle-report! conn)))
 
-;; an atom of ref-resolvers. To watch a query we'll pass in a vector beginning with a query-id,
-;; followed by (optional) arguments.
-(def !ref-resolvers (atom {:entity
-                           (memo/fn-memo [id]
-                             (q/reaction conn {:value (db/get id)}))}))
+
+;; an atom of refs to expose, a map of ids to functions which return reactions.
+;; refs are requested via vectors of the form [<id> & args].
+(def !refs
+  (atom
+   {:entity-1 (constantly (q/reaction conn {:value (db/get 1)}))
+    :entity (fn [id] (q/reaction conn {:value (db/get id)}))}))
 
 ;; A websocket server (clj, runs on the jvm):
 #?(:clj
    (def server
      (ws/serve :port 9062
                :handlers (merge
-                          (sync/watch-handlers :resolve-ref
-                                               (fn [[id & args]]
-                                                 (apply (@!ref-resolvers id) args)))
+                          (sync/watch-handlers :resolve-refs
+                                               (memo/fn-memo [ref-id]
+                                                 (let [[id & args] (if (sequential? ref-id)
+                                                                   ref-id
+                                                                   [ref-id])]
+                                                   (apply (@!refs id) args))))
                           {:db/add! (fn [context e a v]
                                       (transact! [[:db/add e a v]]))}))))
 
@@ -48,22 +53,38 @@
                 :handlers (sync/watch-handlers))))
 
 
-;; Show the result of watching `:entity`  of id `1` (as exposed in `!ref-resolvers`):
+
+;; Show `:entity-1`
 (show-cljs
-  (let [result @(sync/$watch channel [:entity 1])]
+  (let [result @(sync/$watch channel :entity-1)]
     (render/inspect
      (or (:value result) result))))
 
-;; Modify the list:
+^{::clerk/visibility {:code :hide}}
 (show-cljs
   [:button.p-2.rounded.bg-blue-100
-   {:on-click #(sync/send channel [:db/add! 1 (rand-nth [:a :b]) (rand-int 100)])}
-   "Attr, update!"])
+   {:on-click #(sync/send channel [:db/add! 1 :E1 (rand-int 100)])}
+   "Modify entity 1"])
 
+;; Show `[:entity 2]`
+(show-cljs
+  (let [result @(sync/$watch channel [:entity 2])]
+    (render/inspect
+     (or (:value result) result))))
+
+^{::clerk/visibility {:code :hide}}
+(show-cljs
+  [:button.p-2.rounded.bg-blue-100
+   {:on-click #(sync/send channel [:db/add! 2 :A (rand-int 100)])}
+   "Modify entity 2"])
+
+
+^{::clerk/visibility {:code :hide :result :hide}}
 (memo/defn-memo $log [!ref n]
   (xf/transform !ref (keep identity) (xf/sliding-window n)))
 
 ;; Show a log of events:
+^{::clerk/visibility {:code :hide}}
 (show-cljs
   [:div.whitespace-pre-wrap.code.text-xs
    (with-out-str (pprint @($log (:!last-message @channel) 10)))])

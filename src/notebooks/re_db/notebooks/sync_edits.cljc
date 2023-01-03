@@ -38,7 +38,7 @@
    (def server
      (ws/serve :port 9061
                :handlers (merge
-                          (sync/watch-handlers :resolve-ref {:list ($edits !list)})
+                          (sync/watch-handlers :resolve-refs {:list ($edits !list)})
                           {:conj! (fn [_] (swap! !list conj (rand-int 100)))}))))
 
 ;; A websocket channel (cljs, runs in the browser):

@@ -133,20 +133,20 @@
     rx))
 
 (defn watch-handlers [& {:keys [result-handlers
-                                resolve-ref]
+                                resolve-refs]
                          :or {result-handlers {}
-                              resolve-ref {}}}]
+                              resolve-refs {}}}]
   {:sync.client/handle-result
    (fn [_ id target]
      (transact-result result-handlers id target))
    :sync.server/watch
    (fn [{:keys [channel]} ref-id]
-     (if-let [!ref (resolve-ref ref-id)]
+     (if-let [!ref (resolve-refs ref-id)]
        (watch channel ref-id !ref)
        (println "No ref found" ref-id)))
    :sync.server/unwatch
    (fn [{:as context :keys [channel]} ref-id]
-     (if-let [!ref (resolve-ref ref-id)]
+     (if-let [!ref (resolve-refs ref-id)]
        (unwatch channel !ref)
        (println "No ref found" ref-id)))})
 
