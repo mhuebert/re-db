@@ -7,6 +7,7 @@
             [re-db.memo :as memo]
             [re-db.notebooks.tools.websocket :as ws]
             [re-db.sync :as sync]
+            [re-db.notebooks.tools.sync :as tools.sync]
             [re-db.xform :as xf]
             #?(:cljs [nextjournal.clerk.render :as render])))
 
@@ -19,30 +20,24 @@
   (xf/transform ref
     (map (fn [v] {:value v}))))
 
-(show-cljs
-  (let [my-atom (atom 1)]
-    {:atom @my-atom
-     :$values @($values my-atom)}))
-
 ;; A websocket server (clj, runs on the jvm):
 #?(:clj
    (def server
      (ws/serve {:port 9060
                 :handlers (merge
-                           (sync/watch-handlers :resolve-refs {:list ($values !list)})
+                           (tools.sync/make-handlers :resolve-refs {:list ($values !list)})
                            {:conj! (fn [_] (swap! !list conj (rand-int 100)))})})))
 
 ;; A websocket channel (cljs, runs in the browser):
 (show-cljs
   (defonce channel
     (ws/connect {:port 9060
-                 :handlers (sync/watch-handlers)})))
+                 :handlers (tools.sync/make-handlers)})))
 
 ;; Show the result of watching `:list` (as exposed in `!refs`):
 (show-cljs
-  (let [result @(sync/$watch channel :list)]
-
-    (render/inspect (or (:value result) result))))
+  (let [result @(sync/$query channel :list)]
+    (render/inspect (:value result result))))
 
 ;; Modify the list:
 (show-cljs
@@ -56,4 +51,4 @@
 ;; Show a log of events:
 (show-cljs
   [:div.whitespace-pre-wrap.code.text-xs
-   (with-out-str (pprint @($log (:!last-message @channel) 10)))])
+   (with-out-str (pprint @($log (:!last-message channel) 10)))])

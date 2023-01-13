@@ -15,36 +15,52 @@
 ;; Channels - long-lived connections to peers
 ;; A channel must be an atom containing a `:send` function
 
-(defn send [channel message] ((:send @channel) message))
+(defn send [channel message]
+  (let [send-fn (or (::send channel)
+                    (::send (meta channel)))]
+    (assert send-fn (str "send-fn not present on channel" channel))
+    (send-fn message)))
+
+(defn uid-channel
+  "Returns a channel (supporting `send`) given a primitive uid and send-fn"
+  [uid send-fn]
+  (with-meta [uid] {::send send-fn}))
+
+(defn value [x] {:value x})
+(defn error [x] {:error x})
+(defn result [id x] [::result id x])
 
 ;; **Watches** - local refs being sent to connected peers
 
 ;; map of {client-channel, #{...refs}}
 (defonce !watches (atom {}))
+(defonce !last-event  (atom nil))
 
 (defn watch
   "Adds watch for a local ref, sending messages to client via :re-db.sync/tx messages.
    A ref's value may specify `:sync/snapshot` metadata to override the initial message
    sent when starting a watch."
-  [channel descriptor !ref]
+  [channel query-id !ref]
+  (reset! !last-event {:event :watch-ref :channel channel :query-id query-id})
+  (r/update-meta! !ref assoc ::query-id query-id) ;; mutate meta of !ref to include query-id for monitoring
   (swap! !watches update channel (fnil conj #{}) !ref)
-  (add-watch !ref channel (fn [_ _ _ value] (send channel [:sync.client/handle-result descriptor
-                                                           (dissoc value :sync/init)])))
+  (add-watch !ref channel (fn [_ _ _ value]
+                            (send channel (result query-id (dissoc value ::init)))))
   (let [v @!ref]
-    (send channel [:sync.client/handle-result
-                   descriptor
-                   (or (:sync/init v)
-                       (dissoc v :sync/init))])))
+    (send channel (result query-id (or (::init v)
+                                       (dissoc v ::init))))))
 
 (defn unwatch
   "Removes watch for ref."
   [channel !ref]
+  (reset! !last-event {:event :watch-ref :channel channel :query-id (::query-id (meta !ref))})
   (swap! !watches update channel disj !ref)
   (remove-watch !ref channel))
 
 (defn unwatch-all
   "Removes all watches for channel"
   [channel]
+  (reset! !last-event {:event :unwatch-all :channel channel})
   (doseq [ref (@!watches channel)]
     (remove-watch ref channel))
   (swap! !watches dissoc channel)
@@ -58,7 +74,7 @@
 (defn db-id
   "re-db id associated with the current stream"
   [descriptor]
-  {:sync/descriptor descriptor})
+  {::id descriptor})
 
 (defn read-result [qvec]
   (d/get (db-id qvec) :result {:loading? true}))
@@ -87,83 +103,59 @@
                   {:value "Hello"}
                   {:prefix "PRE-"}))
 
-(defn transact-result [result-handlers id message]
-
-  (let [prev-result (read-result id)
-        {:as result :keys [txs]} (resolve-message result-handlers prev-result message)
-        result (not-empty (dissoc result :txs))
-        txs (cond-> []
-                    result (conj [:db/add (db-id id) :result result])
-                    txs (into txs))]
-    (d/transact! txs)))
+(defn transact-result
+  ([id message] (transact-result {} id message))
+  ([result-handlers id message]
+   (let [prev-result (read-result id)
+         {:as result :keys [txs]} (resolve-message result-handlers prev-result message)
+         result (not-empty (dissoc result :txs))
+         txs (cond-> []
+                     result (conj [:db/add (db-id id) :result result])
+                     txs (into txs))]
+     (d/transact! txs))))
 
 (memo/defn-memo $values
   "Stream of :sync/snapshot events associating `id` with values of `!ref`"
   [!ref]
-  (xf/transform !ref
-    (map (fn [value] {:value value}))))
+  (xf/map value !ref))
 
 
 ;; Channel lifecycle functions (to be called at appropriate stages of a long-lived server connection)
 
 (defn on-open
-  "Call when a (server) channel opens to initiate watches"
+  "(client) Call when connected to server, to initiate active watches."
   [channel]
   (doseq [[qvec _] (@!watching channel)]
-    (send channel [:sync.server/watch qvec])))
+    (send channel [::watch qvec])))
 
 (defn on-close
-  "Call when a (client) channel closes top stop watches"
+  "(client) Call when a connection closes, to stop all watches."
   [channel]
   (unwatch-all channel))
 
 ;; Client subscriptions
 
-(memo/defn-memo $watch
-  "Watch a server-side value (by id). Returns map containing one of {:value, :error, :loading?}"
-  [channel qvec]
-  (send channel [:sync.server/watch qvec])
+(memo/defn-memo $query
+  "(client) Watch a value value (by query-id, usually a vector).
+   Returns map containing `:value`, `:error`, or `:loading?`}"
+  [channel query-id]
+  (send channel [::watch query-id])
   (let [rx (r/reaction
             (hooks/use-on-dispose
              (fn []
-               (swap! !watching update channel dissoc qvec)
-               (send channel [:sync.server/unwatch qvec])))
-            (read-result qvec))]
-    (swap! !watching update channel assoc qvec rx)
+               (swap! !watching update channel dissoc query-id)
+               (send channel [::unwatch query-id])))
+            (read-result query-id))]
+    (swap! !watching update channel assoc query-id rx)
     rx))
 
-(defn watch-handlers [& {:keys [result-handlers
-                                resolve-refs]
-                         :or {result-handlers {}
-                              resolve-refs {}}}]
-  {:sync.client/handle-result
-   (fn [_ id target]
-     (transact-result result-handlers id target))
-   :sync.server/watch
-   (fn [{:keys [channel]} ref-id]
-     (if-let [!ref (resolve-refs ref-id)]
-       (watch channel ref-id !ref)
-       (println "No ref found" ref-id)))
-   :sync.server/unwatch
-   (fn [{:as context :keys [channel]} ref-id]
-     (if-let [!ref (resolve-refs ref-id)]
-       (unwatch channel !ref)
-       (println "No ref found" ref-id)))})
-
-(defn handle-message [handlers context mvec]
-  (if-let [handler (handlers (mvec 0))]
-    (apply handler context (rest mvec))
-    (println (str "Handler not found for: " mvec))))
-
-(comment
- ;; convenience subscription -  should go somewhere else
- (memo/defn-memo $all
-   "Compose any number of watches (by id). Returns first :loading? or :error,
-    or joins results into a :value vector."
-   [channel & qvecs]
-   (r/reaction
-    (let [qs (mapv (comp deref (partial $watch channel)) qvecs)]
-      (or (u/find-first qs :error)
-          (u/find-first qs :loading?)
-          {:value (into [] (map :value) qs)})))))
+(memo/defn-memo $all
+  "Compose queries (by id). Returns first :loading? or :error,
+   or joins results into a :value vector."
+  [channel & qvecs]
+  (r/reaction
+   (let [qs (mapv (comp deref (partial $query channel)) qvecs)]
+     (or (u/find-first qs :error)
+         (u/find-first qs :loading?)
+         {:value (into [] (map :value) qs)}))))
 

@@ -1,7 +1,7 @@
 (ns re-db.sync.entity-diff-1
   (:require [re-db.memo :as memo]
             [re-db.sync :as-alias sync]
-            [re-db.transit :refer [entity-pointer]]
+            [re-db.sync.transit :refer [entity-pointer]]
             [re-db.xform :as xf]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -53,21 +53,26 @@
 
    Recognizes only a single entity-map, or a list of entity-maps. Any other shape
    will be shipped as-is."
-  [id [old-result new-result]]
-  (let [db-id {:sync/watch-result id}
+  [[old-result new-result]]
+  (let [{old-value :value} old-result
         {new-value :value new-error :error} new-result
         shape (cond new-error :error
                     (:db/id new-value) :entities/one
                     (and (sequential? new-value)
                          (:db/id (first new-value))) :entities/many
                     :else :value)]
-    (with-meta [:sync/tx (case shape
-                           (:value :error) [[:db/add db-id :result new-result]]
-                           :entities/one [(diff-entity (:value old-result) (:value new-result))
-                                          [:db/add db-id :result (update new-result :value (comp entity-pointer :db/id))]]
-                           :entities/many (conj (diff-entities (:value old-result) (:value new-result))
-                                                [:db/add db-id :result (update new-result :value #(mapv (comp entity-pointer :db/id) %))]))]
-               {:sync/snapshot [:sync/tx [[:db/add db-id :result new-result]]]})))
+    (assoc (case shape
+             (:value :error) new-result
+             :entities/one {:value (entity-pointer new-value)
+                            :txs [(diff-entity old-value new-value)]}
+             :entities/many {:value (mapv entity-pointer new-value)
+                             :txs (diff-entities old-value new-value)})
+      ::sync/init (case shape
+                    (:value :error) new-result
+                    :entities/one {:value (entity-pointer new-value)
+                                   :txs [new-value]}
+                    :entities/many {:value (mapv entity-pointer new-value)
+                                    :txs new-value}))))
 
 (defn send-error [client-id id send-fn error]
   (send-fn client-id [:sync/tx
@@ -82,7 +87,7 @@
 
 (memo/defn-memo $diff-tx
   "transactions of diffs of successive values of ref"
-  [id ref]
+  [ref]
   (xf/transform ref
     (xf/before:after)
-    (map #(diff-tx id %))))
+    (map diff-tx)))

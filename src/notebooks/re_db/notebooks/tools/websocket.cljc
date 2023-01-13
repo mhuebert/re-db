@@ -2,7 +2,8 @@
   "Small clojure(script) server(client) websocket API"
   (:require #?(:clj [org.httpkit.server :as http])
             [applied-science.js-interop :as j]
-            [re-db.transit :as t]
+            [re-db.notebooks.tools.sync :as tools.sync]
+            [re-db.sync.transit :as t]
             [re-db.sync :as sync]))
 
 (def default-options {:pack t/pack
@@ -33,18 +34,19 @@
                          {:as request :keys [uri request-method]}]
      (if (= [request-method uri]
             [:get path])
-       (let [channel (atom {})
+       (let [!ch (atom nil)
+             channel {:!ch !ch
+                      ::sync/send (fn [message]
+                                    (let [ch @!ch]
+                                      (if (http/open? ch)
+                                        (http/send! ch (pack message))
+                                        (println :sending-message-before-open message))))}
              context {:channel channel}]
          (http/as-channel request
-                          {:init (fn [ch]
-                                   (swap! channel assoc
-                                          :send (fn [message]
-                                                  (if (http/open? ch)
-                                                    (http/send! ch (pack message))
-                                                    (println :sending-message-before-open message)))))
-                           :on-open sync/on-open
+                          {:init (fn [ch] (reset! !ch ch))
+                           :on-open #(sync/on-open %)
                            :on-receive (fn [ch message]
-                                         (sync/handle-message handlers context (unpack message)))
+                                         (tools.sync/handle-message handlers context (unpack message)))
                            :on-close (fn [ch status]
                                        (sync/on-close channel))}))
        (throw (ex-info (str "Unknown request " request-method uri) request)))))
@@ -75,16 +77,17 @@
      "
      [& {:as options}]
      (let [{:keys [url port path pack unpack handlers]} (merge default-options options)
-           channel (atom {:!last-message (atom nil)})
-           send (fn [message]
-                  (let [^js ws (:ws @channel)]
-                    (when (= 1 (.-readyState ws))
-                      (.send ws (pack message)))))
-           _ (swap! channel assoc :send send)
+           !ws (atom nil)
+           channel {:!last-message (atom nil)
+                    :ws !ws
+                    ::sync/send (fn [message]
+                                  (let [^js ws @!ws]
+                                    (when (= 1 (.-readyState ws))
+                                      (.send ws (pack message)))))}
            context (assoc options :channel channel)
            init-ws (fn init-ws []
                      (let [ws (js/WebSocket. (or url (str "ws://localhost:" port path)))]
-                       (swap! channel assoc :ws ws)
+                       (reset! !ws ws)
                        (doto ws
                          (.addEventListener "open" (fn [_]
                                                      (sync/on-open channel)))
@@ -92,8 +95,8 @@
                                                       (sync/on-close channel)
                                                       (js/setTimeout init-ws 1000)))
                          (.addEventListener "message" #(let [message (unpack (j/get % :data))]
-                                                         (reset! (:!last-message @channel) message)
-                                                         (sync/handle-message handlers context message))))))]
+                                                         (reset! (:!last-message channel) message)
+                                                         (tools.sync/handle-message handlers context message))))))]
        (init-ws)
        channel)))
 

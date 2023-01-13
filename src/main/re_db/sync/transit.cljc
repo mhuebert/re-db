@@ -1,4 +1,4 @@
-(ns re-db.transit
+(ns re-db.sync.transit
   (:require [cognitect.transit :as t]
             [re-db.api :as d])
   #?(:clj (:import (java.io ByteArrayOutputStream ByteArrayInputStream))))
@@ -8,7 +8,7 @@
 (defn entity-pointer [id]
   (TaggedValue. "re-db/entity" (if (vector? id)
                                  id
-                                 [:db/id id])))
+                                 [:db/id (:db/id id id)])))
 
 (def read-handlers {"re-db/entity"
                     (t/read-handler

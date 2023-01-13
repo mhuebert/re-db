@@ -7,11 +7,13 @@
             [re-db.integrations.in-memory]
             [re-db.integrations.reagent]
             [re-db.memo :as memo]
+            [re-db.notebooks.tools.sync :as tools.sync]
             [re-db.notebooks.tools.websocket :as ws]
             [re-db.query :as q]
             [re-db.read :as read]
             [re-db.sync :as sync]
             [re-db.xform :as xf]
+            [re-db.sync.entity-diff-1 :as entity-diff]
             #?(:cljs [nextjournal.clerk.render :as render])))
 
 ;; create a db connection. We'll use a re-db in-memory db here but you could also use
@@ -28,21 +30,24 @@
 ;; an atom of refs to expose, a map of ids to functions which return reactions.
 ;; refs are requested via vectors of the form [<id> & args].
 (def !refs
-  (atom
-   {:entity-1 (constantly (q/reaction conn {:value (db/get 1)}))
-    :entity (fn [id] (q/reaction conn {:value (db/get id)}))}))
+  (let [$entity-fn (memo/fn-memo [id] (q/reaction conn (db/get id)))]
+    (atom
+     {:entity-1 (constantly ($entity-fn 1))
+      :entity $entity-fn
+      :diffs/entity-1 (constantly (entity-diff/$diff-tx ($entity-fn 1)))
+      :diffs/entity (comp entity-diff/$diff-tx $entity-fn)})))
 
 ;; A websocket server (clj, runs on the jvm):
 #?(:clj
    (def server
      (ws/serve :port 9062
                :handlers (merge
-                          (sync/watch-handlers :resolve-refs
-                                               (memo/fn-memo [ref-id]
-                                                 (let [[id & args] (if (sequential? ref-id)
-                                                                   ref-id
-                                                                   [ref-id])]
-                                                   (apply (@!refs id) args))))
+                          (tools.sync/make-handlers :resolve-refs
+                                                    (memo/fn-memo [ref-id]
+                                                       (let [[id & args] (if (sequential? ref-id)
+                                                                           ref-id
+                                                                           [ref-id])]
+                                                         (apply (@!refs id) args))))
                           {:db/add! (fn [context e a v]
                                       (transact! [[:db/add e a v]]))}))))
 
@@ -50,15 +55,22 @@
 (show-cljs
   (def channel
     (ws/connect :port 9062
-                :handlers (sync/watch-handlers))))
+                :handlers (tools.sync/make-handlers))))
 
 
 
 ;; Show `:entity-1`
 (show-cljs
-  (let [result @(sync/$watch channel :entity-1)]
+  (let [result @(sync/$query channel :entity-1)]
     (render/inspect
-     (or (:value result) result))))
+     (seq (:value result result)))))
+
+;; Show `:diffs/entity-1`
+(show-cljs
+  (let [result @(sync/$query channel :diffs/entity-1)]
+    (render/inspect
+     (seq (:value result result)))))
+
 
 ^{::clerk/visibility {:code :hide}}
 (show-cljs
@@ -68,9 +80,16 @@
 
 ;; Show `[:entity 2]`
 (show-cljs
-  (let [result @(sync/$watch channel [:entity 2])]
+  (let [result @(sync/$query channel [:entity 2])]
     (render/inspect
-     (or (:value result) result))))
+     (seq (:value result result)))))
+
+;; Show `[:diffs/entity 2]`
+(show-cljs
+  (let [result @(sync/$query channel [:diffs/entity 2])]
+    (render/inspect
+     (seq (:value result result)))))
+
 
 ^{::clerk/visibility {:code :hide}}
 (show-cljs
@@ -87,9 +106,4 @@
 ^{::clerk/visibility {:code :hide}}
 (show-cljs
   [:div.whitespace-pre-wrap.code.text-xs
-   (with-out-str (pprint @($log (:!last-message @channel) 10)))])
-
-;; TODO
-;;
-;; entity serialization
-;; diffs
+   (with-out-str (pprint @($log (:!last-message channel) 10)))])

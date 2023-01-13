@@ -9,7 +9,8 @@
   (shadow/watch :clerk)
   (swap! config/!resource->url merge {"/js/viewer.js" "http://localhost:8008/clerk/clerk.js"})
   (clerk/serve! {:browse? true
-                 :watch-paths ["src/notebooks"]})
+                 :watch-paths ["src/notebooks/re_db/notebooks"]
+                 :show-filter-fn #(re-find #"notebooks/[^/]+\.clj\w?" %)})
 
   (eval '(do (in-ns 'nextjournal.clerk.analyzer)
             (defn hash-codeblock [->hash {:as codeblock :keys [hash form id deps vars]}]

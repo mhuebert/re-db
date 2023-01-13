@@ -1,8 +1,6 @@
 (ns re-db.notebooks.test
   (:require [mhuebert.clerk-cljs :refer [show-cljs]]))
 
-(def !a (atom 0))
+(def !a (atom "test"))
 
-(show-cljs (inc @!a))
-
-(inc @!a)
+(show-cljs @!a)

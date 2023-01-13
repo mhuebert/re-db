@@ -9,9 +9,9 @@
      (r/add-on-dispose! [this f] (ratom/add-on-dispose! this f))
      (r/get-watches [^ratom/Reaction this] (.-watches this))
      (r/set-watches! [^ratom/Reaction this watches] (set! (.-watches this) watches))
-     (r/independent? [^ratom/Reaction this] (.-independent? this))
-     (r/independent! [^ratom/Reaction this]
-       (set! (.-independent? this) true)
+     (r/detached? [^ratom/Reaction this] (.-detached? this))
+     (r/detach! [^ratom/Reaction this]
+       (set! (.-detached? this) true)
       @this
       this)))
 

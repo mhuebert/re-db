@@ -82,10 +82,10 @@
        #(remove-watch ref set-value!)))
     value))
 
-(defn use-watch-value
-  "Returns [old-value, new-value] when ref changes - initially [nil, value]"
+(defn use-atom
+  "Returns deref'd value of atom, and re-renders parent when the atom notifies watches."
   [ref]
-  (let [[value set-value!] (use-state @ref)]
+  (let [[value set-value!] (use-state (r/peek ref))]
     (use-effect
      (fn []
        (add-watch ref set-value! (fn [_ _ _ new-value]
