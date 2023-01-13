@@ -2,24 +2,24 @@
   (:require [re-db.sync :as sync]))
 
 (defn make-handlers [& {:keys [result-handlers
-                                resolve-refs]
-                         :or {result-handlers {}
-                              resolve-refs {}}}]
+                               resolve-refs]
+                        :or {result-handlers {}
+                             resolve-refs {}}}]
   {::sync/result
-   (fn [_ id target]
-     (sync/transact-result result-handlers id target))
+   (fn [_ [id result]]
+     (sync/transact-result result-handlers id result))
    ::sync/watch
-   (fn [{:keys [channel]} ref-id]
-     (if-let [!ref (resolve-refs ref-id)]
-       (sync/watch channel ref-id !ref)
-       (println "No ref found" ref-id)))
+   (fn [{:keys [channel]} query-vec]
+     (if-let [!ref (resolve-refs query-vec)]
+       (sync/watch channel query-vec !ref)
+       (println "No ref found" query-vec)))
    ::sync/unwatch
-   (fn [{:as context :keys [channel]} ref-id]
-     (if-let [!ref (resolve-refs ref-id)]
+   (fn [{:as context :keys [channel]} query-vec]
+     (if-let [!ref (resolve-refs query-vec)]
        (sync/unwatch channel !ref)
-       (println "No ref found" ref-id)))})
+       (println "No ref found" query-vec)))})
 
-(defn handle-message [handlers context mvec]
-  (if-let [handler (handlers (mvec 0))]
-    (apply handler context (rest mvec))
-    (println (str "Handler not found for: " mvec))))
+(defn handle-message [handlers context message]
+  (if-let [handler (handlers (message 0))]
+    (apply handler context (rest message))
+    (println (str "Handler not found for: " message))))

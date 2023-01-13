@@ -28,7 +28,7 @@
 
 (defn value [x] {:value x})
 (defn error [x] {:error x})
-(defn result [id x] [::result id x])
+(defn result [id x] [::result [id x]])
 
 ;; **Watches** - local refs being sent to connected peers
 
@@ -40,14 +40,14 @@
   "Adds watch for a local ref, sending messages to client via :re-db.sync/tx messages.
    A ref's value may specify `:sync/snapshot` metadata to override the initial message
    sent when starting a watch."
-  [channel query-id !ref]
-  (reset! !last-event {:event :watch-ref :channel channel :query-id query-id})
-  (r/update-meta! !ref assoc ::query-id query-id) ;; mutate meta of !ref to include query-id for monitoring
+  [channel query-vec !ref]
+  (reset! !last-event {:event :watch-ref :channel channel :query-id query-vec})
+  (r/update-meta! !ref assoc ::query-id query-vec) ;; mutate meta of !ref to include query-id for monitoring
   (swap! !watches update channel (fnil conj #{}) !ref)
   (add-watch !ref channel (fn [_ _ _ value]
-                            (send channel (result query-id (dissoc value ::init)))))
+                            (send channel (result query-vec (dissoc value ::init)))))
   (let [v @!ref]
-    (send channel (result query-id (or (::init v)
+    (send channel (result query-vec (or (::init v)
                                        (dissoc v ::init))))))
 
 (defn unwatch
