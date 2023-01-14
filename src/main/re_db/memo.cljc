@@ -10,7 +10,8 @@
 (defn- instance
   "Create a new instance to memoize"
   [!meta args]
-  (let [sub (apply (:init-fn @!meta) args)]
+  (when-let [sub (apply (:init-fn @!meta) args)]
+    (assert (satisfies? r/ICountReferences sub) "re-db.memo only supports reactions implementing ICountReferences")
     (add-on-dispose! sub (fn [_] (swap! !meta update :cache dissoc args)))
     sub))
 
@@ -24,8 +25,9 @@
 (defn constructor-fn [!meta]
   (with-meta (fn [& args]
                (or (get-in @!meta [:cache args])
-                   (doto (instance !meta args)
-                     (->> (swap! !meta assoc-in [:cache args])))))
+                   (when-some [value (instance !meta args)]
+                     (swap! !meta assoc-in [:cache args] value)
+                     value)))
              {::meta !meta}))
 
 (defmacro fn-memo [& args]
@@ -44,13 +46,13 @@
   ([name doc f]
    (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
    `(do (declare ~name)
-      (let [f# ~f
-            !meta# (if (~'re-db.memo/present? ~name)
-                     (::meta (meta ~name))
-                     (atom {:cache {}
-                            :init-fn f#}))]
-        (reset-fn! !meta# f#)
-        (def ~name (constructor-fn !meta#))))))
+        (let [f# ~f
+              !meta# (if (~'re-db.memo/present? ~name)
+                       (::meta (meta ~name))
+                       (atom {:cache {}
+                              :init-fn f#}))]
+          (reset-fn! !meta# f#)
+          (def ~name (constructor-fn !meta#))))))
 
 (defn clean-fn-args [args]
   (if (string? (first args))
