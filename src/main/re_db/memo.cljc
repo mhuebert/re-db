@@ -11,7 +11,6 @@
   "Create a new instance to memoize"
   [!meta args]
   (let [sub (apply (:init-fn @!meta) args)]
-    (assert (satisfies? r/ICompute sub) "Subscription function must return a reaction")
     (add-on-dispose! sub (fn [_] (swap! !meta update :cache dissoc args)))
     sub))
 
@@ -39,7 +38,8 @@
     `(.hasRoot (def ~name))))
 
 (defmacro def-memo
-  "Defines a memoized function. If the return value implements "
+  "Defines a memoized function. If the return value implements re-db.reactive/ICountReferences,
+   it will be removed from the memo cache when the last reference is removed."
   ([name f] `(re-db.memo/def-memo ~name nil ~f))
   ([name doc f]
    (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
@@ -58,6 +58,8 @@
     args))
 
 (defmacro defn-memo
+  "Defines a memoized function. If the return value implements re-db.reactive/ICountReferences,
+   it will be removed from the memo cache when the last reference is removed."
   [name & args]
   (let [args (clean-fn-args args)]
     `(def-memo ~name (fn ~name ~@args))))
@@ -69,7 +71,9 @@
     (swap! !meta update :cache empty))
   memo)
 
-(defmacro once [expr]
+(defmacro once
+  "Like defonce for `def-memo` and `defn-memo`"
+  [expr]
   (let [name (second expr)]
     `(when-not (present? ~name)
        ~expr)))
