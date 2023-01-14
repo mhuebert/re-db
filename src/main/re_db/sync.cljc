@@ -108,15 +108,15 @@
 (defn watch
   "Adds watch for a local ref, sending messages to client via ::result messages.
    A ref's value may specify an `::init` result to send upon connection."
-  [channel query-vec !ref]
-  (reset! !last-event {:event :watch-ref :channel channel :query-id query-vec})
-  (r/update-meta! !ref assoc ::query-id query-vec) ;; mutate meta of !ref to include query-id for monitoring
+  [channel query !ref]
+  (reset! !last-event {:event :watch-ref :channel channel :query-id query})
+  (r/update-meta! !ref assoc ::query-id query) ;; mutate meta of !ref to include query-id for monitoring
   (swap! !watches update channel (fnil conj #{}) !ref)
   (add-watch !ref channel (fn [_ _ _ value]
-                            (send channel (wrap-result query-vec (dissoc value ::init)))))
+                            (send channel (wrap-result query (dissoc value ::init)))))
   (let [v @!ref]
-    (send channel (wrap-result query-vec (or (::init v)
-                                             (dissoc v ::init))))))
+    (send channel (wrap-result query (or (::init v)
+                                         (dissoc v ::init))))))
 
 (defn unwatch
   "Removes watch for ref."
@@ -147,19 +147,19 @@
   ([] (result-handlers {}))
   ([resolve-result]
    {::result (fn [_ [id result]]
-                    (transact-result resolve-result id result))}))
+               (transact-result resolve-result id result))}))
 
 (defn query-handlers [resolve-query]
   {::watch
-   (fn [{:keys [channel]} query-vec]
-     (if-let [!ref (resolve-query query-vec)]
-       (watch channel query-vec !ref)
-       (println "No ref found" query-vec)))
+   (fn [{:keys [channel]} query]
+     (if-let [!ref (resolve-query query)]
+       (watch channel query !ref)
+       (println "No ref found" query)))
    ::unwatch
-   (fn [{:as context :keys [channel]} query-vec]
-     (if-let [!ref (resolve-query query-vec)]
+   (fn [{:as context :keys [channel]} query]
+     (if-let [!ref (resolve-query query)]
        (unwatch channel !ref)
-       (println "No ref found" query-vec)))})
+       (println "No ref found" query)))})
 
 (defn handle-message [handlers context message]
   (if-let [handler (handlers (message 0))]
@@ -186,15 +186,15 @@
 (memo/defn-memo $query
   "(client) Watch a value (by query, usually a vector).
    Returns map containing `:value`, `:error`, or `:loading?`}"
-  [channel query-vec]
-  (send channel [::watch query-vec])
+  [channel query]
+  (send channel [::watch query])
   (let [rx (r/reaction
             (hooks/use-on-dispose
              (fn []
-               (swap! !watching update channel dissoc query-vec)
-               (send channel [::unwatch query-vec])))
-            (read-result query-vec))]
-    (swap! !watching update channel assoc query-vec rx)
+               (swap! !watching update channel dissoc query)
+               (send channel [::unwatch query])))
+            (read-result query))]
+    (swap! !watching update channel assoc query rx)
     rx))
 
 (memo/defn-memo $all

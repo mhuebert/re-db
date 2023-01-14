@@ -43,7 +43,7 @@
              context {:channel channel}]
          (http/as-channel request
                           {:init (fn [ch] (reset! !ch ch))
-                           :on-open #(sync/on-open %)
+                           :on-open sync/on-open
                            :on-receive (fn [ch message]
                                          (sync/handle-message handlers context (unpack message)))
                            :on-close (fn [ch status]
