@@ -7,7 +7,6 @@
             [re-db.integrations.in-memory]
             [re-db.integrations.reagent]
             [re-db.memo :as memo]
-            [re-db.notebooks.tools.sync :as tools.sync]
             [re-db.notebooks.tools.websocket :as ws]
             [re-db.query :as q]
             [re-db.read :as read]
@@ -42,12 +41,12 @@
    (def server
      (ws/serve :port 9062
                :handlers (merge
-                          (tools.sync/make-handlers :resolve-refs
-                                                    (memo/fn-memo [ref-id]
-                                                       (let [[id & args] (if (sequential? ref-id)
-                                                                           ref-id
-                                                                           [ref-id])]
-                                                         (apply (@!refs id) args))))
+                          (sync/query-handlers
+                           (memo/fn-memo [ref-id]
+                             (let [[id & args] (if (sequential? ref-id)
+                                                 ref-id
+                                                 [ref-id])]
+                               (apply (@!refs id) args))))
                           {:db/add! (fn [context e a v]
                                       (transact! [[:db/add e a v]]))}))))
 
@@ -55,9 +54,7 @@
 (show-cljs
   (def channel
     (ws/connect :port 9062
-                :handlers (tools.sync/make-handlers))))
-
-
+                :handlers (sync/result-handlers))))
 
 ;; Show `:entity-1`
 (show-cljs

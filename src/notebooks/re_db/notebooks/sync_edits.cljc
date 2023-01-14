@@ -5,7 +5,6 @@
             [nextjournal.clerk :as-alias clerk]
             [re-db.integrations.reagent]
             [re-db.memo :as memo]
-            [re-db.notebooks.tools.sync :as tools.sync]
             [re-db.notebooks.tools.websocket :as ws]
             [re-db.sync :as sync]
             [re-db.xform :as xf]
@@ -39,15 +38,14 @@
    (def server
      (ws/serve :port 9061
                :handlers (merge
-                          (tools.sync/make-handlers :resolve-refs {:list ($edits !list)})
+                          (sync/query-handlers {:list ($edits !list)})
                           {:conj! (fn [_] (swap! !list conj (rand-int 100)))}))))
 
 ;; A websocket channel (cljs, runs in the browser):
 (show-cljs
   (def channel
     (ws/connect :port 9061
-                :handlers (tools.sync/make-handlers
-                           :result-handlers
+                :handlers (sync/result-handlers
                            {::sync/editscript handle-editscript-result}))))
 
 

@@ -2,7 +2,6 @@
   "Small clojure(script) server(client) websocket API"
   (:require #?(:clj [org.httpkit.server :as http])
             [applied-science.js-interop :as j]
-            [re-db.notebooks.tools.sync :as tools.sync]
             [re-db.sync.transit :as t]
             [re-db.sync :as sync]))
 
@@ -46,7 +45,7 @@
                           {:init (fn [ch] (reset! !ch ch))
                            :on-open #(sync/on-open %)
                            :on-receive (fn [ch message]
-                                         (tools.sync/handle-message handlers context (unpack message)))
+                                         (sync/handle-message handlers context (unpack message)))
                            :on-close (fn [ch status]
                                        (sync/on-close channel))}))
        (throw (ex-info (str "Unknown request " request-method uri) request)))))
@@ -96,7 +95,7 @@
                                                       (js/setTimeout init-ws 1000)))
                          (.addEventListener "message" #(let [message (unpack (j/get % :data))]
                                                          (reset! (:!last-message channel) message)
-                                                         (tools.sync/handle-message handlers context message))))))]
+                                                         (sync/handle-message handlers context message))))))]
        (init-ws)
        channel)))
 

@@ -12,43 +12,111 @@
 ;; - everything is based on watching refs that contain streams of messages.
 ;; - use transducers to transform "simple values" into messages.
 
-;; Channels - long-lived connections to peers
-;; A channel must be an atom containing a `:send` function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Channels - a channel represents either side of a client-server connection
 
-(defn send [channel message]
+(defn uid-channel
+  "Returns a channel given a primitive uid and send-fn (a function of one argument, the message to be sent)"
+  [uid send-fn]
+  (with-meta [uid] {::send send-fn}))
+
+(defn send
+  "Sends a message to a channel (which must have a ::send key on itself or metadata)"
+  [channel message]
   (let [send-fn (or (::send channel)
                     (::send (meta channel)))]
     (assert send-fn (str "send-fn not present on channel" channel))
     (send-fn message)))
 
-(defn uid-channel
-  "Returns a channel (supporting `send`) given a primitive uid and send-fn"
-  [uid send-fn]
-  (with-meta [uid] {::send send-fn}))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Result preparation (server)
 
-(defn value [x] {:value x})
-(defn error [x] {:error x})
-(defn result [id x] [::result [id x]])
+(defn wrap-value
+  "Wraps a value result"
+  [x]
+  {:value x})
 
-;; **Watches** - local refs being sent to connected peers
+(memo/defn-memo $values
+  "Stream of :sync/snapshot events associating `id` with values of `!ref`"
+  [!ref]
+  (xf/map wrap-value !ref))
+
+(defn wrap-error
+  "Wraps an error result"
+  [x]
+  {:error x})
+
+(defn wrap-result
+  "Returns a result message for a given query-id"
+  [query-id the-result]
+  [::result [query-id the-result]])
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Result handling (client)
+
+(defn db-id
+  "re-db id associated with the current stream"
+  [descriptor]
+  {::id descriptor})
+
+(defn read-result [qvec]
+  (d/get (db-id qvec) :result {:loading? true}))
+
+(defn- merge-result [result1 result2]
+  (let [txs (:txs result2)
+        m (not-empty (dissoc result2 :txs))]
+    (cond-> result1
+            txs (update :txs (fnil into []) txs)
+            m (merge m))))
+
+(defn resolve-result [result-resolvers prev result]
+  (reduce-kv (fn [result k v]
+               (if-let [f (get result-resolvers k)]
+                 (merge-result result (f prev v))
+                 (if (= k :txs)
+                   (update result :txs (fnil into []) v)
+                   (assoc result k v))))
+             {}
+             result))
+
+(comment
+ (resolve-result {:prefix (fn [{:keys [value]} prefix]
+                            {:value (str prefix value)
+                             :txs [[:db/add \a \b \c]]})}
+                 {:value "Hello"}
+                 {:prefix "PRE-"}))
+
+(defn transact-result
+  ([id message] (transact-result {} id message))
+  ([result-resolvers id message]
+   (let [prev-result (read-result id)
+         {:as result :keys [txs]} (resolve-result result-resolvers prev-result message)
+         result (not-empty (dissoc result :txs))
+         txs (cond-> []
+                     result (conj [:db/add (db-id id) :result result])
+                     txs (into txs))]
+     (d/transact! txs))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; `Watch` bookkeeping (server) - which queries are being watched by which clients
 
 ;; map of {client-channel, #{...refs}}
 (defonce !watches (atom {}))
-(defonce !last-event  (atom nil))
+;; for logging/inspection
+(defonce !last-event (atom nil))
 
 (defn watch
-  "Adds watch for a local ref, sending messages to client via :re-db.sync/tx messages.
-   A ref's value may specify `:sync/snapshot` metadata to override the initial message
-   sent when starting a watch."
+  "Adds watch for a local ref, sending messages to client via ::result messages.
+   A ref's value may specify an `::init` result to send upon connection."
   [channel query-vec !ref]
   (reset! !last-event {:event :watch-ref :channel channel :query-id query-vec})
   (r/update-meta! !ref assoc ::query-id query-vec) ;; mutate meta of !ref to include query-id for monitoring
   (swap! !watches update channel (fnil conj #{}) !ref)
   (add-watch !ref channel (fn [_ _ _ value]
-                            (send channel (result query-vec (dissoc value ::init)))))
+                            (send channel (wrap-result query-vec (dissoc value ::init)))))
   (let [v @!ref]
-    (send channel (result query-vec (or (::init v)
-                                       (dissoc v ::init))))))
+    (send channel (wrap-result query-vec (or (::init v)
+                                             (dissoc v ::init))))))
 
 (defn unwatch
   "Removes watch for ref."
@@ -66,60 +134,39 @@
   (swap! !watches dissoc channel)
   nil)
 
-;; **Watching** - remote refs being sent to this instance
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; `Watch` bookkeeping (client) - which queries are being watched by this client
 
 ;; a map of {channel, {ref-id, #{...rx}}}
 (defonce !watching (atom {}))
 
-(defn db-id
-  "re-db id associated with the current stream"
-  [descriptor]
-  {::id descriptor})
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Websocket message utilities
 
-(defn read-result [qvec]
-  (d/get (db-id qvec) :result {:loading? true}))
+(defn result-handlers
+  ([] (result-handlers {}))
+  ([resolve-result]
+   {::result (fn [_ [id result]]
+                    (transact-result resolve-result id result))}))
 
-(defn- merge-result [result1 result2]
-  (let [txs (:txs result2)
-        m (not-empty (dissoc result2 :txs))]
-    (cond-> result1
-            txs (update :txs (fnil into []) txs)
-            m (merge m))))
+(defn query-handlers [resolve-query]
+  {::watch
+   (fn [{:keys [channel]} query-vec]
+     (if-let [!ref (resolve-query query-vec)]
+       (watch channel query-vec !ref)
+       (println "No ref found" query-vec)))
+   ::unwatch
+   (fn [{:as context :keys [channel]} query-vec]
+     (if-let [!ref (resolve-query query-vec)]
+       (unwatch channel !ref)
+       (println "No ref found" query-vec)))})
 
-(defn resolve-message [result-handlers prev result]
-  (reduce-kv (fn [result k v]
-               (if-let [f (get result-handlers k)]
-                 (merge-result result (f prev v))
-                 (if (= k :txs)
-                   (update result :txs (fnil into []) v)
-                   (assoc result k v))))
-             {}
-             result))
+(defn handle-message [handlers context message]
+  (if-let [handler (handlers (message 0))]
+    (apply handler context (rest message))
+    (println (str "Handler not found for: " message))))
 
-(comment
- (resolve-message {:prefix (fn [{:keys [value]} prefix]
-                             {:value (str prefix value)
-                              :txs [[:db/add \a \b \c]]})}
-                  {:value "Hello"}
-                  {:prefix "PRE-"}))
-
-(defn transact-result
-  ([id message] (transact-result {} id message))
-  ([result-handlers id message]
-   (let [prev-result (read-result id)
-         {:as result :keys [txs]} (resolve-message result-handlers prev-result message)
-         result (not-empty (dissoc result :txs))
-         txs (cond-> []
-                     result (conj [:db/add (db-id id) :result result])
-                     txs (into txs))]
-     (d/transact! txs))))
-
-(memo/defn-memo $values
-  "Stream of :sync/snapshot events associating `id` with values of `!ref`"
-  [!ref]
-  (xf/map value !ref))
-
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Channel lifecycle functions (to be called at appropriate stages of a long-lived server connection)
 
 (defn on-open
@@ -133,20 +180,21 @@
   [channel]
   (unwatch-all channel))
 
-;; Client subscriptions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Query utils (client)
 
 (memo/defn-memo $query
-  "(client) Watch a value value (by query-id, usually a vector).
+  "(client) Watch a value (by query, usually a vector).
    Returns map containing `:value`, `:error`, or `:loading?`}"
-  [channel query-id]
-  (send channel [::watch query-id])
+  [channel query-vec]
+  (send channel [::watch query-vec])
   (let [rx (r/reaction
             (hooks/use-on-dispose
              (fn []
-               (swap! !watching update channel dissoc query-id)
-               (send channel [::unwatch query-id])))
-            (read-result query-id))]
-    (swap! !watching update channel assoc query-id rx)
+               (swap! !watching update channel dissoc query-vec)
+               (send channel [::unwatch query-vec])))
+            (read-result query-vec))]
+    (swap! !watching update channel assoc query-vec rx)
     rx))
 
 (memo/defn-memo $all
