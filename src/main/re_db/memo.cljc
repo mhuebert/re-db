@@ -11,7 +11,6 @@
   "Create a new instance to memoize"
   [!meta args]
   (when-let [sub (apply (:init-fn @!meta) args)]
-    (assert (satisfies? r/ICountReferences sub) "re-db.memo only supports reactions implementing ICountReferences")
     (add-on-dispose! sub (fn [_] (swap! !meta update :cache dissoc args)))
     sub))
 
@@ -26,7 +25,8 @@
   (with-meta (fn [& args]
                (or (get-in @!meta [:cache args])
                    (when-some [value (instance !meta args)]
-                     (swap! !meta assoc-in [:cache args] value)
+                     (when (satisfies? r/ICountReferences value)
+                       (swap! !meta assoc-in [:cache args] value))
                      value)))
              {::meta !meta}))
 
