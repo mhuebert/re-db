@@ -7,27 +7,28 @@
 
 ;; memoize, but with reference counting (& lifecycle)
 
-(defn- instance
+(defn- instance!
   "Create a new instance to memoize"
   [!meta args]
-  (when-let [sub (apply (:init-fn @!meta) args)]
-    (add-on-dispose! sub (fn [_] (swap! !meta update :cache dissoc args)))
-    sub))
+  (let [value (apply (:init-fn @!meta) args)]
+    (when (and value (satisfies? r/ICountReferences value))
+      (swap! !meta assoc-in [:cache args] value)
+      (add-on-dispose! value (fn [_] (swap! !meta update :cache dissoc args))))
+    value))
 
 (defn reset-fn!
   "Resets the init-fn for a def, "
   [!meta init-fn]
   (swap! !meta assoc :init-fn init-fn)
-  (doseq [[args old-rx] (:cache @!meta)]
-    (r/become old-rx (fn [old-val] (instance !meta args)))))
+  (let [cache (:cache @!meta)]
+    (swap! !meta update :cache empty)
+    (doseq [[args old-rx] cache]
+      (r/become old-rx (fn [old-val] (instance! !meta args))))))
 
 (defn constructor-fn [!meta]
   (with-meta (fn [& args]
                (or (get-in @!meta [:cache args])
-                   (when-some [value (instance !meta args)]
-                     (when (satisfies? r/ICountReferences value)
-                       (swap! !meta assoc-in [:cache args] value))
-                     value)))
+                   (instance! !meta args)))
              {::meta !meta}))
 
 (defmacro fn-memo [& args]
