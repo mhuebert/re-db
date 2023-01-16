@@ -174,6 +174,20 @@
           (notify-watches to old-val new-val)))
       to)))
 
+(defmacro redef
+  "Like `def` but if name already exists, migrates old reaction to new reaction using become"
+  ([name doc rx] `(redef ~(with-meta name {:doc doc}) ~rx))
+  ([name rx]
+   (let [rx-sym (gensym "rx")]
+     `(do (declare ~name)
+          (let [~rx-sym ~rx]
+            (if (macros/present? ~name)
+              ~(if (:ns &env)
+                 `(set! ~name (become ~name (constantly ~rx-sym)))
+                 `(do (become ~name (constantly (alter-var-root (var ~name) (constantly ~rx-sym))))
+                      (var ~name))))
+            (def ~name ~rx-sym))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactive Atom - for holding values, with reference tracking and disposal
 
