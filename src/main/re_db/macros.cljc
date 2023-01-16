@@ -95,6 +95,11 @@
                                          (mapcat (fn [x] (if (= x '_) argv [x])) x)
                                          x)) f))))))
 
+(defmacro present? [name]
+  (if (:ns &env)
+    `(~'exists? ~name)
+    `(.hasRoot (def ~name))))
+
 (comment
  '(defpartial f {:f '(a/f _ *db*)}
     ([a])

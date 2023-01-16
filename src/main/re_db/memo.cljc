@@ -2,7 +2,8 @@
   "Subscriptions: named reactive computations cached globally for deduplication of effort"
   (:require [clojure.core :as core]
             [clojure.string :as str]
-            [re-db.reactive :as r :refer [add-on-dispose!]])
+            [re-db.reactive :as r :refer [add-on-dispose!]]
+            [re-db.macros :as macros])
   #?(:cljs (:require-macros re-db.memo)))
 
 ;; memoize, but with reference counting (& lifecycle)
@@ -35,11 +36,6 @@
   `(constructor-fn (atom {:cache {}
                           :init-fn (fn ~@args)})))
 
-(defmacro present? [name]
-  (if (:ns &env)
-    `(~'exists? ~name)
-    `(.hasRoot (def ~name))))
-
 (defmacro def-memo
   "Defines a memoized function. If the return value implements re-db.reactive/ICountReferences,
    it will be removed from the memo cache when the last reference is removed."
@@ -48,7 +44,7 @@
    (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
    `(do (declare ~name)
         (let [f# ~f
-              !meta# (if (~'re-db.memo/present? ~name)
+              !meta# (if (~'re-db.macros/present? ~name)
                        (::meta (meta ~name))
                        (atom {:cache {}
                               :init-fn f#}))]
@@ -78,8 +74,20 @@
   "Like defonce for `def-memo` and `defn-memo`"
   [expr]
   (let [name (second expr)]
-    `(when-not (present? ~name)
+    `(when-not (macros/present? ~name)
        ~expr)))
+
+(defmacro def-atom
+  "Defines or resets atom with `init`"
+  ([name doc init]
+   `(def-atom ~(with-meta name {:doc doc}) ~init))
+  ([name init]
+   `(do (declare ~name)
+        (let [value# ~init]
+          (if (macros/present? ~name)
+            (do (reset! ~name value#)
+                (var ~name))
+            (def ~name (atom value#)))))))
 
 (comment
 
