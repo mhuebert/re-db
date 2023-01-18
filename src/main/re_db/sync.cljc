@@ -6,7 +6,8 @@
             [re-db.reactive :as r]
             [re-db.memo :as memo]
             [re-db.util :as u]
-            [re-db.xform :as xf]))
+            [re-db.xform :as xf])
+  #?(:cljs (:require-macros re-db.sync)))
 
 ;; Ideas
 ;; - everything is based on watching refs that contain streams of messages.
@@ -29,7 +30,7 @@
     (send-fn message)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Result preparation (server)
+;; Query resolution (server)
 
 (defn wrap-value
   "Wraps a value result"
@@ -50,6 +51,11 @@
   "Returns a result message for a given query-id"
   [query-id the-result]
   [::result [query-id the-result]])
+
+(defmacro try-value [& body]
+  `(try {:value (do ~@body)}
+        (catch ~(if (:ns &env) 'js/Error 'Exception) e#
+          {:error e#})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Result handling (client)
@@ -206,4 +212,3 @@
      (or (u/find-first qs :error)
          (u/find-first qs :loading?)
          {:value (into [] (map :value) qs)}))))
-
