@@ -1,25 +1,22 @@
 (ns re-db.integrations-test
-  (:require [datomic.api :as dm]
-            [re-db.integrations.datomic]
-
+  (:require [clojure.string :as str]
+            [clojure.test :refer [are deftest is]]
+            [clojure.walk :as walk]
             [datahike.api :as dh]
             [datalevin.core :as dl]
+            [datomic.api :as dm]
+            [re-db.api :as re]
+            [re-db.hooks :as hooks]
             [re-db.integrations.datahike]
             [re-db.integrations.datalevin]
+            [re-db.integrations.datomic]
             [re-db.integrations.in-memory]
-
-            [re-db.api :as re]
-            [re-db.query :as q]
-            [re-db.memo :as m]
-            [re-db.reactive :as r]
-            [re-db.hooks :as hooks]
+            [re-db.memo :as memo]
             [re-db.protocols :as rp]
-            [re-db.memo :as subs]
-            [clojure.test :as test :refer [is are deftest testing]]
-            [re-db.schema :as schema]
+            [re-db.query :as q]
+            [re-db.reactive :as r]
             [re-db.read :as read]
-            [clojure.string :as str]
-            [clojure.walk :as walk]))
+            [re-db.schema :as schema]))
 
 
 (read/clear-listeners!)
@@ -117,13 +114,16 @@
 
 ;; a query-function that uses the read/entity api:
 
+
+
 (deftest db-queries
 
-  (q/defn-query $emo-movies [conn emo-name]
-                (->> (re/entity [:emotion/name emo-name])
-         :movie/_emotions
-         (mapv :movie/title)
-         set))
+  (memo/defn-memo $emo-movies [conn emo-name]
+    (q/bound-reaction conn
+      (->> (re/entity [:emotion/name emo-name])
+           :movie/_emotions
+           (mapv :movie/title)
+           set)))
 
   (transact! initial-data)
 

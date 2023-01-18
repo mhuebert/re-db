@@ -29,7 +29,7 @@
 ;; an atom of refs to expose, a map of ids to functions which return reactions.
 ;; refs are requested via vectors of the form [<id> & args].
 (def !refs
-  (let [$entity-fn (memo/fn-memo [id] (q/reaction conn (db/get id)))]
+  (let [$entity-fn (memo/fn-memo [id] (q/bound-reaction conn (db/get id)))]
     (atom
      {:entity-1 (constantly ($entity-fn 1))
       :entity $entity-fn
@@ -72,7 +72,7 @@
 ^{::clerk/visibility {:code :hide}}
 (show-cljs
   [:button.p-2.rounded.bg-blue-100
-   {:on-click #(sync/send channel [:db/add! 1 :E1 (rand-int 100)])}
+   {:on-click #(sync/send channel [:db/add! 1 (rand-nth [:A :B]) (rand-int 100)])}
    "Modify entity 1"])
 
 ;; Show `[:entity 2]`
@@ -91,7 +91,7 @@
 ^{::clerk/visibility {:code :hide}}
 (show-cljs
   [:button.p-2.rounded.bg-blue-100
-   {:on-click #(sync/send channel [:db/add! 2 :A (rand-int 100)])}
+   {:on-click #(sync/send channel [:db/add! 2 (rand-nth [:A :B]) (rand-int 100)])}
    "Modify entity 2"])
 
 
