@@ -57,6 +57,11 @@
         (catch ~(if (:ns &env) 'js/Error 'Exception) e#
           {:error e#})))
 
+(defmacro reaction
+  "A reaction which returns results compatible with re-db.sync a map containing (:value or :error)"
+  [& body]
+  `(r/reaction (try-value ~@body)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Result handling (client)
 
