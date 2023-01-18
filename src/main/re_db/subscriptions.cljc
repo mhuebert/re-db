@@ -32,7 +32,7 @@
        (when pre-existing? ;; update existing instances
          (doseq [[svec old-rx] @!subscription-cache
                  :when (= id (first svec))]
-           (r/become old-rx #(subscription svec))))))
+           (r/become old-rx (fn [_] (subscription svec)))))))
 
   id)
 
