@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is]]
             [re-db.reactive :as r]
             [re-db.memo :as s]
-            [re-db.hooks :as hooks]))
+            [re-db.hooks :as hooks]
+            [re-db.xform :as xf]))
 
 
 (deftest disposal
@@ -30,7 +31,7 @@
   (let [!latch (atom 0)]
     (def !latch (atom 0))
     (s/def-memo $sub
-                (fn []
+      (fn []
         (r/reaction
          (hooks/use-effect
           (fn []
@@ -49,4 +50,15 @@
       (r/session @rx)
       (is (= @!latch 4) "Same reaction can be instantiated multiple times")))
   )
+
+(deftest diamond-pattern-glitch-test
+  (r/session
+   (let [!a (r/atom 1)
+         !b (r/reaction (+ @!a 1))
+         !c-called (atom 0)
+         !c (r/reaction! (swap! !c-called inc) (+ @!a @!b))
+         !c-values (r/detach! (xf/into #{} !c))]
+     (swap! !a inc)
+     (is (= @!c-called 2) "refs are evaluated once per epoch")
+     (is (= @!c-values #{3 5})))))
 

@@ -1,19 +1,20 @@
 (ns re-db.reactive
-  (:refer-clojure :exclude [-peek atom peek])
-  (:require [clojure.set :as set]
-            [re-db.macros :as macros]
+  (:refer-clojure :exclude [atom peek])
+  (:require [re-db.macros :as macros]
             [re-db.util :as util])
   #?(:cljs (:require-macros re-db.reactive)))
 
 (defprotocol ICompute
   "Protocol for signals that have a compute function"
-  (compute! [this] "(re)compute the value of this")
-  (stale? [this] "the instance must be (re)computed before a valid value can be read"))
+  (compute! [this] "(re)compute the value of this, returns true if value changed")
+  (set-stale! [this] "mark instance as stale")
+  (stale? [this] "the instance must be (re)computed before a valid value can be read")
+  (computes? [this] "marker method - returns false for default impl"))
 
 (defprotocol ICountReferences
   "Protocol for types that track watches and dispose when unwatched.
 
-   An instance can be independent, which means it remains active regardless of watched status
+   An instance can be detached, which means it remains active regardless of watched status
    and will never be automatically disposed."
   (get-watches [this])
   (set-watches! [this new-watches])
@@ -38,12 +39,6 @@
 (defprotocol IMutableMeta
   (update-meta! [this f] [this f x] [this f x y] [this f x y args]))
 
-
-;; todo
-;; independent -> detached ?
-;; frp vs streams
-;; frtime "father time" racket library - done in scheme, idioms more similar to clj
-
 (extend-type #?(:clj Object :cljs object)
   IMutableMeta
   (update-meta!
@@ -61,78 +56,45 @@
   (detached? [this] true)
 
   ICompute
-  (compute! [this] this)
-  (stale? [this] false))
+  (compute! [this] false)
+  (stale? [this] false)
+  (set-stale! [this] this)
+  (computes? [this] false))
 
 (def empty-watches {})
 (def empty-dispose-fns [])
 
-(comment
- ;; TODO - work on sorting/deduping compute
- ;; re: frp glitches
- (def ^:dynamic *notifying* nil)
- (defn transitive-sorted [f]
-   (fn -transitive-sorted
-     ([dep]
-      (->> dep
-           (-transitive-sorted [#{dep} []])
-           (second)))
-     ([[seen results] dep]
-      (let [new (set/difference (f dep) seen)]
-        (reduce -transitive-sorted
-                [(into (conj seen dep) new)
-                 (-> results
-                     (cond-> (not (seen dep)) (conj dep))
-                     (into new))]
-                new)))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
- (def dependents (transitive-sorted
-                  (fn [ref]
-                    (into []
-                          (filter #(satisfies? ICompute %))
-                          (keys (get-watches ref)))))))
+(defprotocol IPeek
+  "for reading reactive values without triggering a dependency relationship.
+   Note: this does not trigger computation of disposed/stale sources."
+  (peek [this]))
 
-(defn notify-watches [ref old-val new-val]
-  ;; TODO...
-  ;; topologic sort (within a synchronous 'epoch') so that if signal A
-  ;;  is consumed by B and C, while B also consumes C, we notify C before B,
-  ;;  and only invalidate each dependent once.
-  ;;
-  ;; how?
-  ;;
-  ;; one approach: don't notify _immediate_ dependents which are also _transitive_ dependents,
-  ;;   downside: expensive
-  ;; another approach: each signal tracks its 'height', which is greater than the height of anything
-  ;;   it depends on (but this requires knowledge of its dependencies. why don't we have this knowledge?
-  ;;   because we support hooks, which add-watch and remove-watch without any protocol/type involved)
+(extend-protocol IPeek
+  #?(:clj Object :cljs object)
+  (peek [this] (macros/without-deref-capture @this)))
 
-  ;; - use a dynamic var, eg. *notifying*
-  ;;   on init:
-  ;;   - make a list of all signals that will become stale as a result of this,
-  ;;     keep track of signals that have been notified,
-  ;;     before notifying a signal, ensure that all of its dependencies (derefs) have been notified...
-  ;;     (wait: we don't store those consistently. sometimes `derefs`, sometimes it's just in a hook)
-  ;;   when initializing the dynamic var, compute the total sort order and re-use this
-  ;;   while crawling the graph?
-  ;;
-  ;; what about Weak References? can we use those for keeping track of dependencies?
-  ;; see 2.6.1 https://cs.brown.edu/people/ghcooper/thesis.pdf
-  ;; eg. each signal, when watched, updates both its own 'dependents'
-  ;;     and also the 'dependencies' of the key
-  ;;
-  ;; update queue vs synchronous updating?
-  ;;
-  ;; atomicity of updates
-  (comment
-   (if *notifying*
-     nil
-     (binding [*notifying* true]
-       (let [sorted-dependents ((fn [depth watchers]
-                                  )
-                                0 (keys (get-watches ref)))]
-         (doseq [[k f] (get-watches ref)] (f k ref old-val new-val))))))
-  (doseq [[k f] (get-watches ref)] (f k ref old-val new-val)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Notify
+;;
+;; When a ref changes, notify dependents (watches) in topological order,
+;; once per epocph.
+
+(defn notify-watches
+  [ref old-val new-val]
+  #_(doseq [[k f] (get-watches ref)] (f k ref old-val new-val))
+
+  (let [watches (get-watches ref)]
+    ;; mark immediate depts as stale before evaluating any of them
+    ;; (causes transitive depts to evaluate in order)
+    (doseq [ref (keys watches)] (set-stale! ref))
+
+    (doseq [[k f] watches]
+      (if (computes? k)
+        (when (stale? k) (compute! k))
+        (f k ref old-val new-val)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -145,16 +107,6 @@
 (defn owner []
   #?(:clj  *owner*
      :cljs (or *owner* (get-reagent-context))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defprotocol IPeek
-  "for reading reactive values without triggering a dependency relationship.
-   Note: this does not trigger computation of disposed/stale sources."
-  (-peek [this]))
-
-(defn peek [this]
-  (if (satisfies? IPeek this) (-peek this) (macros/without-deref-capture @this)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -198,14 +150,14 @@
                   ^:volatile-mutable watches
                   ^:volatile-mutable metadata
                   ^:volatile-mutable dispose-fns
-                  ^:volatile-mutable independent]
+                  ^:volatile-mutable detached]
     ICountReferences
     (get-watches [this] watches)
     (set-watches! [this! new-watches] (set! watches new-watches))
-    (detached? [this] independent)
+    (detached? [this] detached)
     (detach! [this]
-      (when-not independent
-        (set! independent true)))
+      (when-not detached
+        (set! detached true)))
     (add-on-dispose! [this f]
       (macros/set-swap! dispose-fns conj f))
     (dispose! [this]
@@ -219,7 +171,7 @@
     (update-meta! [this f x y] (set! metadata (f metadata x y)))
     (update-meta! [this f x y args] (set! metadata (apply f metadata x y args)))
     IPeek
-    (-peek [this] state)
+    (peek [this] state)
     IDeref
     (-deref [this]
       (collect-deref! this)
@@ -241,23 +193,23 @@
       this)
     (-remove-watch [this key]
       (macros/set-swap! watches dissoc key)
-      (when (and (empty? watches) (not independent))
+      (when (and (empty? watches) (not detached))
         (dispose! this))
       this)))
 
 (defn atom
   ([initial-value]
    (->RAtom initial-value {} {} [] false))
-  ([initial-value & {:keys [meta independent on-dispose]
+  ([initial-value & {:keys [meta detached on-dispose]
                      :or {meta {}
-                          independent false}}]
+                          detached false}}]
    (->RAtom initial-value
             empty-watches
             meta
             (cond-> empty-dispose-fns
                     on-dispose
                     (conj on-dispose))
-            independent)))
+            detached)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -333,14 +285,14 @@
      ^:volatile-mutable watches
      ^:volatile-mutable metadata
      ^:volatile-mutable stale
-     ^:volatile-mutable independent]
+     ^:volatile-mutable detached]
     ICountReferences
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))
-    (detached? [this] independent)
+    (detached? [this] detached)
     (detach! [this]
-      (when-not independent
-        (set! independent true)
+      (when-not detached
+        (set! detached true)
         (compute! this))
       this)
     (add-on-dispose! [this f]
@@ -373,7 +325,7 @@
       state)
 
     IPeek
-    (-peek [this] state)
+    (peek [this] state)
     IReset
     (-reset! [this new-val]
       (let [old-val state]
@@ -396,7 +348,7 @@
       this)
     (-remove-watch [this key]
       (macros/set-swap! watches dissoc key)
-      (when (and (empty? watches) (not independent))
+      (when (and (empty? watches) (not detached))
         (dispose! this))
       this)
     ITrackDerefs
@@ -404,24 +356,27 @@
     (set-derefs! [this new-derefs] (set! derefs new-derefs))
     ICompute
     (stale? [this] stale)
+    (set-stale! [this] (set! stale true))
     (compute! [this]
       (set! stale false)
       (let [new-val (macros/with-owner this
                       (macros/with-hook-support!
                        (macros/with-deref-capture! this
-                         (f))))]
-        (when (not= state new-val)
+                         (f))))
+            changed? (not= state new-val)]
+        (when changed?
           (reset! this new-val))
-        this))))
+        changed?))
+    (computes? [this] true)))
 
 (defn make-reaction [compute-fn & {:as opts
                                    :keys [init
                                           meta
                                           on-dispose
                                           stale
-                                          independent]
+                                          detached]
                                    :or {stale true
-                                        independent false}}]
+                                        detached false}}]
   (cond-> (->Reaction compute-fn
                       init
                       empty-derefs
@@ -430,8 +385,8 @@
                       empty-watches
                       meta
                       stale
-                      independent)
-          independent compute!))
+                      detached)
+          detached (doto compute!)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
@@ -455,7 +410,7 @@
 (defmacro session [& body] `(macros/session ~@body))
 (defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
 (defmacro reaction [& body] (macros/reaction* &form &env body))
-(defmacro reaction! [& body] (concat (macros/reaction* &form &env body) [:independent true]))
+(defmacro reaction! [& body] (concat (macros/reaction* &form &env body) [:detached true]))
 
 #?(:clj
    (defmethod print-method re_db.reactive.Reaction
@@ -463,7 +418,13 @@
      (#'clojure.core/print-meta rx w)
      (.write w "#")
      (.write w (.getName re_db.reactive.Reaction))
-     (#'clojure.core/print-map (merge {:independent (detached? rx)
+     (#'clojure.core/print-map (merge {:detached (detached? rx)
                                        :stale (stale? rx)
                                        :peek (peek rx)}
                                       (select-keys (meta rx) [:display-name])) #'clojure.core/pr-on w)))
+
+
+;; todo
+;; detached -> detached ?
+;; frp vs streams
+;; frtime "father time" racket library - done in scheme, idioms more similar to clj

@@ -34,12 +34,14 @@
 
 (defmacro with-owner [owner & body] (-with-owner owner body))
 
-(defn reaction* [form env body]
+(defn reaction* [form env body & args]
   `(~'re-db.reactive/make-reaction (fn [] ~@body)
     :meta {:display-name ~(str *ns* "@"
                                (:line (meta form))
                                ":"
-                               (:column (meta form)))}))
+                               (:column (meta form)))}
+    ~@args))
+
 (defmacro reaction
   "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
    when they change. Disposes self when last watch is removed."
@@ -47,9 +49,9 @@
   (reaction* &form &env body))
 
 (defmacro reaction!
-  "Returns an independent reaction: computes immediately, remains active until explicitly disposed."
+  "Returns an detached reaction: computes immediately, remains active until explicitly disposed."
   [& body]
-  (concat (reaction* &form &env body) [:independent true]))
+  (concat (reaction* &form &env body) [:detached true]))
 
 (defmacro session
   "Evaluate body in a reaction which is immediately disposed"
