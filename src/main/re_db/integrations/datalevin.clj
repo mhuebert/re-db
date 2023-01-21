@@ -7,16 +7,6 @@
   (:import datalevin.db.DB
            datalevin.datom.Datom))
 
-;; installing lmdb on M1: https://github.com/lmdbjava/native/issues/10#issuecomment-984467831
-
-(comment
- (def conn (d/get-conn "/tmp/datalevin/1" {}))
- (defn db [] @conn)
-
- (merge {} (rp/merge-schema conn {(keyword (str "name" (rand-int 999999)))
-                                  (merge s/unique-id
-                                         s/string)})))
-
 (defn- v [^datalevin.datom.Datom d] (.-v d))
 
 (extend-type datalevin.db.DB

@@ -1,8 +1,12 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [atom peek])
   (:require [re-db.macros :as macros]
-            [re-db.util :as util])
+            [re-db.util :as util]
+            [re-db.impl.hooks :as -hooks])
   #?(:cljs (:require-macros re-db.reactive)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Protocols
 
 (defprotocol ICompute
   "Protocol for signals that have a compute function"
@@ -23,30 +27,22 @@
   (detach! [this] "Detach from graph - computes immediately and remains active until explicitly disposed")
   (detached? [this]))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Deref Tracking - for implicitly recording dependencies via `deref`
-
 (defprotocol ITrackDerefs
-  "for dependency on reactive sources"
+  "for implicitly recording dependencies via `deref`"
   (get-derefs [this])
   (set-derefs! [this new-derefs]))
 
 (def ^:dynamic *captured-derefs* nil)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Dynamic metadata
+(defprotocol IPeek
+  "for reading reactive values without triggering a dependency relationship.
+   Note: this does not trigger computation of disposed/stale sources."
+  (peek [this]))
 
-(defprotocol IMutableMeta
-  (update-meta! [this f] [this f x] [this f x y] [this f x y args]))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Default implementations
 
 (extend-type #?(:clj Object :cljs object)
-  IMutableMeta
-  (update-meta!
-    ([this f] this)
-    ([this f x] this)
-    ([this f x y] this)
-    ([this f x y args] this))
-
   ICountReferences
   (get-watches [this] this)
   (set-watches! [this new-watches] this)
@@ -59,22 +55,11 @@
   (compute! [this] false)
   (stale? [this] false)
   (set-stale! [this] this)
-  (computes? [this] false))
+  (computes? [this] false)
 
-(def empty-watches {})
-(def empty-dispose-fns [])
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defprotocol IPeek
-  "for reading reactive values without triggering a dependency relationship.
-   Note: this does not trigger computation of disposed/stale sources."
-  (peek [this]))
-
-(extend-protocol IPeek
-  #?(:clj Object :cljs object)
-  (peek [this] (macros/without-deref-capture @this)))
+  IPeek
+  (peek [this] (macros/without-deref-capture @this))
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Notify
@@ -141,6 +126,36 @@
             (def ~name ~rx-sym))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Deref tracking
+
+#?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
+
+(defn collect-deref! [producer]
+  #?(:cljs (reagent-notify-deref-watcher! producer))
+  (some-> *captured-derefs* (vswap! conj producer)))
+
+(defn handle-new-derefs! [consumer new-derefs]
+  (let [derefs (get-derefs consumer)
+        [added removed] (util/set-diff (util/guard derefs seq)
+                                       (util/guard new-derefs seq))]
+    (doseq [producer added] (add-watch producer consumer (fn [_ _ _ _] (compute! consumer))))
+    (doseq [producer removed] (remove-watch producer consumer))
+    (set-derefs! consumer new-derefs)
+    consumer))
+
+(defn dispose-derefs! [consumer] (handle-new-derefs! consumer nil))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Initial values
+
+(def init-meta {})
+(def init-stale true)
+(def init-watches {})
+(def init-dispose-fns [])
+(def init-detached false)
+(def init-derefs #{})
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactive Atom - for holding values, with reference tracking and disposal
 
 (declare collect-deref!)
@@ -148,9 +163,9 @@
 (util/support-clj-protocols
   (deftype RAtom [^:volatile-mutable state
                   ^:volatile-mutable watches
-                  ^:volatile-mutable metadata
                   ^:volatile-mutable dispose-fns
-                  ^:volatile-mutable detached]
+                  ^:volatile-mutable detached
+                  ^:volatile-mutable meta]
     ICountReferences
     (get-watches [this] watches)
     (set-watches! [this! new-watches] (set! watches new-watches))
@@ -162,14 +177,12 @@
       (macros/set-swap! dispose-fns conj f))
     (dispose! [this]
       (doseq [f dispose-fns] (f this))
-      (macros/set-swap! dispose-fns empty))
+      (set! dispose-fns init-dispose-fns))
     IMeta
-    (-meta [this] metadata)
-    IMutableMeta
-    (update-meta! [this f] (set! metadata (f metadata)))
-    (update-meta! [this f x] (set! metadata (f metadata x)))
-    (update-meta! [this f x y] (set! metadata (f metadata x y)))
-    (update-meta! [this f x y args] (set! metadata (apply f metadata x y args)))
+    (-meta [this] meta)
+    #?@(:clj [clojure.lang.IReference
+              (alterMeta [this f args] (set! meta (apply f meta args)))
+              (resetMeta [this new-meta] (set! meta new-meta))])
     IPeek
     (peek [this] state)
     IDeref
@@ -199,81 +212,24 @@
 
 (defn atom
   ([initial-value]
-   (->RAtom initial-value {} {} [] false))
-  ([initial-value & {:keys [meta detached on-dispose]
-                     :or {meta {}
-                          detached false}}]
    (->RAtom initial-value
-            empty-watches
-            meta
-            (cond-> empty-dispose-fns
+            init-watches
+            init-dispose-fns
+            init-detached
+            init-meta))
+  ([initial-value & {:keys [meta detached on-dispose]
+                     :or {meta init-meta
+                          detached init-detached}}]
+   (->RAtom initial-value
+            init-watches
+            (cond-> init-dispose-fns
                     on-dispose
                     (conj on-dispose))
-            detached)))
+            detached
+            meta)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-
-#?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
-
-(defn collect-deref! [producer]
-  #?(:cljs (reagent-notify-deref-watcher! producer))
-  (some-> *captured-derefs* (vswap! conj producer)))
-
-(defn handle-new-derefs! [consumer new-derefs]
-  (let [derefs (get-derefs consumer)
-        [added removed] (util/set-diff (util/guard derefs seq)
-                                       (util/guard new-derefs seq))]
-    (doseq [producer added] (add-watch producer consumer (fn [_ _ _ _] (compute! consumer))))
-    (doseq [producer removed] (remove-watch producer consumer))
-    (set-derefs! consumer new-derefs)
-    consumer))
-
-(defn dispose-derefs! [consumer] (handle-new-derefs! consumer nil))
-
-(def empty-derefs #{})
-
-(defn captured-patterns []
-  (->> @*captured-derefs*
-       (into #{} (map (comp :pattern meta)))))
-
-(defprotocol IHook
-  "for composable side-effects within reactions (modeled on React hooks).
-   See re-db.hooks for the api."
-  (get-hooks [this])
-  (set-hooks! [this hooks]))
-
-(defn get-hook [this i] (nth (get-hooks this) i nil))
-(defn set-hook! [this i hook]
-  (set-hooks! this (assoc (get-hooks this) i hook))
-  hook)
-
-(def ^:dynamic *hook-i*)
-
-(defn get-next-hook! [expected-type]
-  {:post [(volatile? %)]}
-  (let [owner *owner*
-        i (vswap! *hook-i* inc)
-        !hook (get-hook owner i)]
-    (when !hook
-      (assert (= (:type (meta @!hook)) expected-type)
-              (str "expected hook of type " expected-type ", but found " (:type @!hook) ". "
-                   "A reaction must always call the same hooks in the same order on every evaluation.")))
-    (or !hook
-        (set-hook! owner i (volatile! (with-meta {} {:type expected-type}))))))
-
-(defn fresh? [hook] (empty? hook))
-
-(def empty-hooks [])
-
-(defn dispose-hooks! [this]
-  (let [hooks (get-hooks this)]
-    (set-hooks! this empty-hooks)
-    (doseq [hook hooks
-            :let [dispose (:dispose @hook)]]
-      (when dispose (dispose)))))
-
+;; Reactions - computed reactive values
 
 (util/support-clj-protocols
   (deftype Reaction
@@ -283,9 +239,9 @@
      ^:volatile-mutable hooks
      ^:volatile-mutable dispose-fns
      ^:volatile-mutable watches
-     ^:volatile-mutable metadata
      ^:volatile-mutable stale
-     ^:volatile-mutable detached]
+     ^:volatile-mutable detached
+     ^:volatile-mutable meta]
     ICountReferences
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))
@@ -299,20 +255,22 @@
       (macros/set-swap! dispose-fns conj f))
     (dispose! [this]
       (dispose-derefs! this)
-      (dispose-hooks! this)
+      (-hooks/dispose-hooks! this)
       (set! stale true)
       (doseq [f dispose-fns] (f this))
-      (macros/set-swap! dispose-fns empty))
+      (set! dispose-fns init-dispose-fns))
     IMeta
-    (-meta [this] metadata)
-    IMutableMeta
-    (update-meta! [this f] (set! metadata (f metadata)))
-    (update-meta! [this f x] (set! metadata (f metadata x)))
-    (update-meta! [this f x y] (set! metadata (f metadata x y)))
-    (update-meta! [this f x y args] (set! metadata (apply f metadata x y args)))
-    IHook
+    (-meta [this] meta)
+    #?@(:clj [clojure.lang.IReference
+              (alterMeta [this f args] (set! meta (apply f meta args)))
+              (resetMeta [this new-meta] (set! meta new-meta))])
+    -hooks/IHook
     (get-hooks [this] hooks)
     (set-hooks! [this new-hooks] (set! hooks new-hooks))
+    (get-hook [this i] (nth hooks i nil))
+    (set-hook! [this i new-hook]
+      (set! hooks (assoc hooks i new-hook))
+      new-hook)
 
     IDeref
     (-deref [this]
@@ -375,17 +333,17 @@
                                           on-dispose
                                           stale
                                           detached]
-                                   :or {stale true
-                                        detached false}}]
+                                   :or {stale init-stale
+                                        detached init-detached}}]
   (cond-> (->Reaction compute-fn
                       init
-                      empty-derefs
-                      empty-hooks
-                      (if on-dispose [on-dispose] empty-dispose-fns)
-                      empty-watches
-                      meta
+                      init-derefs
+                      -hooks/init-hooks
+                      (if on-dispose [on-dispose] init-dispose-fns)
+                      init-watches
                       stale
-                      detached)
+                      detached
+                      meta)
           detached (doto compute!)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

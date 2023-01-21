@@ -135,13 +135,17 @@
        (api/transact! [[:db/add 3 :x 99]])
        (is (= @log [1 2 3 1 2 3]))))))
 
+(defn captured-patterns []
+  (->> @r/*captured-derefs*
+       (into #{} (map (comp :pattern meta)))))
+
 (deftest lookup-patterns
   (api/with-conn {:a/id {:db/unique :db.unique/identity}
                   :b/id {:db/unique :db.unique/identity}}
     (testing
      (let [get-patterns (fn [f]
                           (let [res (atom nil)
-                                rx (r/session @(r/reaction (f) (reset! res (r/captured-patterns))))]
+                                rx (r/session @(r/reaction (f) (reset! res (captured-patterns))))]
                             @res))]
        (are [f patterns]
          (= (get-patterns f) patterns)

@@ -6,6 +6,7 @@
 (defn start
   {:shadow/requires-server true}
   []
+  (compile 're-db.scratch.Suspension)
   (shadow/watch :clerk)
   (swap! config/!resource->url merge {"/js/viewer.js" "http://localhost:8008/clerk/clerk.js"})
   (clerk/serve! {:browse? true

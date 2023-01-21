@@ -9,7 +9,7 @@
   `(set! ~sym (~f ~sym ~@args)))
 
 (defmacro with-deref-capture! [owner & body]
-  `(binding [~'re-db.reactive/*captured-derefs* (volatile! ~'re-db.reactive/empty-derefs)]
+  `(binding [~'re-db.reactive/*captured-derefs* (volatile! ~'re-db.reactive/init-derefs)]
      (let [val# (do ~@body)
            new-derefs# @~'re-db.reactive/*captured-derefs*]
        (~'re-db.reactive/handle-new-derefs! ~owner new-derefs#)
@@ -22,7 +22,7 @@
 
 
 (defn -with-hook-support! [body]
-  `(binding [~'re-db.reactive/*hook-i* (volatile! -1)]
+  `(binding [~'re-db.impl.hooks/*hook-i* (volatile! -1)]
      ~@body))
 
 (defmacro with-hook-support! [& body] (-with-hook-support! body))
@@ -66,7 +66,7 @@
   [session & body]
   `(let [session# ~session]
      (with-owner session#
-       (binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/empty-derefs)]
+       (binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/init-derefs)]
          (let [val# (do ~@body)
                new-derefs# @re-db.reactive/*captured-derefs*]
            (doseq [producer# new-derefs#] (add-watch producer# session# (fn [& args#])))

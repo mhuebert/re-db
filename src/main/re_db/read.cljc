@@ -5,7 +5,7 @@
             [re-db.util :as u]
             [re-db.protocols :as rp]
             [re-db.in-memory :as mem])
-  #?(:cljs (:require-macros [re-db.read :refer [resolve-entity-e!]])))
+  #?(:cljs (:require-macros [re-db.read])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Listeners
@@ -57,8 +57,6 @@
 
 ;; the point-in-time value of the conn (db) can optionally be overridden
 (defonce ^:dynamic *db* nil)
-
-(defn current-conn [] *conn*)
 
 (defn current-db
   ([] (current-db *conn* *db*))
@@ -153,13 +151,6 @@
 
 (defonce ^:dynamic *attribute-resolvers* {})
 
-(defmacro resolve-entity-e! [conn db e-sym e-resolved-sym]
-  `(do (when-not ~e-resolved-sym
-         (when-some [e# (resolve-e ~conn ~db ~e-sym)]
-           (set! ~e-sym e#)
-           (set! ~e-resolved-sym true)))
-       ~e-sym))
-
 (declare entity)
 
 (defn id->ident [db v]
@@ -201,6 +192,13 @@
             (ref-wrapper conn db v))
           v)))))
 
+(defmacro resolve-entity-e! [conn db e-sym e-resolved-sym]
+  `(do (when-not ~e-resolved-sym
+         (when-some [e# (resolve-e ~conn ~db ~e-sym)]
+           (set! ~e-sym e#)
+           (set! ~e-resolved-sym true)))
+       ~e-sym))
+
 (defprotocol IEntity
   (conn [entity])
   (db [entity]))
@@ -220,7 +218,7 @@
     IHash
     (-hash [this]
       (let [db (current-db conn db)]
-        (resolve-entity-e! conn db e e-resolved?)
+        (re-db.read/resolve-entity-e! conn db e e-resolved?)
         (hash [e (rp/eav db e)])))
 
     IEquiv
@@ -232,19 +230,19 @@
     ILookup
     (-lookup [o a]
       (let [db (current-db conn db)]
-        (resolve-entity-e! conn db e e-resolved?)
+        (re-db.read/resolve-entity-e! conn db e e-resolved?)
         (get* conn db e a @ref-wrapper-entity)))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
         (let [db (current-db conn db)]
-          (resolve-entity-e! conn db e e-resolved?)
+          (re-db.read/resolve-entity-e! conn db e e-resolved?)
           (get* conn db e a ref-wrapper-noop))
         (if-some [v (clojure.core/get o a)] v nf)))
     IDeref
     (-deref [this]
       (let [db (current-db conn db)]
-        (when-let [e (resolve-entity-e! conn db e e-resolved?)]
+        (when-let [e (re-db.read/resolve-entity-e! conn db e e-resolved?)]
           (depend-on-triple! e nil nil)
           (rp/eav db e))))
     ISeqable

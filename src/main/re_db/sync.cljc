@@ -121,7 +121,7 @@
    A ref's value may specify an `::init` result to send upon connection."
   [channel query !ref]
   (reset! !last-event {:event :watch-ref :channel channel :query-id query})
-  (r/update-meta! !ref assoc ::query-id query) ;; mutate meta of !ref to include query-id for monitoring
+  (alter-meta! !ref assoc ::query-id query) ;; mutate meta of !ref to include query-id for monitoring
   (swap! !watches update channel (fnil conj #{}) !ref)
   (add-watch !ref channel (fn [_ _ _ value]
                             (send channel (wrap-result query (dissoc value ::init)))))
