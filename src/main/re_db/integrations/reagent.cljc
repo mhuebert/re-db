@@ -4,7 +4,7 @@
 
 #?(:cljs
    (extend-type ratom/Reaction
-     r/ICountReferences
+     r/IReactiveValue
      (r/dispose! [this] (ratom/dispose! this))
      (r/add-on-dispose! [this f] (ratom/add-on-dispose! this f))
      (r/get-watches [^ratom/Reaction this] (.-watches this))

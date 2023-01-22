@@ -1,7 +1,20 @@
 (ns re-db.hooks
-  (:require [re-db.util :as util]
-            [re-db.reactive :as r :refer [*owner*]]
-            [re-db.impl.hooks :as -hooks :refer [*hook-i*]]))
+  (:require [re-db.impl.hooks :as -hooks :refer [*hook-i*]]
+            [re-db.reactive :as r]
+            [re-db.util :as util]))
+
+(util/support-clj-protocols
+  (deftype AtomLike [value update-fn]
+    IDeref (-deref [_] value)
+    IReset (-reset! [_ new-value] (update-fn (fn [_] new-value)) new-value)
+    ISwap
+    (-swap! [_ f] (update-fn f))
+    (-swap! [_ f a] (update-fn #(f % a)))
+    (-swap! [_ f a b] (update-fn #(f % a b)))
+    (-swap! [_ f a b xs] (update-fn #(apply f % a b xs)))
+    IIndexed
+    (-nth [_ i] (case i 0 value 1 update-fn))
+    (-nth [_ i nf] (case i 0 value 1 update-fn nf))))
 
 (defn eval-fn
   ([f] (if (fn? f) (f) f))
@@ -15,7 +28,7 @@
    Returns nil."
   ([f] (use-effect f nil))
   ([f deps]
-   (let [owner *owner*
+   (let [owner r/*owner*
          hook (-hooks/get-next-hook! owner :state)
          i @*hook-i*]
      (when (or (-hooks/fresh? hook) (not= (:prev-deps hook) deps))
@@ -35,7 +48,7 @@
    f is called once to initialize, then re-evaluated when `deps` change."
   ([f] (use-memo f nil))
   ([f deps]
-   (let [owner *owner*
+   (let [owner r/*owner*
          hook (-hooks/get-next-hook! owner :state)
          i @*hook-i*]
      (:value
@@ -45,44 +58,45 @@
         hook)))))
 
 (defn use-state [initial-state]
-  (let [owner *owner*
+  (let [owner r/*owner*
         hook (-hooks/get-next-hook! owner :state)
-        i @*hook-i*]
-    ((juxt :value :update-fn)
-     (if (-hooks/fresh? hook)
-       (-hooks/update-hook! owner i merge
-         {:value (r/without-deref-capture (eval-fn initial-state))
-          :update-fn (fn [value]
-                       (let [old-value (:value (-hooks/get-hook owner i))
-                             new-value (if (fn? value)
-                                         (r/without-deref-capture (value old-value))
-                                         value)]
-                         (-hooks/update-hook! owner i assoc :value new-value)
-                         (when (not= old-value new-value)
-                           (r/compute! owner))
-                         new-value))})
-       hook))))
+        {:keys [value update-fn]} (if (-hooks/fresh? hook)
+                                    (let [i @*hook-i*]
+                                      (-hooks/update-hook! owner i merge
+                                        {:value (r/without-deref-capture (eval-fn initial-state))
+                                         :update-fn (fn [value]
+                                                      (let [old-value (:value (-hooks/get-hook owner i))
+                                                            new-value (if (fn? value)
+                                                                        (r/without-deref-capture (value old-value))
+                                                                        value)]
+                                                        (-hooks/update-hook! owner i assoc :value new-value)
+                                                        (when (not= old-value new-value)
+                                                          (r/compute! owner))
+                                                        new-value))}))
+                                    hook)]
+    (->AtomLike value update-fn)))
 
 (defn use-reducer [f init]
-  (let [[state set-state!] (use-state init)]
-    [state (fn [v] (set-state! (f state v)))]))
+  (let [!st (use-state init)]
+    (->AtomLike (.-state !st)
+                (fn [v] ((.-update-fn !st) #(f % v))))))
 
 (defn use-volatile [initial-state]
-  (let [owner *owner*
+  (let [owner r/*owner*
         hook (-hooks/get-next-hook! owner :state)
-        i @*hook-i*]
-    ((juxt :value :update-fn)
-     (if (-hooks/fresh? hook)
-       (-hooks/update-hook! owner i merge
-         {:value (r/without-deref-capture (eval-fn initial-state))
-          :update-fn (fn [value]
-                       (let [old-value (:value (-hooks/get-hook owner i))
-                             new-value (if (fn? value)
-                                         (r/without-deref-capture (value old-value))
-                                         value)]
-                         (-hooks/update-hook! owner i assoc :value new-value)
-                         new-value))})
-       hook))))
+        {:keys [value update-fn]} (if (-hooks/fresh? hook)
+                                    (let [i @*hook-i*]
+                                      (-hooks/update-hook! owner i merge
+                                        {:value (r/without-deref-capture (eval-fn initial-state))
+                                         :update-fn (fn [value]
+                                                      (let [old-value (:value (-hooks/get-hook owner i))
+                                                            new-value (if (fn? value)
+                                                                        (r/without-deref-capture (value old-value))
+                                                                        value)]
+                                                        (-hooks/update-hook! owner i assoc :value new-value)
+                                                        new-value))}))
+                                    hook)]
+    (->AtomLike value update-fn)))
 
 (defn use-watch
   "Returns [old-value, new-value] when ref changes - initially [nil, value]"

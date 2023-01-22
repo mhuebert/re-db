@@ -50,6 +50,9 @@
     ISwap clojure.lang.IAtom
     -swap! swap
 
+    IIndexed clojure.lang.Indexed
+    -nth nth
+
     IWatchable clojure.lang.IRef
     -add-watch addWatch
     -remove-watch removeWatch})

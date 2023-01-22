@@ -8,18 +8,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Protocols
 
-(defprotocol ICompute
-  "Protocol for signals that have a compute function"
+(defprotocol IReactiveFunction
+  "Protocol for reactive values that have a compute function"
   (compute! [this] "(re)compute the value of this, returns true if value changed")
   (set-stale! [this] "mark instance as stale")
   (stale? [this] "the instance must be (re)computed before a valid value can be read")
   (computes? [this] "marker method - returns false for default impl"))
 
-(defprotocol ICountReferences
-  "Protocol for types that track watches and dispose when unwatched.
-
-   An instance can be detached, which means it remains active regardless of watched status
-   and will never be automatically disposed."
+(defprotocol IReactiveValue
+  "Protocol for reactive values that can be watched and have a lifecycle based on reference count"
   (get-watches [this])
   (set-watches! [this new-watches])
   (add-on-dispose! [this f])
@@ -43,7 +40,7 @@
 ;; Default implementations
 
 (extend-type #?(:clj Object :cljs object)
-  ICountReferences
+  IReactiveValue
   (get-watches [this] this)
   (set-watches! [this new-watches] this)
   (add-on-dispose! [this f] this)
@@ -51,15 +48,14 @@
   (detach! [this] this)
   (detached? [this] true)
 
-  ICompute
+  IReactiveFunction
   (compute! [this] false)
   (stale? [this] false)
   (set-stale! [this] this)
   (computes? [this] false)
 
   IPeek
-  (peek [this] (macros/without-deref-capture @this))
-  )
+  (peek [this] (macros/without-deref-capture @this)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Notify
@@ -87,6 +83,7 @@
   "Owner of the current reactive computation"
   nil)
 
+;; for reagent compatibility
 #?(:cljs (defonce get-reagent-context (constantly nil)))
 
 (defn owner []
@@ -112,7 +109,7 @@
       to)))
 
 (defmacro redef
-  "Like `def` but if name already exists, migrates old reaction to new reaction using become"
+  "Reactive `def` - value should be a reactive value. If name already exists, migrates watches to the new reactive value."
   ([name doc rx] `(redef ~(with-meta name {:doc doc}) ~rx))
   ([name rx]
    (let [rx-sym (gensym "rx")]
@@ -156,9 +153,7 @@
 (def init-derefs #{})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Reactive Atom - for holding values, with reference tracking and disposal
-
-(declare collect-deref!)
+;; Reactive Atom - basic reactive value
 
 (util/support-clj-protocols
   (deftype RAtom [^:volatile-mutable state
@@ -166,7 +161,7 @@
                   ^:volatile-mutable dispose-fns
                   ^:volatile-mutable detached
                   ^:volatile-mutable meta]
-    ICountReferences
+    IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this! new-watches] (set! watches new-watches))
     (detached? [this] detached)
@@ -233,16 +228,16 @@
 
 (util/support-clj-protocols
   (deftype Reaction
-    [^:volatile-mutable f
+    [^:volatile-mutable compute-fn
      ^:volatile-mutable state
+     ^:volatile-mutable watches
+     ^:volatile-mutable dispose-fns
+     ^:volatile-mutable detached
      ^:volatile-mutable derefs
      ^:volatile-mutable hooks
-     ^:volatile-mutable dispose-fns
-     ^:volatile-mutable watches
      ^:volatile-mutable stale
-     ^:volatile-mutable detached
      ^:volatile-mutable meta]
-    ICountReferences
+    IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))
     (detached? [this] detached)
@@ -296,13 +291,13 @@
     (-swap! [this f x y] (reset! this (f state x y)))
     (-swap! [this f x y args] (reset! this (apply f state x y args)))
     IWatchable
-    (-add-watch [this key f]
+    (-add-watch [this key compute-fn]
 
      ;; if the reaction is not yet initialized, do it here (before adding the watch,
      ;; so that the watch-fn is not called here)
       (when stale (compute! this))
 
-      (macros/set-swap! watches assoc key f)
+      (macros/set-swap! watches assoc key compute-fn)
       this)
     (-remove-watch [this key]
       (macros/set-swap! watches dissoc key)
@@ -312,7 +307,7 @@
     ITrackDerefs
     (get-derefs [this] derefs)
     (set-derefs! [this new-derefs] (set! derefs new-derefs))
-    ICompute
+    IReactiveFunction
     (stale? [this] stale)
     (set-stale! [this] (set! stale true))
     (compute! [this]
@@ -320,7 +315,7 @@
       (let [new-val (macros/with-owner this
                       (macros/with-hook-support!
                        (macros/with-deref-capture! this
-                         (f))))
+                         (compute-fn))))
             changed? (not= state new-val)]
         (when changed?
           (reset! this new-val))
@@ -337,12 +332,12 @@
                                         detached init-detached}}]
   (cond-> (->Reaction compute-fn
                       init
+                      init-watches
+                      (if on-dispose [on-dispose] init-dispose-fns)
+                      detached
                       init-derefs
                       -hooks/init-hooks
-                      (if on-dispose [on-dispose] init-dispose-fns)
-                      init-watches
                       stale
-                      detached
                       meta)
           detached (doto compute!)))
 

@@ -17,7 +17,7 @@
                 (prn (str "Subscription not defined: " id) svec))
             sub (doto (apply init-fn args)
                   (->> (swap! !subscription-cache assoc svec)))]
-        (assert (satisfies? r/ICompute sub) "Subscription function must return a reaction")
+        (assert (satisfies? r/IReactiveValue sub) "Subscription function must return a reactive value")
         (add-on-dispose! sub (fn [_]
                                (swap! !subscription-cache dissoc svec)))
         sub)))

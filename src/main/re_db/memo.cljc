@@ -12,7 +12,7 @@
   "Create a new instance to memoize"
   [!meta args]
   (let [value (apply (:init-fn @!meta) args)]
-    (when (and value (satisfies? r/ICountReferences value))
+    (when (and value (satisfies? r/IReactiveValue value))
       (swap! !meta assoc-in [:cache args] value)
       (add-on-dispose! value (fn [_] (swap! !meta update :cache dissoc args))))
     value))
@@ -37,7 +37,7 @@
                           :init-fn (fn ~@args)})))
 
 (defmacro def-memo
-  "Defines a memoized function. If the return value implements re-db.reactive/ICountReferences,
+  "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
    it will be removed from the memo cache when the last reference is removed."
   ([name f] `(re-db.memo/def-memo ~name nil ~f))
   ([name doc f]
@@ -57,7 +57,7 @@
     args))
 
 (defmacro defn-memo
-  "Defines a memoized function. If the return value implements re-db.reactive/ICountReferences,
+  "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
    it will be removed from the memo cache when the last reference is removed."
   [name & args]
   (let [args (clean-fn-args args)]
