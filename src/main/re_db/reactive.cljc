@@ -10,9 +10,10 @@
 
 (defprotocol IReactiveFunction
   "Protocol for reactive values that have a compute function"
-  (compute! [this] "(re)compute the value of this, returns true if value changed")
-  (set-stale! [this] "mark instance as stale")
-  (stale? [this] "the instance must be (re)computed before a valid value can be read")
+  (compute! [this] "(re)compute value, return this")
+  (compute [this] "compute value without performing side effects, return this")
+  (set-stale! [this stale] "mark instance as stale, return this")
+  (stale? [this] "returns true if the instance must be (re)computed before a valid value can be read")
   (computes? [this] "marker method - returns false for default impl"))
 
 (defprotocol IReactiveValue
@@ -49,9 +50,10 @@
   (detached? [this] true)
 
   IReactiveFunction
-  (compute! [this] false)
+  (compute! [this] this)
+  (compute [this] nil)
   (stale? [this] false)
-  (set-stale! [this] this)
+  (set-stale! [this stale] this)
   (computes? [this] false)
 
   IPeek
@@ -60,22 +62,50 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Notify
 ;;
-;; When a ref changes, notify dependents (watches) in topological order,
-;; once per epocph.
+;; When a ref changes, notify dependents (watches) in topological order
+
+(defn rdistinct
+  "Returns v keeping the last occurrence of each element."
+  [v]
+  (into ()
+        (distinct)
+        (rseq v)))
+
+(defn sorted-dependents
+  ([root get-fn] (some-> (sorted-dependents #{} root get-fn) rdistinct))
+  ([seen root get-dependents]
+   (let [seen (conj seen root)
+         depts (get-dependents root)]
+     (reduce (fn [acc x]
+               (if (seen x)
+                 acc
+                 (into acc (sorted-dependents seen x get-dependents))))
+             (vec depts)
+             depts))))
+
+(def ^:dynamic *notifying* nil)
+
+(defn- handle-change! [ref old-val new-val]
+  (doseq [[k f] (get-watches ref)]
+    (if (computes? k)
+      (set-stale! k true)
+      (vswap! *notifying* conj #(f k ref old-val new-val)))))
 
 (defn notify-watches
   [ref old-val new-val]
-  #_(doseq [[k f] (get-watches ref)] (f k ref old-val new-val))
-
-  (let [watches (get-watches ref)]
-    ;; mark immediate depts as stale before evaluating any of them
-    ;; (causes transitive depts to evaluate in order)
-    (doseq [ref (keys watches)] (set-stale! ref))
-
-    (doseq [[k f] watches]
-      (if (computes? k)
-        (when (stale? k) (compute! k))
-        (f k ref old-val new-val)))))
+  (when (seq (get-watches ref))
+    (if *notifying*
+      (handle-change! ref old-val new-val)
+      (binding [*notifying* (volatile! [])]
+        (handle-change! ref old-val new-val)
+        (doseq [r (sorted-dependents ref (comp keys get-watches))
+                :when (stale? r)
+                :let [_ (set-stale! r false)
+                      old-val (peek r)
+                      new-val (compute r)]]
+          (when (not= old-val new-val)
+            (reset! r new-val)))
+        (doseq [f @*notifying*] (f))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -309,17 +339,18 @@
     (set-derefs! [this new-derefs] (set! derefs new-derefs))
     IReactiveFunction
     (stale? [this] stale)
-    (set-stale! [this] (set! stale true))
+    (set-stale! [this is-stale] (set! stale is-stale))
+    (compute [this]
+      (macros/with-owner this
+        (macros/with-hook-support!
+         (macros/with-deref-capture! this
+           (compute-fn)))))
     (compute! [this]
       (set! stale false)
-      (let [new-val (macros/with-owner this
-                      (macros/with-hook-support!
-                       (macros/with-deref-capture! this
-                         (compute-fn))))
-            changed? (not= state new-val)]
-        (when changed?
+      (let [new-val (compute this)]
+        (when (not= state new-val)
           (reset! this new-val))
-        changed?))
+        this))
     (computes? [this] true)))
 
 (defn make-reaction [compute-fn & {:as opts
@@ -339,7 +370,7 @@
                       -hooks/init-hooks
                       stale
                       meta)
-          detached (doto compute!)))
+          detached compute!))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
