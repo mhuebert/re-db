@@ -207,7 +207,7 @@
   (is (= #{\a \b}
          (into #{} (map :name) (api/where [:name])))))
 
-(deftest subscriptions
+(deftest memo
   (r/session
 
    ;; source atom
@@ -266,6 +266,7 @@
      (is (= @rx 1))
      (r/compute! rx)
      (is (= @rx 2) "With an owner present, a reaction persists across time."))))
+
 
 (comment
  (deftest pattern-listeners

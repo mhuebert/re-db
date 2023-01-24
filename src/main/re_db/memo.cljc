@@ -1,6 +1,7 @@
 (ns re-db.memo
   "Subscriptions: named reactive computations cached globally for deduplication of effort"
-  (:require [clojure.core :as core]
+  (:refer-clojure :exclude [memoize fn defn])
+  (:require [clojure.core :as c]
             [clojure.string :as str]
             [re-db.reactive :as r :refer [add-on-dispose!]]
             [re-db.macros :as macros])
@@ -8,67 +9,65 @@
 
 ;; memoize, but with reference counting (& lifecycle)
 
-(defn- instance!
-  "Create a new instance to memoize"
-  [!meta args]
-  (let [value (apply (:init-fn @!meta) args)]
+(defn- new-entry!
+  "Adds an entry to the cache, with a dispose hook to remove when unwatched"
+  [!state args]
+  (let [value (apply (:init-fn @!state) args)]
     (when (and value (satisfies? r/IReactiveValue value))
-      (swap! !meta assoc-in [:cache args] value)
-      (add-on-dispose! value (fn [_] (swap! !meta update :cache dissoc args))))
+      (swap! !state assoc-in [:cache args] value)
+      (add-on-dispose! value (c/fn [_] (swap! !state update :cache dissoc args))))
     value))
 
-(defn reset-fn!
-  "Resets the init-fn for a def, "
-  [!meta init-fn]
-  (swap! !meta assoc :init-fn init-fn)
-  (let [cache (:cache @!meta)]
-    (swap! !meta update :cache empty)
-    (doseq [[args old-rx] cache]
-      (r/become old-rx (fn [old-val] (instance! !meta args))))))
+(c/defn get-state [f] (::state (meta f)))
 
-(defn constructor-fn [!meta]
-  (with-meta (fn [& args]
-               (or (get-in @!meta [:cache args])
-                   (instance! !meta args)))
-             {::meta !meta}))
+(c/defn reset-fn!
+  "Resets the init-fn for a memoized function"
+  [f init-fn]
+  (let [!state (get-state f)]
+    (swap! !state assoc :init-fn init-fn)
+    (let [cache (:cache @!state)]
+      (swap! !state update :cache empty)
+      (doseq [[args old-rx] cache]
+        (r/become old-rx (c/fn [_] (new-entry! !state args)))))
+    f))
+
+(c/defn constructor-fn [!state]
+  (with-meta (c/fn [& args]
+               (or (get-in @!state [:cache args])
+                   (new-entry! !state args)))
+             {::state !state}))
+
+(c/defn memoize [f]
+  (constructor-fn (atom {:cache {}
+                         :init-fn f})))
 
 (defmacro fn-memo [& args]
-  `(constructor-fn (atom {:cache {}
-                          :init-fn (fn ~@args)})))
+  `(memoize (c/fn ~@args)))
 
 (defmacro def-memo
   "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
    it will be removed from the memo cache when the last reference is removed."
-  ([name f] `(re-db.memo/def-memo ~name nil ~f))
-  ([name doc f]
+  ([name doc f] `(re-db.memo/def-memo ~(with-meta name {:doc doc}) ~f))
+  ([name f]
    (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
-   `(do (declare ~name)
-        (let [f# ~f
-              !meta# (if (~'re-db.macros/present? ~name)
-                       (::meta (meta ~name))
-                       (atom {:cache {}
-                              :init-fn f#}))]
-          (reset-fn! !meta# f#)
-          (def ~name (constructor-fn !meta#))))))
+   `(do (defonce ~name (memoize nil))
+        (reset-fn! ~name ~f)
+        ~name)))
 
-(defn clean-fn-args [args]
-  (if (string? (first args))
-    (rest args)
-    args))
+(c/defn- without-docstring [args] (cond-> args (string? (first args)) rest))
 
 (defmacro defn-memo
   "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
    it will be removed from the memo cache when the last reference is removed."
   [name & args]
-  (let [args (clean-fn-args args)]
-    `(def-memo ~name (fn ~name ~@args))))
+  `(def-memo ~name (c/fn ~name ~@(without-docstring args))))
 
-(defn clear-memo! [memo]
-  (let [!meta (::meta (meta memo))]
-    (doseq [[args rx] (:cache @!meta)]
+(c/defn dispose! [memoized]
+  (let [!state (::state (meta memoized))]
+    (doseq [[args rx] (:cache @!state)]
       (r/dispose! rx))
-    (swap! !meta update :cache empty))
-  memo)
+    (swap! !state update :cache empty))
+  memoized)
 
 (defmacro once
   "Like defonce for `def-memo` and `defn-memo`"
@@ -94,31 +93,32 @@
  ;; swap: recomputes
  (swap! !a inc)
  ;; clear: disposes
- (clear-memo! $inc)
+ (dispose! $inc)
  ;; session: init & dispose
  (r/session
   @($inc !a))
 
  (require '[re-db.hooks :as hooks])
- (def-memo $sleeper
-   (fn [& {:as options :keys [limit sleep] :or {limit 50 sleep 2000}}]
-     (r/reaction
-      (let [[counter count!] (hooks/use-state 0)
-            !future (hooks/use-memo #(atom nil))]
-        (prn :compute counter)
-        (hooks/use-effect (fn [] (prn :init counter)
-                            #(do (prn :dispose counter)
-                                 (some-> @!future future-cancel))))
-        (when (< counter limit)
-          (reset! !future (future (Thread/sleep sleep)
-                                  (count! inc))))
-        counter))))
+ (defn-memo $sleeper [& {:as options
+                         :keys [limit sleep]
+                         :or {limit 50 sleep 2000}}]
+   (r/reaction
+    (let [!counter (hooks/use-state 0)
+          !future (hooks/use-memo #(atom nil))]
+      (prn :compute--- @!counter)
+      (hooks/use-effect
+       (fn []
+           (prn :init @!counter)
+           #(do (prn :dispose @!counter)
+                (some-> @!future future-cancel))))
+      (when (< @!counter limit)
+        (reset! !future (future (Thread/sleep sleep)
+                                (swap! !counter inc))))
+      @!counter)))
 
- (clear-memo! $sleeper)
+
  ;; adds watches (removes old watches)
- (remove-watch ($sleeper) :w)
  (add-watch ($sleeper) :w (fn [_ _ _ n] (prn :watch n)))
- @($sleeper))
-
-
-
+ (remove-watch ($sleeper) :w)
+ (dispose! $sleeper)
+ )

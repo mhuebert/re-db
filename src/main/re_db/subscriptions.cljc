@@ -1,45 +1,31 @@
 (ns re-db.subscriptions
-  "Subscriptions: global cache of memoized reactive computations with garbage collection"
-  (:require [re-db.reactive :as r :refer [add-on-dispose! dispose!]])
+  "Registry of named subscriptions (memoized reactive computations)"
+  (:require
+   [re-db.memo :as memo]
+   [re-db.reactive :as r])
   #?(:cljs (:require-macros re-db.subscriptions)))
 
-(defonce !subscription-defs (atom {}))
-;; map of {svec, sub}
-(defonce !subscription-cache (atom {}))
+(defonce !subscriptions (atom {}))
 
 (defn subscription
   "Finds or creates a subscription for the given svec, a vector of [id & args]"
-  [svec]
-  (or (@!subscription-cache svec)
-      (let [[id & args] svec
-            init-fn (if (fn? id) id (@!subscription-defs id))
-            _ (when-not init-fn
-                (prn (str "Subscription not defined: " id) svec))
-            sub (doto (apply init-fn args)
-                  (->> (swap! !subscription-cache assoc svec)))]
-        (assert (satisfies? r/IReactiveValue sub) "Subscription function must return a reactive value")
-        (add-on-dispose! sub (fn [_]
-                               (swap! !subscription-cache dissoc svec)))
-        sub)))
+  [[id & args]]
+  (if-let [init-fn (@!subscriptions id)]
+    (apply init-fn args)
+    (throw (ex-info (str "Subscription not defined: " id) {:id id :args args}))))
 
 (defn register
   "Define a subscription by providing an id and constructor function, which should
    return a type that implements IDispose (clj) or IDisposable (cljs)"
   [id f]
-  (let [pre-existing? (@!subscription-defs id)]
-    (swap! !subscription-defs assoc id f)
-    #?(:clj
-       (when pre-existing? ;; update existing instances
-         (doseq [[svec old-rx] @!subscription-cache
-                 :when (= id (first svec))]
-           (r/become old-rx (fn [_] (subscription svec)))))))
-
+  (if-let [memoized (@!subscriptions id)]
+    (memo/reset-fn! memoized f)
+    (swap! !subscriptions assoc id (memo/memoize f)))
   id)
 
 (defn clear-subscription-cache! []
-  (try
-    (doseq [sub (vals @!subscription-cache)] (dispose! sub)))
-  (swap! !subscription-cache empty))
+  (doseq [memoized (vals @!subscriptions)] (memo/dispose! memoized))
+  (swap! !subscriptions empty))
 
 (comment
  (clear-subscription-cache!)

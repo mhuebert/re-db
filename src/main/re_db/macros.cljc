@@ -1,6 +1,6 @@
 (ns re-db.macros
-  (:require [clojure.walk :as walk])
-  #_(:require [re-db.reactive :as-alias r]) ;; TODO when cursive fixes bug https://github.com/cursive-ide/cursive/issues/2690
+  (:require [clojure.walk :as walk]
+            [re-db.reactive :as-alias r])
   #?(:cljs (:require-macros re-db.macros)))
 
 ;; Macro implementations are kept separate from macros to facilitate usage from sci
@@ -9,17 +9,16 @@
   `(set! ~sym (~f ~sym ~@args)))
 
 (defmacro with-deref-capture! [owner & body]
-  `(binding [~'re-db.reactive/*captured-derefs* (volatile! ~'re-db.reactive/init-derefs)]
+  `(binding [r/*captured-derefs* (volatile! r/init-derefs)]
      (let [val# (do ~@body)
-           new-derefs# @~'re-db.reactive/*captured-derefs*]
-       (~'re-db.reactive/handle-new-derefs! ~owner new-derefs#)
+           new-derefs# @r/*captured-derefs*]
+       (r/handle-new-derefs! ~owner new-derefs#)
        val#)))
 
 (defn -without-deref-capture [body]
-  `(binding [~'re-db.reactive/*captured-derefs* nil] ~@body))
+  `(binding [r/*captured-derefs* nil] ~@body))
 
 (defmacro without-deref-capture [& body] (-without-deref-capture body))
-
 
 (defn -with-hook-support! [body]
   `(binding [~'re-db.impl.hooks/*hook-i* (volatile! -1)]
@@ -29,36 +28,37 @@
 
 (defn -with-owner [owner body]
   `(let [owner# ~owner]
-     (binding [~'re-db.reactive/*owner* owner#]
+     (binding [r/*owner* owner#]
        ~@body)))
 
 (defmacro with-owner [owner & body] (-with-owner owner body))
 
-(defn reaction* [form env body & args]
-  `(~'re-db.reactive/make-reaction (fn [] ~@body)
-    :meta {:display-name ~(str *ns* "@"
-                               (:line (meta form))
-                               ":"
-                               (:column (meta form)))}
-    ~@args))
+(defn dev-meta [form]
+  {:display-name (str *ns* "@"
+                      (:line (meta form))
+                      ":"
+                      (:column (meta form)))})
 
 (defmacro reaction
   "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
    when they change. Disposes self when last watch is removed."
-  [& body]
-  (reaction* &form &env body))
+  ([expr] `(reaction {} ~expr))
+  ([options & body]
+   (let [[options body] (if (map? options) [options body] [{} (cons options body)])
+         options (update options :meta merge (dev-meta &form))]
+     `(r/make-reaction ~options (fn [] ~@body)))))
 
 (defmacro reaction!
   "Returns an detached reaction: computes immediately, remains active until explicitly disposed."
   [& body]
-  (concat (reaction* &form &env body) [:detached true]))
+  `(r/detach! (reaction ~@body)))
 
 (defmacro session
   "Evaluate body in a reaction which is immediately disposed"
   [& body]
   `(let [rx# (reaction! ~@body)
          v# @rx#]
-     (re-db.reactive/dispose! rx#)
+     (r/dispose! rx#)
      v#))
 
 (defmacro with-session
@@ -66,11 +66,11 @@
   [session & body]
   `(let [session# ~session]
      (with-owner session#
-       (binding [re-db.reactive/*captured-derefs* (volatile! re-db.reactive/init-derefs)]
+       (binding [r/*captured-derefs* (volatile! r/init-derefs)]
          (let [val# (do ~@body)
-               new-derefs# @re-db.reactive/*captured-derefs*]
+               new-derefs# @r/*captured-derefs*]
            (doseq [producer# new-derefs#] (add-watch producer# session# (fn [& args#])))
-           (re-db.reactive/set-derefs! session# (into (re-db.reactive/get-derefs session#) new-derefs#))
+           (r/set-derefs! session# (into (r/get-derefs session#) new-derefs#))
            val#)))))
 
 (defn dequote [x]

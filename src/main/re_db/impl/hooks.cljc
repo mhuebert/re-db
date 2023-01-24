@@ -22,8 +22,8 @@
       (assert (= (:type (meta hook)) expected-type)
               (str "expected hook of type " expected-type ", but found " (:type hook) ". "
                    "A reaction must always call the same hooks in the same order on every evaluation.")))
-    (or hook
-        (set-hook! owner i (with-meta {} {:type expected-type})))))
+    [i (or hook
+           (set-hook! owner i (with-meta {} {:type expected-type})))]))
 
 (defn fresh? [hook] (empty? hook))
 
@@ -31,7 +31,7 @@
 
 (defn dispose-hooks! [this]
   (let [hooks (get-hooks this)]
-    (set-hooks! this init-hooks)
     (doseq [hook hooks
             :let [dispose (:dispose hook)]]
-      (when dispose (dispose)))))
+      (when dispose (dispose)))
+    (set-hooks! this init-hooks)))

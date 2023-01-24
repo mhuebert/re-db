@@ -42,7 +42,7 @@
 
 (extend-type #?(:clj Object :cljs object)
   IReactiveValue
-  (get-watches [this] this)
+  (get-watches [this] nil)
   (set-watches! [this new-watches] this)
   (add-on-dispose! [this f] this)
   (dispose! [this] this)
@@ -353,31 +353,34 @@
         this))
     (computes? [this] true)))
 
-(defn make-reaction [compute-fn & {:as opts
-                                   :keys [init
-                                          meta
-                                          on-dispose
-                                          stale
-                                          detached]
-                                   :or {stale init-stale
-                                        detached init-detached}}]
-  (cond-> (->Reaction compute-fn
-                      init
-                      init-watches
-                      (if on-dispose [on-dispose] init-dispose-fns)
-                      detached
-                      init-derefs
-                      -hooks/init-hooks
-                      stale
-                      meta)
-          detached compute!))
+(defn make-reaction
+  ([compute-fn] (make-reaction nil compute-fn))
+  ([{:keys [init
+            meta
+            on-dispose
+            stale
+            detached]
+     :or {stale init-stale
+          detached init-detached}}
+    compute-fn]
+   (cond-> (->Reaction compute-fn
+                       init
+                       init-watches
+                       (cond-> init-dispose-fns
+                               on-dispose (conj on-dispose))
+                       detached
+                       init-derefs
+                       -hooks/init-hooks
+                       stale
+                       meta)
+           detached compute!)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
 ;; clean up afterwards
 
 (defn make-session []
-  (make-reaction (fn []) :stale false))
+  (make-reaction {:stale false} (fn [])))
 
 (comment
  ;; using a session
@@ -393,8 +396,8 @@
 ;; macro passthrough
 (defmacro session [& body] `(macros/session ~@body))
 (defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
-(defmacro reaction [& body] (macros/reaction* &form &env body))
-(defmacro reaction! [& body] (concat (macros/reaction* &form &env body) [:detached true]))
+(defmacro reaction [& body] `(macros/reaction ~@body))
+(defmacro reaction! [& body] `(detach! (macros/reaction ~@body)))
 
 #?(:clj
    (defmethod print-method re_db.reactive.Reaction
