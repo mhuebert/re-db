@@ -39,14 +39,18 @@
                       ":"
                       (:column (meta form)))})
 
+(defn parse-reaction-args [form args]
+  (-> (if (and (map? (first args)) (second args))
+        [(first args) (rest args)]
+        [{} args])
+      (update-in [0 :meta] merge (dev-meta form))))
+
 (defmacro reaction
   "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
    when they change. Disposes self when last watch is removed."
-  ([expr] `(reaction {} ~expr))
-  ([options & body]
-   (let [[options body] (if (map? options) [options body] [{} (cons options body)])
-         options (update options :meta merge (dev-meta &form))]
-     `(r/make-reaction ~options (fn [] ~@body)))))
+  [& body]
+  (let [[options body] (parse-reaction-args &form body)]
+    `(r/make-reaction ~options (fn [] ~@body))))
 
 (defmacro reaction!
   "Returns an detached reaction: computes immediately, remains active until explicitly disposed."

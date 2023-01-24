@@ -21,6 +21,12 @@
     (r/add-on-dispose!
      (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))))
 
+(defn patterns
+  ([] (patterns r/*owner*))
+  ([q]
+   (->> (r/get-derefs q)
+        (keep (comp :pattern meta)))))
+
 (defn handle-report!
   "Invalidate readers for a tx-report from conn based on datoms transacted"
   [conn tx-report]

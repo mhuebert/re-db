@@ -4,6 +4,8 @@
             re-db.integrations.in-memory
             [re-db.macros :as m :refer [defpartial]]
             [re-db.protocols :as rp]
+            [re-db.reactive :as r]
+            [re-db.macros :as macros]
             [re-db.read :as read :refer [*conn*]]
             [re-db.util :as util])
   #?(:cljs (:require-macros re-db.api)))
@@ -23,6 +25,14 @@
      (fn [& args#]
        (binding [*conn* conn#]
          (apply f# args#)))))
+
+(defmacro bound-reaction
+  "Returns a reaction which evaluates `body` with *conn* bound to the provided value."
+  [conn & body]
+  (let [[options body] (macros/parse-reaction-args &form body)]
+    `(let [conn# ~conn]
+       (r/reaction ~options
+        (with-conn conn# ~@body)))))
 
 (defn entity [id] (read/entity id))
 

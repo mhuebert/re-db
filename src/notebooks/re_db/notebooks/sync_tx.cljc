@@ -8,11 +8,10 @@
             [re-db.integrations.reagent]
             [re-db.memo :as memo]
             [re-db.notebooks.tools.websocket :as ws]
-            [re-db.query :as q]
             [re-db.read :as read]
             [re-db.sync :as sync]
-            [re-db.xform :as xf]
             [re-db.sync.entity-diff-1 :as entity-diff]
+            [re-db.xform :as xf]
             #?(:cljs [nextjournal.clerk.render :as render])))
 
 ;; create a db connection. We'll use a re-db in-memory db here but you could also use
@@ -25,11 +24,12 @@
   (->> (mem/transact! conn txs)
        (read/handle-report! conn)))
 
-
 ;; an atom of refs to expose, a map of ids to functions which return reactions.
 ;; refs are requested via vectors of the form [<id> & args].
 (def !refs
-  (let [$entity-fn (memo/fn-memo [id] (q/bound-reaction conn (db/get id)))]
+  (let [$entity-fn (memo/fn-memo [id]
+                     (db/bound-reaction conn
+                       (sync/try-value (db/get id))))]
     (atom
      {:entity-1 (constantly ($entity-fn 1))
       :entity $entity-fn
