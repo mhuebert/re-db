@@ -10,8 +10,8 @@
 (defn subscription
   "Finds or creates a subscription for the given svec, a vector of [id & args]"
   [[id & args]]
-  (if-let [init-fn (@!subscriptions id)]
-    (apply init-fn args)
+  (if-let [memoized (@!subscriptions id)]
+    (apply memoized args)
     (throw (ex-info (str "Subscription not defined: " id) {:id id :args args}))))
 
 (defn register
