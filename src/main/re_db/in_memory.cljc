@@ -553,3 +553,21 @@
   (if (map? conn-or-schema)
     (create-conn conn-or-schema)
     conn-or-schema))
+
+(comment
+ ;; should this exist? mem-only...
+ (defmacro branch
+   "Evaluates body with *conn* bound to a fork of `conn`. Returns a transaction."
+   [conn & body]
+   (let [[conn body] (if (or (symbol? conn) (map? conn))
+                       [conn body]
+                       ['re-db.api/*conn* (cons conn body)])]
+     `(binding [*conn* (mem/clone ~conn)
+                ~'re-db.in-memory/*branch-tx-log* (atom [])]
+        (let [db-before# @*conn*
+              val# (do ~@body)
+              txs# @~'re-db.in-memory/*branch-tx-log*]
+          (with-meta {:db-before db-before#
+                      :db-after @*conn*
+                      :datoms (into [] (mapcat :datoms) txs#)}
+                     {:value val#}))))))

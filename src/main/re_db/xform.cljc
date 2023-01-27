@@ -90,6 +90,7 @@
  (r/session
   (let [source (atom 0)
         before-after (transform source (before:after))]
+    @before-after
     (swap! source inc)
     @before-after))
 

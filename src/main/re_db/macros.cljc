@@ -91,8 +91,12 @@
 
   eg
   (defpartial add-to-1 {:f `(+ 1 _)} ([x]) ([x y]))"
-  [name {:keys [f]} & arglists]
-  (let [f (dequote f)]
+  [name & args]
+  (let [[name args] (if (string? (first args))
+                      [(with-meta name {:doc (first args)}) (rest args)]
+                      [name args])
+        [{:keys [f]} & arglists] args
+        f (dequote f)]
     `(defn ~name
        ~@(for [argv arglists
                :let [argv (if (list? argv) (first argv) argv)]]

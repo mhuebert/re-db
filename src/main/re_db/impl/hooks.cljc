@@ -15,23 +15,24 @@
 
 (def ^:dynamic *hook-i*)
 
-(defn get-next-hook! [owner expected-type]
+(defn get-next-hook! [owner expected-type & [init-fn]]
   (let [i (vswap! *hook-i* inc)
         hook (get-hook owner i)]
     (when hook
-      (assert (= (:type (meta hook)) expected-type)
-              (str "expected hook of type " expected-type ", but found " (:type hook) ". "
+      (assert (= (:hook/type hook) expected-type)
+              (str "expected hook of type " expected-type ", but found " (:hook/type hook) ". "
                    "A reaction must always call the same hooks in the same order on every evaluation.")))
-    [i (or hook
-           (set-hook! owner i (with-meta {} {:type expected-type})))]))
-
-(defn fresh? [hook] (empty? hook))
+    [i
+     (or hook
+         (set-hook! owner i (merge (if init-fn {:hook/value (init-fn)} {})
+                                   {:hook/type expected-type})))
+     (nil? hook)]))
 
 (def init-hooks [])
 
 (defn dispose-hooks! [this]
   (let [hooks (get-hooks this)]
     (doseq [hook hooks
-            :let [dispose (:dispose hook)]]
+            :let [dispose (:hook/dispose hook)]]
       (when dispose (dispose)))
     (set-hooks! this init-hooks)))

@@ -10,8 +10,8 @@
 
 (defprotocol IReactiveFunction
   "Protocol for reactive values that have a compute function"
-  (compute! [this] "(re)compute value, return this")
-  (compute [this] "compute value without performing side effects, return this")
+  (compute! [this] "compute value, reset state, notify dependents")
+  (compute [this] "compute value")
   (set-stale! [this stale] "mark instance as stale, return this")
   (stale? [this] "returns true if the instance must be (re)computed before a valid value can be read")
   (computes? [this] "marker method - returns false for default impl"))
@@ -396,6 +396,7 @@
 ;; macro passthrough
 (defmacro session [& body] `(macros/session ~@body))
 (defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
+(defmacro static [& body] `(macros/without-deref-capture ~@body))
 (defmacro reaction [& body] `(macros/reaction ~@body))
 (defmacro reaction! [& body] `(detach! (macros/reaction ~@body)))
 

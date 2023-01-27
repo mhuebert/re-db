@@ -7,18 +7,19 @@
             [datomic.api :as dm]
             [re-db.api :as db]
             [re-db.hooks :as hooks]
+            [re-db.in-memory :as mem]
             [re-db.integrations.datahike]
             [re-db.integrations.datalevin]
             [re-db.integrations.datomic]
             [re-db.integrations.in-memory]
             [re-db.memo :as memo]
-            [re-db.protocols :as rp]
+            [re-db.triplestore :as ts]
             [re-db.reactive :as r]
             [re-db.read :as read]
             [re-db.schema :as schema]))
 
 
-(read/clear-listeners!)
+(swap! read/!listeners empty)
 
 (defn noids [e]
   (walk/postwalk (fn [x]
@@ -28,7 +29,7 @@
 
 (do
   (def db-uuid (random-uuid))
-  (def mem-conn (db/create-conn))
+  (def mem-conn (mem/create-conn))
   (def dm-conn (dm/connect (doto (str "datomic:mem://db-" db-uuid) dm/create-database)))
   (def dh-conn (let [config {:store {:backend :file :path "/tmp/example"}}]
                  (do (try (dh/delete-database config) (catch Exception e))
@@ -44,9 +45,9 @@
 
 
   (defn transact! [txs]
-    (mapv (fn [{:keys [conn]}]
-            (->> (rp/transact conn txs)
-                 (read/handle-report! conn))) databases))
+    (mapv
+     #(read/transact! (:conn %) txs)
+     databases))
 
   (def initial-data [{:movie/title "The Goonies"
                       :movie/genre "action/adventure"
@@ -68,7 +69,7 @@
                      {:movie/title "Mr. Bean"}])
 
   (doseq [{:keys [conn]} databases]
-    (rp/merge-schema conn {:movie/title (merge schema/string
+    (ts/merge-schema conn {:movie/title (merge schema/string
                                                schema/one
                                                schema/unique-id)
 
@@ -161,14 +162,14 @@
 (deftest reads
 
   (doseq [{:keys [conn]} databases]
-    (rp/merge-schema conn {:owner (merge schema/ref
+    (ts/merge-schema conn {:owner (merge schema/ref
                                          schema/unique-id
                                          schema/one)
                            :person/name (merge schema/unique-id
                                                schema/one
                                                schema/string)})
-    (rp/transact conn [{:person/name "Fred"}])
-    (rp/transact conn [{:owner [:person/name "Fred"]
+    (ts/transact conn [{:person/name "Fred"}])
+    (ts/transact conn [{:owner [:person/name "Fred"]
                         :person/name "Ball"}]))
 
   (dl/update-schema dl-conn {:owner (merge schema/ref
@@ -261,13 +262,13 @@
  ;; logged lookups
 
  (db/with-conn (dm-db)
-   (read/ave :movie/title "Repo Man"))
+   (db/where [[:movie/title "Repo Man"]]))
 
  (db/with-conn (dm-db)
-   (read/ae :movie/title))
+   (db/where [:movie/title]))
 
  (db/with-conn (dm-db)
-   (read/eav [:movie/title "Repo Man"] :movie/top-emotion))
+   (read/get [:movie/title "Repo Man"] :movie/top-emotion))
 
  ;; filtering api
  (db/with-conn (dm-db)
@@ -280,7 +281,7 @@
    (->> (q/where [:movie/release-year 1985])
         (mapv deref)
         #_(q/pull [:movie/release-year :movie/title]))
-   (read/patterns))
+   (read/captured-patterns))
 
  '(db/pull '[* {:sub/child [:person/name :birthdate]}])
 
@@ -329,12 +330,12 @@
    (swap! a inc) (swap! b inc)))
 
 (comment
- (rp/merge-schema dm-conn {:person/name (merge schema/unique-id
+ (ts/merge-schema dm-conn {:person/name (merge schema/unique-id
                                                schema/one
                                                schema/string)
                            :pets (merge schema/ref
                                         schema/many)})
- (rp/transact dm-conn [{:db/id -1
+ (ts/transact dm-conn [{:db/id -1
                         :person/name "Mr. Porcupine"
                         :_pets {:db/id -2
                                 :person/name "Sally"

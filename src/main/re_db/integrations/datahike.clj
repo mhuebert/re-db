@@ -2,36 +2,36 @@
   (:require [datahike.api :as d]
             datahike.datom
             datahike.db
-            [re-db.protocols :as rp])
+            [re-db.triplestore :as ts])
   (:import datahike.db.DB
            datahike.datom.Datom))
 
 (defn- v [^datahike.datom.Datom d] (.-v d))
 
 (extend-type datahike.db.DB
-  rp/ITriple
+  ts/ITripleStore
   (eav
     ([db e a]
      (let [datoms (d/datoms db :eavt e a)]
-       (if (rp/many? db a)
+       (if (ts/many? db a)
          (mapv v datoms)
          (some-> (first datoms) v))))
-    ([db e] (rp/datoms->map db (d/datoms db :eavt e))))
+    ([db e] (ts/datoms->map db (d/datoms db :eavt e))))
   (ave [db a v] (into #{} (map :e) (d/datoms db :avet a v)))
   (ae [db a] (into #{} (map :e) (d/datoms db :aevt a)))
   (datom-a [db a] a)
   (get-schema [db a] (d/entity db a))
-  (id->ident [db e] (or (rp/eav db e :db/ident) e))
+  (id->ident [db e] (or (ts/eav db e :db/ident) e))
   (ref?
-    ([this a] (rp/ref? this a (rp/get-schema this a)))
+    ([this a] (ts/ref? this a (ts/get-schema this a)))
     ([this a schema] (= :db.type/ref (:db/valueType schema))))
   (unique?
-    ([this a] (rp/unique? this a (rp/get-schema this a)))
+    ([this a] (ts/unique? this a (ts/get-schema this a)))
     ([this a schema] (:db/unique schema)))
   (many?
-    ([this a] (rp/many? this a (rp/get-schema this a)))
+    ([this a] (ts/many? this a (ts/get-schema this a)))
     ([this a schema] (= :db.cardinality/many (:db/cardinality schema))))
-  (doto-report-triples [this f report]
+  (report-triples [this report f]
     (doseq [^datahike.datom.Datom datom (:tx-data report)]
       (f (.-e datom) (.-a datom) (.-v datom))))
   (-transact
