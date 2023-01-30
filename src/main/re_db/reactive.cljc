@@ -393,6 +393,7 @@
   "Returns a map containing :value or :error, without throwing an exception."
   [rx]
   (when (stale? rx) (compute! rx))
+  (collect-deref! rx)
   (as-result (peek rx)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

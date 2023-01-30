@@ -26,16 +26,21 @@
   [ref & xforms]
   (let [f (step (apply comp xforms))]
     (r/reaction
-     (let [this r/*owner*]
+     (let [this r/*owner*
+           next-value (r/peek ref)]
        (hooks/use-effect
         (fn []
           (add-watch ref this (fn [_ _ _ _] (r/compute! this)))
           #(remove-watch ref this)))
-       (let [next-step (f (r/peek ref))]
-         (case next-step
-           ::no-op (r/peek this)
-           ::done (do (remove-watch ref this) (r/peek this))
-           next-step))))))
+       (if (r/error? next-value)
+         next-value ;; propagate errors directly
+         (let [next-step (f next-value)]
+           (if (r/error? next-step)
+             next-step
+             (case next-step
+               ::no-op (r/peek this)
+               ::done (do (remove-watch ref this) (r/peek this))
+               next-step))))))))
 
 (defn map [f source]
   (transform source (clojure.core/map f)))

@@ -14,6 +14,7 @@
             [re-db.hooks :as hooks]
             [re-db.xform :as xf]
             [re-db.triplestore :as ts]
+            [re-db.sync :as sync]
             #?@(:cljs [[reagent.core :as reagent :refer [track!]]
                        [reagent.dom :as rdom]
                        [reagent.ratom :as ratom]
@@ -540,16 +541,21 @@
                         (throw e)
                         @n))
         b (r/reaction @a)
-        c (r/reaction @b)]
+        c (r/reaction @b)
+        d (sync/$results c)]
     (is (= 1 @n
            @a @b @c
-           (:value (r/deref-result a)) (:value (r/deref-result b)) (:value (r/deref-result c)))
+           (:value (r/deref-result a)) (:value (r/deref-result b)) (:value (r/deref-result c))
+           (:value @d))
         "Value propagates")
      (swap! n inc)
 
     (is (= e
            (r/peek a) (r/peek b) (r/peek c)
-           (:error (r/deref-result a)) (:error (r/deref-result b)) (:error (r/deref-result c)))
+           (:error (r/deref-result a))
+           (:error (r/deref-result b))
+           (:error (r/deref-result c))
+           (:error (r/peek d)))
         "Error propagates from source to dependents")
     (is (thrown? #?(:clj Exception :cljs js/Error) @c)
         "Dereferencing a reaction with an error throws an exception"))
@@ -559,4 +565,11 @@
              (remove-watch a ::x)
              nil))
         "Adding a watch to a reaction that throws does not throw an exception")))
+
+(deftest xf
+  (let [a (r/reaction 0)
+        b (xf/map inc a)]
+    (is (= 1 @b))
+    (swap! a inc)
+    (is (= 2 @b) "xf/transform is reactive")))
 

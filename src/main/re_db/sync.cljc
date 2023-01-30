@@ -35,7 +35,8 @@
 (memo/defn-memo $results
   "Stream of :sync/snapshot events associating `id` with values of `!ref`"
   [!ref]
-  (xf/map r/as-result !ref))
+  (r/reaction
+   (r/deref-result !ref)))
 
 (defn wrap-result
   "Returns a result message for a given query-id"
