@@ -256,6 +256,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactions - computed reactive values
 
+(defn error [r]
+  (util/guard (peek r) #(instance? #?(:clj Exception :cljs js/Error) %)))
+
 (util/support-clj-protocols
   (deftype Reaction
     [^:volatile-mutable compute-fn
@@ -305,6 +308,8 @@
 
       (when stale (compute! this))
 
+      (when-let [e (error this)] (throw e))
+
       state)
 
     IPeek
@@ -344,7 +349,9 @@
       (macros/with-owner this
         (macros/with-hook-support!
          (macros/with-deref-capture! this
-           (compute-fn)))))
+           (try (compute-fn)
+                (catch #?(:cljs js/Error :clj Exception) e
+                  e))))))
     (compute! [this]
       (set! stale false)
       (let [new-val (compute this)]
@@ -374,6 +381,13 @@
                        stale
                        meta)
            detached compute!)))
+
+(defn result-map [r]
+  (if-let [e (error r)]
+    {:error e}
+    (try {:value @r}
+         (catch #?(:cljs js/Error :clj Exception) e
+           {:error e}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and

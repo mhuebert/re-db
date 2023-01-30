@@ -532,3 +532,26 @@
 
   )
 
+(deftest error-propagation
+
+  (let [e (ex-info "error" {})
+        n (r/atom 1)
+        a (r/reaction (if (even? @n)
+                        (throw e)
+                        @n))
+        b (r/reaction @a)
+        c (r/reaction @b)]
+    (is (= 1 @n
+           @a @b @c
+           (:value (r/result-map a)) (:value (r/result-map b)) (:value (r/result-map c)))
+        "Value propagates")
+     (swap! n inc)
+
+    (is (= e
+           (r/peek a) (r/peek b) (r/peek c)
+           (r/error a) (r/error b) (r/error c)
+           (:error (r/result-map a)) (:error (r/result-map b)) (:error (r/result-map c)))
+        "Error propagates from source to dependents")
+    (is (thrown? #?(:clj Exception :cljs js/Error) @c)
+        "Dereferencing a reaction with an error throws an exception")))
+
