@@ -543,15 +543,20 @@
         c (r/reaction @b)]
     (is (= 1 @n
            @a @b @c
-           (:value (r/result-map a)) (:value (r/result-map b)) (:value (r/result-map c)))
+           (:value (r/deref-result a)) (:value (r/deref-result b)) (:value (r/deref-result c)))
         "Value propagates")
      (swap! n inc)
 
     (is (= e
            (r/peek a) (r/peek b) (r/peek c)
-           (r/error a) (r/error b) (r/error c)
-           (:error (r/result-map a)) (:error (r/result-map b)) (:error (r/result-map c)))
+           (:error (r/deref-result a)) (:error (r/deref-result b)) (:error (r/deref-result c)))
         "Error propagates from source to dependents")
     (is (thrown? #?(:clj Exception :cljs js/Error) @c)
-        "Dereferencing a reaction with an error throws an exception")))
+        "Dereferencing a reaction with an error throws an exception"))
+  (let [a (r/reaction (throw (ex-info "error" {})))]
+    (is (nil?
+         (do (add-watch a ::x (fn [& _]))
+             (remove-watch a ::x)
+             nil))
+        "Adding a watch to a reaction that throws does not throw an exception")))
 

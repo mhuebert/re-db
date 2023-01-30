@@ -256,8 +256,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactions - computed reactive values
 
-(defn error [r]
-  (util/guard (peek r) #(instance? #?(:clj Exception :cljs js/Error) %)))
+(defn error? [x]
+  (instance? #?(:cljs js/Error :clj Exception) x))
 
 (util/support-clj-protocols
   (deftype Reaction
@@ -308,7 +308,7 @@
 
       (when stale (compute! this))
 
-      (when-let [e (error this)] (throw e))
+      (when (error? state) (throw state))
 
       state)
 
@@ -382,12 +382,18 @@
                        meta)
            detached compute!)))
 
-(defn result-map [r]
-  (if-let [e (error r)]
-    {:error e}
-    (try {:value @r}
-         (catch #?(:cljs js/Error :clj Exception) e
-           {:error e}))))
+(defn as-result
+  "Returns a map containing :value or :error (if v is an exception)"
+  [value]
+  (if (error? value)
+    {:error value}
+    {:value value}))
+
+(defn deref-result
+  "Returns a map containing :value or :error, without throwing an exception."
+  [rx]
+  (when (stale? rx) (compute! rx))
+  (as-result (peek rx)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
