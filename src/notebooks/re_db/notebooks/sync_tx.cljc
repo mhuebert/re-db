@@ -29,7 +29,7 @@
 (def !refs
   (let [$entity-fn (memo/fn-memo [id]
                      (db/bound-reaction conn
-                       (sync/try-value (db/get id))))]
+                       (db/get id)))]
     (atom
      {:entity-1 (constantly ($entity-fn 1))
       :entity $entity-fn

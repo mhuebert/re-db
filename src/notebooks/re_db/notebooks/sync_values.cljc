@@ -13,18 +13,12 @@
 ;; In this namespace we'll sync the contents of an atom, !list.
 (defonce !list (atom ()))
 
-;; $values is a memoized transform of a ref which wraps values in a {:value _} map.
-
-(memo/defn-memo $values [ref]
-  (xf/transform ref
-    (map (fn [v] {:value v}))))
-
 ;; A websocket server (clj, runs on the jvm):
 #?(:clj
    (def server
      (ws/serve {:port 9060
                 :handlers (merge
-                           (sync/query-handlers {:list ($values !list)})
+                           (sync/query-handlers {:list (sync/$results !list)})
                            {:conj! (fn [_] (swap! !list conj (rand-int 100)))})})))
 
 ;; A websocket channel (cljs, runs in the browser):

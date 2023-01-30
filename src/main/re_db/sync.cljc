@@ -32,35 +32,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Query resolution (server)
 
-(defn wrap-value
-  "Wraps a value result"
-  [x]
-  {:value x})
-
-(memo/defn-memo $values
+(memo/defn-memo $results
   "Stream of :sync/snapshot events associating `id` with values of `!ref`"
   [!ref]
-  (xf/map wrap-value !ref))
-
-(defn wrap-error
-  "Wraps an error result"
-  [x]
-  {:error x})
+  (xf/map r/as-result !ref))
 
 (defn wrap-result
   "Returns a result message for a given query-id"
   [query-id the-result]
   [::result [query-id the-result]])
-
-(defmacro try-value [& body]
-  `(try {:value (do ~@body)}
-        (catch ~(if (:ns &env) 'js/Error 'Exception) e#
-          {:error (ex-message e#)})))
-
-(defmacro reaction
-  "A reaction which returns results compatible with re-db.sync a map containing (:value or :error)"
-  [& body]
-  `(r/reaction (try-value ~@body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Result handling (client)

@@ -1,5 +1,6 @@
 (ns re-db.sync.entity-diff-1
   (:require [re-db.memo :as memo]
+            [re-db.reactive :as r]
             [re-db.sync :as-alias sync]
             [re-db.sync.transit :refer [entity-pointer]]
             [re-db.xform :as xf]))
@@ -53,22 +54,23 @@
 
    Recognizes only a single entity-map, or a list of entity-maps. Any other shape
    will be shipped as-is."
-  [[old-result new-result]]
+  [[old-result new-value]]
   (let [{old-value :value} old-result
-        {new-value :value new-error :error} new-result
-        shape (cond new-error :error
+        shape (cond (r/error? new-value) :error
                     (:db/id new-value) :entities/one
                     (and (sequential? new-value)
                          (:db/id (first new-value))) :entities/many
                     :else :value)]
     (assoc (case shape
-             (:value :error) new-result
+             :value {:value new-value}
+             :error {:error new-value}
              :entities/one {:value (entity-pointer new-value)
                             :txs [(diff-entity old-value new-value)]}
              :entities/many {:value (mapv entity-pointer new-value)
                              :txs (diff-entities old-value new-value)})
       ::sync/init (case shape
-                    (:value :error) new-result
+                    :value {:value new-value}
+                    :error {:error new-value}
                     :entities/one {:value (entity-pointer new-value)
                                    :txs [new-value]}
                     :entities/many {:value (mapv entity-pointer new-value)
