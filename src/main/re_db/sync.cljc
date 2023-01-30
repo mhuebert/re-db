@@ -55,7 +55,7 @@
 (defmacro try-value [& body]
   `(try {:value (do ~@body)}
         (catch ~(if (:ns &env) 'js/Error 'Exception) e#
-          {:error e#})))
+          {:error (ex-message e#)})))
 
 (defmacro reaction
   "A reaction which returns results compatible with re-db.sync a map containing (:value or :error)"

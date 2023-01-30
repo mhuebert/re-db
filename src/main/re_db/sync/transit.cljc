@@ -30,8 +30,9 @@
 
 #?(:cljs (def reader (t/reader :json {:handlers read-handlers})))
 (defn unpack [x] #?(:clj  (let [in (ByteArrayInputStream. (.getBytes x))]
-                            (t/read (t/reader in :json)))
+                            (t/read (t/reader in :json {:handlers read-handlers})))
                     :cljs (t/read reader x)))
 
 (comment
+ (unpack (pack (ex-info "foo" {})))
  (unpack (pack {:x 1})))
