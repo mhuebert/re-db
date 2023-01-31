@@ -1,5 +1,5 @@
 (ns re-db.reactive
-  (:refer-clojure :exclude [atom peek])
+  (:refer-clojure :exclude [atom peek catch])
   (:require [re-db.macros :as macros]
             [re-db.util :as util]
             [re-db.impl.hooks :as -hooks])
@@ -382,20 +382,6 @@
                        meta)
            detached compute!)))
 
-(defn as-result
-  "Returns a map containing :value or :error (if v is an exception)"
-  [value]
-  (if (error? value)
-    {:error value}
-    {:value value}))
-
-(defn deref-result
-  "Returns a map containing :value or :error, without throwing an exception."
-  [rx]
-  (when (stale? rx) (compute! rx))
-  (collect-deref! rx)
-  (as-result (peek rx)))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
 ;; clean up afterwards
@@ -414,12 +400,34 @@
    (with-session my-session @b)
    (dispose! my-session)))
 
-;; macro passthrough
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Macros
+
 (defmacro session [& body] `(macros/session ~@body))
 (defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
 (defmacro static [& body] `(macros/without-deref-capture ~@body))
 (defmacro reaction [& body] `(macros/reaction ~@body))
 (defmacro reaction! [& body] `(detach! (macros/reaction ~@body)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Error handling
+
+
+(defn deref-result
+  "Returns [error, value] vector, without throwing an exception."
+  [!ref]
+  (when (stale? !ref) (compute! !ref))
+  (collect-deref! !ref)
+  (let [v (peek !ref)]
+    (if (error? v)
+      [v nil]
+      [nil v])))
+
+(defn catch [!ref f]
+  (re-db.reactive/reaction
+   (let [[error value] (deref-result !ref)]
+     (if error (f error) value))))
+
 
 #?(:clj
    (defmethod print-method re_db.reactive.Reaction

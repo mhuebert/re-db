@@ -5,9 +5,7 @@
             [re-db.hooks :as hooks]
             [re-db.reactive :as r]
             [re-db.memo :as memo]
-            [re-db.util :as u]
-            [re-db.xform :as xf])
-  #?(:cljs (:require-macros re-db.sync)))
+            [re-db.util :as u]))
 
 ;; Ideas
 ;; - everything is based on watching refs that contain streams of messages.
@@ -32,11 +30,16 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Query resolution (server)
 
-(memo/defn-memo $results
+(memo/defn-memo $result-map
   "Stream of :sync/snapshot events associating `id` with values of `!ref`"
   [!ref]
   (r/reaction
-   (r/deref-result !ref)))
+   (try {:value @!ref}
+        (catch #?(:clj Exception :cljs js/Error) e
+          {:error e}))))
+
+(memo/defn-memo $catch [!ref f]
+  (r/catch !ref f))
 
 (defn wrap-result
   "Returns a result message for a given query-id"

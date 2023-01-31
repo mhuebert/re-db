@@ -1,6 +1,5 @@
 (ns re-db.sync.entity-diff-1
   (:require [re-db.memo :as memo]
-            [re-db.reactive :as r]
             [re-db.sync :as-alias sync]
             [re-db.sync.transit :refer [entity-pointer]]
             [re-db.xform :as xf]))
@@ -56,21 +55,18 @@
    will be shipped as-is."
   [[old-result new-value]]
   (let [{old-value :value} old-result
-        shape (cond (r/error? new-value) :error
-                    (:db/id new-value) :entities/one
+        shape (cond (:db/id new-value) :entities/one
                     (and (sequential? new-value)
                          (:db/id (first new-value))) :entities/many
                     :else :value)]
     (assoc (case shape
              :value {:value new-value}
-             :error {:error new-value}
              :entities/one {:value (entity-pointer new-value)
                             :txs [(diff-entity old-value new-value)]}
              :entities/many {:value (mapv entity-pointer new-value)
                              :txs (diff-entities old-value new-value)})
       ::sync/init (case shape
                     :value {:value new-value}
-                    :error {:error new-value}
                     :entities/one {:value (entity-pointer new-value)
                                    :txs [new-value]}
                     :entities/many {:value (mapv entity-pointer new-value)

@@ -18,7 +18,7 @@
    (def server
      (ws/serve {:port 9060
                 :handlers (merge
-                           (sync/query-handlers {:list (sync/$results !list)})
+                           (sync/query-handlers {:list (sync/$result-map !list)})
                            {:conj! (fn [_] (swap! !list conj (rand-int 100)))})})))
 
 ;; A websocket channel (cljs, runs in the browser):

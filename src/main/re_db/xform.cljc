@@ -24,23 +24,22 @@
 (defn transform
   "Streams values from ref into a new ratom, applying any supplied xforms (transducers)"
   [ref & xforms]
-  (let [f (step (apply comp xforms))]
+  (let [f (step (apply comp xforms))
+        !value (volatile! nil)]
     (r/reaction
-     (let [this r/*owner*
-           next-value (r/peek ref)]
+     (let [this r/*owner*]
        (hooks/use-effect
         (fn []
           (add-watch ref this (fn [_ _ _ _] (r/compute! this)))
           #(remove-watch ref this)))
-       (if (r/error? next-value)
-         next-value ;; propagate errors directly
-         (let [next-step (f next-value)]
-           (if (r/error? next-step)
-             next-step
+       (let [next-val (r/peek ref)]
+         (if (r/error? next-val)
+           next-val
+           (let [next-step (f next-val)]
              (case next-step
-               ::no-op (r/peek this)
-               ::done (do (remove-watch ref this) (r/peek this))
-               next-step))))))))
+               ::no-op @!value
+               ::done (do (remove-watch ref this) @!value)
+               (vreset! !value next-step)))))))))
 
 (defn map [f source]
   (transform source (clojure.core/map f)))

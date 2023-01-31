@@ -542,19 +542,19 @@
                         @n))
         b (r/reaction @a)
         c (r/reaction @b)
-        d (sync/$results c)]
+        d  (r/catch c (partial hash-map :error))]
     (is (= 1 @n
            @a @b @c
-           (:value (r/deref-result a)) (:value (r/deref-result b)) (:value (r/deref-result c))
-           (:value @d))
+           (second (r/deref-result a)) (second (r/deref-result b)) (second (r/deref-result c))
+           @d)
         "Value propagates")
      (swap! n inc)
 
     (is (= e
            (r/peek a) (r/peek b) (r/peek c)
-           (:error (r/deref-result a))
-           (:error (r/deref-result b))
-           (:error (r/deref-result c))
+           (first (r/deref-result a))
+           (first (r/deref-result b))
+           (first (r/deref-result c))
            (:error (r/peek d)))
         "Error propagates from source to dependents")
     (is (thrown? #?(:clj Exception :cljs js/Error) @c)
@@ -571,5 +571,23 @@
         b (xf/map inc a)]
     (is (= 1 @b))
     (swap! a inc)
-    (is (= 2 @b) "xf/transform is reactive")))
+    (is (= 2 @b) "xf/transform is reactive"))
+
+  (let [a (r/atom 0)
+        b (r/reaction (if (odd? @a)
+                        (throw (ex-info "whoa" {}))
+                        @a))
+        c (xf/map inc b)
+        d (r/catch c (constantly ::caught))
+        e (xf/into [] c)]
+    (is (= [1] @e) "xf/into init")
+    (is (= 0 @b))
+    (swap! a inc)
+    (is (thrown? #?(:clj Exception :cljs js/Error) @c) "xf/transform throws errors")
+    (is (= @d ::caught))
+
+    (is (thrown? #?(:clj Exception :cljs js/Error) @e) "xf/into init")
+    (swap! a inc)
+    (is (= 3 @c @d) "xf/transform recovers from errors")
+    (is (= [1 3] @e) "xf/transform does not pass errors to xforms")))
 
