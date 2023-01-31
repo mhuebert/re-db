@@ -1,6 +1,5 @@
 (ns re-db.sync.entity-diff-1
-  (:require [re-db.memo :as memo]
-            [re-db.sync :as-alias sync]
+  (:require [re-db.sync :as-alias sync]
             [re-db.sync.transit :refer [entity-pointer]]
             [re-db.xform :as xf]))
 
@@ -47,7 +46,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Result transactions - for sending re-db transaction format over the wire
 
-(defn diff-tx
+(defn diff->tx
   "Replaces entities in result (detected via presence of :db/id) with instances of ->Entity,
    returns new result and list of transactions containing entity data.
 
@@ -76,16 +75,9 @@
   (send-fn client-id [:sync/tx
                       [[:db/add {:sync/watch-result id} :result {:error error}]]]))
 
-;; currently only used for tests
-(memo/defn-memo $diff
+(defn txs
+  "Returns transactions which diff successive values of ref"
   [ref]
   (xf/transform ref
     (xf/before:after)
-    (map diff)))
-
-(memo/defn-memo $diff-tx
-  "transactions of diffs of successive values of ref"
-  [ref]
-  (xf/transform ref
-    (xf/before:after)
-    (map diff-tx)))
+    (map diff->tx)))

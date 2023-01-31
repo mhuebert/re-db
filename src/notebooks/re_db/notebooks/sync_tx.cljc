@@ -29,12 +29,13 @@
 (def !refs
   (let [$entity-fn (memo/fn-memo [id]
                      (db/bound-reaction conn
-                       (db/get id)))]
+                       (db/get id)))
+        $txs (memo/memoize entity-diff/txs)]
     (atom
      {:entity-1 (constantly ($entity-fn 1))
       :entity $entity-fn
-      :diffs/entity-1 (constantly (entity-diff/$diff-tx ($entity-fn 1)))
-      :diffs/entity (comp entity-diff/$diff-tx $entity-fn)})))
+      :diffs/entity-1 (constantly ($txs ($entity-fn 1)))
+      :diffs/entity (comp $txs $entity-fn)})))
 
 ;; A websocket server (clj, runs on the jvm):
 #?(:clj
