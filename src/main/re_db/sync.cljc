@@ -110,7 +110,7 @@
          tx-report (d/transact! txs)]
 
      ;; resolve loading promise if present
-     (when-let [^js suspended (:loading? prev-result)] (.resolve suspended))
+     #?(:cljs (when-let [^js suspended (:loading? prev-result)] (.resolve suspended)))
      tx-report)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
