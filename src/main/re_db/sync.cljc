@@ -54,8 +54,26 @@
   [descriptor]
   {::id descriptor})
 
+#?(:cljs
+   (defn suspended
+     "Returns a promise-like object which can be resolved via .resolve,
+      after which functions passed to .then are called immediately."
+     []
+     (let [!resolved (volatile! false)
+           !callbacks (volatile! [])]
+       (reify
+         Object
+         (then [_ f]
+           (if @!resolved
+             (f nil)
+             (vswap! !callbacks conj f)))
+         (resolve [_]
+           (vreset! !resolved true)
+           (doseq [f @!callbacks] (f))
+           (vswap! !callbacks empty))))))
+
 (defn read-result [qvec]
-  (d/get (db-id qvec) :result {:loading? true}))
+  (d/get (db-id qvec) :result))
 
 (defn- merge-result [result1 result2]
   (let [txs (:txs result2)
@@ -83,14 +101,17 @@
 
 (defn transact-result
   ([id message] (transact-result {} id message))
-  ([result-resolvers id message]
-   (let [prev-result (read-result id)
+  ([result-resolvers qvec message]
+   (let [prev-result (read-result qvec)
          {:as result :keys [txs]} (resolve-result result-resolvers prev-result message)
          result (not-empty (dissoc result :txs))
-         txs (cond-> []
-                     result (conj [:db/add (db-id id) :result result])
-                     txs (into txs))]
-     (d/transact! txs))))
+         txs (cond-> [[:db/add (db-id qvec) :result result]]
+                     txs (into txs))
+         tx-report (d/transact! txs)]
+
+     ;; resolve loading promise if present
+     (when-let [^js suspended (:loading? prev-result)] (.resolve suspended))
+     tx-report)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; `Watch` bookkeeping (server) - which queries are being watched by which clients
@@ -101,7 +122,7 @@
 (defonce !last-event (atom nil))
 
 (defn watch
-  "Adds watch for a local ref, sending messages to client via ::result messages.
+  "(server) Adds watch for a local ref, sending messages to client via ::result messages.
    A ref's value may specify an `::init` result to send upon connection."
   [channel query !ref]
   (reset! !last-event {:event :watch-ref :channel channel :query-id query})
@@ -114,14 +135,14 @@
                                          (dissoc v ::init))))))
 
 (defn unwatch
-  "Removes watch for ref."
+  "(server) Removes watch for ref."
   [channel !ref]
   (reset! !last-event {:event :watch-ref :channel channel :query-id (::query-id (meta !ref))})
   (swap! !watches update channel disj !ref)
   (remove-watch !ref channel))
 
-(defn unwatch-all
-  "Removes all watches for channel"
+(defn unwatch-all ;; server
+  "(server) Removes all watches for channel"
   [channel]
   (reset! !last-event {:event :unwatch-all :channel channel})
   (doseq [ref (@!watches channel)]
@@ -139,12 +160,15 @@
 ;; Websocket message utilities
 
 (defn result-handlers
+  "(client) Handlers for messages received by the client"
   ([] (result-handlers {}))
   ([resolve-result]
    {::result (fn [_ [id result]]
                (transact-result resolve-result id result))}))
 
-(defn query-handlers [resolve-query]
+(defn query-handlers
+  "(server) Handlers for messages received by teh server"
+  [resolve-query]
   {::watch
    (fn [{:keys [channel]} query]
      (if-let [!ref (resolve-query query)]
@@ -156,7 +180,9 @@
        (unwatch channel !ref)
        (println "No ref found" query)))})
 
-(defn handle-message [handlers context message]
+(defn handle-message
+  "Applies handler-fn (if found) to message args, with context as 1st param."
+  [handlers context message]
   (if-let [handler (handlers (message 0))]
     (apply handler context (rest message))
     (println (str "Handler not found for: " message))))
@@ -178,18 +204,30 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Query utils (client)
 
+(defn client:unwatch [channel query]
+  (swap! !watching update channel dissoc query)
+  (send channel [::unwatch query])
+  ;; resolve loading promise if still present
+  (when-let [^js deferred (:loading? (read-result query))]
+    (.resolve deferred)))
+
 (memo/defn-memo $query
   "(client) Watch a value (by query, usually a vector).
    Returns map containing `:value`, `:error`, or `:loading?`}"
-  [channel query]
-  (send channel [::watch query])
+  [channel qvec]
+
+  ;; set initial :loading? to a `suspended` value, to be resolved
+  ;; when the first result arrives.
+  #?(:cljs
+     (when-not (read-result qvec)
+       (d/transact! [[:db/add (db-id qvec) :result {:loading? (suspended)}]])))
+
+  (send channel [::watch qvec])
   (let [rx (r/reaction
             (hooks/use-on-dispose
-             (fn []
-               (swap! !watching update channel dissoc query)
-               (send channel [::unwatch query])))
-            (read-result query))]
-    (swap! !watching update channel assoc query rx)
+             (fn [] (client:unwatch channel qvec)))
+            (read-result qvec))]
+    (swap! !watching update channel assoc qvec rx)
     rx))
 
 (memo/defn-memo $all
