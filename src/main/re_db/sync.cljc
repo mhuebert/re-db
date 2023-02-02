@@ -110,7 +110,9 @@
          tx-report (d/transact! txs)]
 
      ;; resolve loading promise if present
-     #?(:cljs (when-let [^js suspended (:loading? prev-result)] (.resolve suspended)))
+     #?(:cljs
+        (when-let [^js suspended (:loading? prev-result)]
+          (.resolve suspended)))
      tx-report)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -208,8 +210,9 @@
   (swap! !watching update channel dissoc query)
   (send channel [::unwatch query])
   ;; resolve loading promise if still present
-  (when-let [^js deferred (:loading? (read-result query))]
-    (.resolve deferred)))
+  #?(:cljs
+     (when-let [^js deferred (:loading? (read-result query))]
+       (.resolve deferred))))
 
 (memo/defn-memo $query
   "(client) Watch a value (by query, usually a vector).
