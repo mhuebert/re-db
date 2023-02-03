@@ -14,10 +14,12 @@
 
 (defonce !listeners (atom {}))
 
-(defn- make-listener [conn e a v]
-  (doto (r/atom nil :meta {:pattern [e a v]})
-    (r/add-on-dispose!
-     (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))))
+(defn- make-listener! [conn e a v]
+  (let [listener (r/atom nil
+                         :meta {:pattern [e a v]} ;; for debugging
+                         :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))]
+    (swap! !listeners assoc-in [conn e a v] listener)
+    listener))
 
 (defn captured-patterns []
   (->> @r/*captured-derefs*
@@ -54,15 +56,17 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(declare -resolve-pattern)
+(declare -resolve-pattern -resolve-e resolve-v)
 
 (defn- -depend-on-triple! [conn db e a v]
   (when (and conn (r/owner))
-    (let [[e a v :as triple] (-resolve-pattern conn db e a v)]
-      @(or (fast/gets-some @!listeners conn e a v)
-           (doto (make-listener conn e a v)
-             (->> (swap! !listeners assoc-in [conn e a v]))))
-      triple)))
+    (let [e (-resolve-e conn db e)
+          a (ts/datom-a db a)
+          v (resolve-v conn db a v)]
+      (r/collect-deref! ;; directly create dependency
+       (or (fast/gets-some @!listeners conn e a v)
+            (make-listener! conn e a v)))
+      nil)))
 
 (defn- -ae [conn db a]
   (-depend-on-triple! conn db nil a nil)
@@ -101,11 +105,6 @@
   (when-let [v (resolve-v conn db a v)]
     (-depend-on-triple! conn db nil a v)
     (ts/ave db a v)))
-
-(defn- -resolve-pattern [conn db e a v]
-  [(some->> e (-resolve-e conn db))
-   (some->> a (ts/datom-a db))
-   (some->> v (resolve-v conn db a))])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity API
