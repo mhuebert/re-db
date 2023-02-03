@@ -1,6 +1,6 @@
 (ns re-db.sync
   "Support for watching refs across websocket(-like) connections"
-  (:refer-clojure :exclude [send])
+  (:refer-clojure :exclude [send deliver])
   (:require [re-db.api :as d]
             [re-db.hooks :as hooks]
             [re-db.reactive :as r]
@@ -54,11 +54,11 @@
   [descriptor]
   {::id descriptor})
 
-#?(:cljs
-   (defn suspended
-     "Returns a promise-like object which can be resolved via .resolve,
-      after which functions passed to .then are called immediately."
-     []
+(defn loading-promise
+  "Custom promise implementation for suspense - completes via `deliver` without handling values"
+  []
+  #?(:clj (promise)
+     :cljs
      (let [!resolved (volatile! false)
            !callbacks (volatile! [])]
        (reify
@@ -67,10 +67,15 @@
            (if @!resolved
              (f nil)
              (vswap! !callbacks conj f)))
-         (resolve [_]
+         (deliver [_]
            (vreset! !resolved true)
-           (doseq [f @!callbacks] (f))
+           (doseq [f @!callbacks] (f nil))
            (vswap! !callbacks empty))))))
+
+
+(defn deliver [x]
+  #?(:cljs (.deliver x)
+     :clj  (clojure.core/deliver x nil)))
 
 (defn read-result [qvec]
   (d/get (db-id qvec) :result))
@@ -108,11 +113,7 @@
          txs (cond-> [[:db/add (db-id qvec) :result result]]
                      txs (into txs))
          tx-report (d/transact! txs)]
-
-     ;; resolve loading promise if present
-     #?(:cljs
-        (when-let [^js suspended (:loading? prev-result)]
-          (.resolve suspended)))
+     (some-> (:loading? prev-result) deliver)
      tx-report)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -209,10 +210,7 @@
 (defn client:unwatch [channel query]
   (swap! !watching update channel dissoc query)
   (send channel [::unwatch query])
-  ;; resolve loading promise if still present
-  #?(:cljs
-     (when-let [^js deferred (:loading? (read-result query))]
-       (.resolve deferred))))
+  (some-> (:loading? (read-result query)) deliver))
 
 (memo/defn-memo $query
   "(client) Watch a value (by query, usually a vector).
@@ -223,7 +221,7 @@
   ;; when the first result arrives.
   #?(:cljs
      (when-not (read-result qvec)
-       (d/transact! [[:db/add (db-id qvec) :result {:loading? (suspended)}]])))
+       (d/transact! [[:db/add (db-id qvec) :result {:loading? (loading-promise)}]])))
 
   (send channel [::watch qvec])
   (let [rx (r/reaction
