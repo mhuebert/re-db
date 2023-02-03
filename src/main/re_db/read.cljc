@@ -56,7 +56,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(declare -resolve-pattern -resolve-e resolve-v)
+(declare -resolve-e resolve-v)
 
 (defn- -depend-on-triple! [conn db e a v]
   (when (and conn (r/owner))
