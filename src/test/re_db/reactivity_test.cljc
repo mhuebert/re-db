@@ -106,9 +106,9 @@
 (db/with-conn {}
 
   (db/transact! [{:db/id :matt
-                   :name/first "Matt"
-                   :name/last "Huebert"}
-                  [:db/add :matt :pets #{"kona"}]])
+                  :name/first "Matt"
+                  :name/last "Huebert"}
+                 [:db/add :matt :pets #{"kona"}]])
 
   (db/transact! [[:db/add :matt :name/middle "Neil"]]))
 
@@ -144,7 +144,7 @@
 
 (deftest lookup-patterns
   (db/with-conn {:a/id {:db/unique :db.unique/identity}
-                  :b/id {:db/unique :db.unique/identity}}
+                 :b/id {:db/unique :db.unique/identity}}
     (testing
      (let [get-patterns (fn [f]
                           (let [res (atom nil)
@@ -181,7 +181,7 @@
     (db/with-conn {:person/children schema/unique-value}
 
       (throws (db/transact! [[:db/add "mary" :person/children "peter"]
-                              [:db/add "sally" :person/children "peter"]])
+                             [:db/add "sally" :person/children "peter"]])
               "Enforced uniqueness in cardinality/many")
 
       (is (nil? (db/get [:person/children "peter"]))
@@ -194,9 +194,9 @@
       (r/session
        (let [log (atom 0)]
          @(r/make-reaction
-           (db/bound-fn []
-             (db/get [:person/children "peter"])
-             (swap! log inc)))
+            (db/bound-fn []
+              (db/get [:person/children "peter"])
+              (swap! log inc)))
          (is (= 1 @log))
          (db/transact! [[:db/add "mary" :person/children "peter"]])
          (is (= 2 @log)))))))
@@ -204,7 +204,7 @@
 
 (deftest read-from-reaction
   (db/transact! [{:db/id 1 :name \a}
-                  {:db/id 2 :name \b}])
+                 {:db/id 2 :name \b}])
   (is (= #{\a \b}
          (into #{} (map :name) (db/where [:name]))))
   (is (= #{\a \b}
@@ -274,17 +274,17 @@
 (comment
  (deftest pattern-listeners
    (db/with-conn {:person/children {:db/cardinality :db.cardinality/many
-                                     :db/unique :db.unique/identity}}
+                                    :db/unique :db.unique/identity}}
      (let [conn (db/conn)
            tx-log (atom [])
            _ (mem/listen! conn ::pattern-listeners #(swap! tx-log conj (:datoms %2)))]
        (testing "entity pattern"
          (db/transact! [{:db/id "mary"
-                          :name "Mary"}
-                         [:db/add "mary"
-                          :person/children #{"john"}]
-                         {:db/id "john"
-                          :name "John"}])
+                         :name "Mary"}
+                        [:db/add "mary"
+                         :person/children #{"john"}]
+                        {:db/id "john"
+                         :name "John"}])
 
          (reagent/flush)
 
@@ -313,9 +313,9 @@
                    r/IRecompute
                    (-recompute! [_]))]
       (db/transact! [{:db/id 1
-                       :name "Peter"}
-                      {:db/id 2
-                       :name "Victoria"}])
+                      :name "Peter"}
+                     {:db/id 2
+                      :name "Victoria"}])
 
       (testing "capture access patterns"
 
@@ -542,13 +542,13 @@
                         @n))
         b (r/reaction @a)
         c (r/reaction @b)
-        d  (r/catch c (partial hash-map :error))]
+        d (r/catch c (partial hash-map :error))]
     (is (= 1 @n
            @a @b @c
            (second (r/deref-result a)) (second (r/deref-result b)) (second (r/deref-result c))
            @d)
         "Value propagates")
-     (swap! n inc)
+    (swap! n inc)
 
     (is (= e
            (r/peek a) (r/peek b) (r/peek c)
@@ -624,5 +624,28 @@
      (is (= 3 @($af 1)))))
   (r/session
    ;; TODO - test hook/dispose behavior
-   (let [!log (atom {})]))
+   (let [-a (r/atom 1)
+         a (xf/map inc -a)
+         b (xf/map inc a)]
+     (is (= 2 @a))
+     (swap! -a inc)
+     (is (= 3 @a))
+     (r/become b (r/reaction (+ @a 2)))
+     (is (= @b 5))
+     (r/become a (xf/map inc -a) #_(r/reaction (+ @-a 1)))
+     (is (= (inc @-a) @a))))
+
+  (r/session
+   (let [a (r/atom 1)
+         b (xf/map inc a)]
+     (is (= (inc @a) @b))))
+
+  (r/session
+   (let [a (r/reaction 1)
+         b (xf/map inc a)
+         c (r/catch (xf/map inc b) identity)]
+     (is (= (inc @a) @b))
+     (r/become a (r/reaction 2))
+     (is (= (inc @a) @b))
+     (is (= (inc @b) @c))))
   )

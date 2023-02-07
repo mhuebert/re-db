@@ -205,10 +205,12 @@
                   ^:volatile-mutable detached
                   ^:volatile-mutable meta]
     IBecome
-    (-become [this new-state]
-      (when (not= state new-state)
-        (reset! this new-state)))
-    (-extract [this] state)
+    (-become [this extracted]
+      (let [[new-state new-meta] extracted]
+        (set! meta (merge new-meta meta))
+        (when (not= state new-state)
+          (reset! this new-state))))
+    (-extract [this] [state meta])
     IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this! new-watches] (set! watches new-watches))
@@ -290,13 +292,13 @@
      ^:volatile-mutable meta]
     IBecome
     (-become [this extracted]
-     (let [[compute-fn-2 state-2 dispose-fns-2 detached-2 hooks-2 stale-2 meta-2] extracted]
+     (let [[compute-fn-2 state-2 detached-2 hooks-2 stale-2 meta-2] extracted]
+       ;; hooks are disposed, because they are controlled by the compute-fn.
+       ;; dispose-fns are not disposed, because they are controlled from 'outside'.
        (-hooks/dispose-hooks! this) ;; new compute-fn can't reuse old hooks
-       (doseq [f dispose-fns] (f this)) ;;
        (set! stale true)
        (set! compute-fn compute-fn-2)
        (set! state state-2)
-       (set! dispose-fns dispose-fns-2)
        (set! detached detached-2)
        (set! hooks hooks-2)
        (set! stale stale-2)
@@ -304,7 +306,7 @@
        (set! state state-2)
        (when (seq watches) (compute! this))
        this))
-    (-extract [this] [compute-fn state dispose-fns detached hooks stale meta])
+    (-extract [this] [compute-fn state detached hooks stale meta])
     IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))

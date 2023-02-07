@@ -34,9 +34,9 @@
   "Stream of :sync/snapshot events associating `id` with values of `!ref`"
   [!ref]
   (r/reaction
-   (try {:value @!ref}
-        (catch #?(:clj Exception :cljs js/Error) e
-          {:error e}))))
+    (try {:value @!ref}
+         (catch #?(:clj Exception :cljs js/Error) e
+           {:error e}))))
 
 (memo/defn-memo $catch [!ref f]
   (r/catch !ref f))
@@ -224,19 +224,19 @@
        (d/transact! [[:db/add (db-id qvec) :result {:loading? (loading-promise)}]])))
 
   (send channel [::watch qvec])
-  (let [rx (r/reaction
-            (hooks/use-on-dispose
-             (fn [] (client:unwatch channel qvec)))
-            (read-result qvec))]
-    (swap! !watching update channel assoc qvec rx)
-    rx))
+  (r/reaction
+    (hooks/use-effect
+     (fn []
+       (swap! !watching update channel assoc qvec r/*owner*)
+       #(client:unwatch channel qvec)))
+    (read-result qvec)))
 
 (memo/defn-memo $all
   "Compose queries (by id). Returns first :loading? or :error,
    or joins results into a :value vector."
   [channel & qvecs]
   (r/reaction
-   (let [qs (mapv (comp deref (partial $query channel)) qvecs)]
-     (or (u/find-first qs :error)
-         (u/find-first qs :loading?)
-         {:value (into [] (map :value) qs)}))))
+    (let [qs (mapv (comp deref (partial $query channel)) qvecs)]
+      (or (u/find-first qs :error)
+          (u/find-first qs :loading?)
+          {:value (into [] (map :value) qs)}))))
