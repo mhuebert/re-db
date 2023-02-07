@@ -74,7 +74,7 @@
 
 
 (defn deliver [x]
-  #?(:cljs (.deliver x)
+  #?(:cljs (.deliver ^js x)
      :clj  (clojure.core/deliver x nil)))
 
 (defn read-result [qvec]

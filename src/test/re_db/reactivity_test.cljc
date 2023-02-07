@@ -591,3 +591,38 @@
     (is (= 3 @c @d) "xf/transform recovers from errors")
     (is (= [1 3] @e) "xf/transform does not pass errors to xforms")))
 
+(deftest become
+
+  (let [-a (r/atom 1)
+        a (r/reaction @-a)
+        b (r/reaction @a)
+        c (r/reaction @b)
+        d (r/reaction @-a)]
+    (is (= 1 @a @b @c @d))
+    (r/become a (r/reaction (inc @-a)))
+    (is (= 2 @a @b @c))
+    (is (= 1 @d)))
+
+  (let [-a (r/atom 1)
+        a (xf/map inc -a)
+        b (xf/map inc a)
+        c (xf/map inc b)]
+    (is (= [1 2 3 4]
+           (mapv deref [-a a b c])))
+    (r/become -a (r/atom 2))
+    (is (= [2 3 4 5]
+           (mapv deref [-a a b c])))
+    (r/become a (xf/map (partial + 2) -a))
+    (is (= [2 4 5 6]
+           (mapv deref [-a a b c]))))
+
+  (r/session
+   (let [-a (r/atom 1)
+         $af (memo/memoize (fn [n] (r/reaction (+ @-a n))))]
+     (is (= 2 @($af 1)))
+     (memo/reset-fn! $af (fn [n] (r/reaction (+ @-a n n))))
+     (is (= 3 @($af 1)))))
+  (r/session
+   ;; TODO - test hook/dispose behavior
+   (let [!log (atom {})]))
+  )

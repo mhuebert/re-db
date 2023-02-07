@@ -96,16 +96,18 @@
   (when (seq (get-watches ref))
     (if *notifying*
       (handle-change! ref old-val new-val)
-      (binding [*notifying* (volatile! [])]
-        (handle-change! ref old-val new-val)
-        (doseq [r (sorted-dependents ref (comp keys get-watches))
-                :when (stale? r)
-                :let [_ (set-stale! r false)
-                      old-val (peek r)
-                      new-val (compute r)]]
-          (when (not= old-val new-val)
-            (reset! r new-val)))
-        (doseq [f @*notifying*] (f))))))
+      (let [!to-notify (volatile! [])]
+        (binding [*notifying* !to-notify]
+          (handle-change! ref old-val new-val)
+          (doseq [r (sorted-dependents ref (comp keys get-watches))
+                  :when (stale? r)
+                  :let [_ (set-stale! r false)
+                        old-val (peek r)
+                        new-val (compute r)
+                        changed? (not= old-val new-val)]]
+            (when changed?
+              (reset! r new-val))))
+        (doseq [f @!to-notify] (f))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -122,7 +124,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn become
+#_(defn become
   "Moves all watches from `old-ref` to a new ref, and calls `notify-watches` if the
    value has changed. The new ref is created via `init-fn` after the old ref is disposed."
   ;; https://gbracha.blogspot.com/2009/07/miracle-of-become.html
@@ -138,6 +140,17 @@
           (notify-watches to old-val new-val)))
       to)))
 
+(defprotocol IBecome
+  "Redefine a reactive source while keeping its identity"
+  (-become [from to] "Copies behaviour from 'from' to 'to'")
+  (-extract [from] "Extracts state necessary for `-become`"))
+
+(defn become [from to]
+  ;; unclear:
+  ;; - dispose-fns, should they be called?
+  (assert (identical? (type from) (type to)) "`become` requires reactive values of the same type")
+  (-become from (-extract to)))
+
 (defmacro redef
   "Reactive `def` - value should be a reactive value. If name already exists, migrates watches to the new reactive value."
   ([name doc rx] `(redef ~(with-meta name {:doc doc}) ~rx))
@@ -147,8 +160,8 @@
           (let [~rx-sym ~rx]
             (if (macros/present? ~name)
               ~(if (:ns &env)
-                 `(set! ~name (become ~name (constantly ~rx-sym)))
-                 `(do (become ~name (constantly (alter-var-root (var ~name) (constantly ~rx-sym))))
+                 `(become ~name ~rx-sym)
+                 `(do (become ~name ~rx-sym)
                       (var ~name))))
             (def ~name ~rx-sym))))))
 
@@ -191,6 +204,11 @@
                   ^:volatile-mutable dispose-fns
                   ^:volatile-mutable detached
                   ^:volatile-mutable meta]
+    IBecome
+    (-become [this new-state]
+      (when (not= state new-state)
+        (reset! this new-state)))
+    (-extract [this] state)
     IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this! new-watches] (set! watches new-watches))
@@ -270,6 +288,23 @@
      ^:volatile-mutable hooks
      ^:volatile-mutable stale
      ^:volatile-mutable meta]
+    IBecome
+    (-become [this extracted]
+     (let [[compute-fn-2 state-2 dispose-fns-2 detached-2 hooks-2 stale-2 meta-2] extracted]
+       (-hooks/dispose-hooks! this) ;; new compute-fn can't reuse old hooks
+       (doseq [f dispose-fns] (f this)) ;;
+       (set! stale true)
+       (set! compute-fn compute-fn-2)
+       (set! state state-2)
+       (set! dispose-fns dispose-fns-2)
+       (set! detached detached-2)
+       (set! hooks hooks-2)
+       (set! stale stale-2)
+       (set! meta meta-2)
+       (set! state state-2)
+       (when (seq watches) (compute! this))
+       this))
+    (-extract [this] [compute-fn state dispose-fns detached hooks stale meta])
     IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))
@@ -284,9 +319,10 @@
     (dispose! [this]
       (dispose-derefs! this)
       (-hooks/dispose-hooks! this)
-      (set! stale true)
       (doseq [f dispose-fns] (f this))
-      (set! dispose-fns init-dispose-fns))
+      (set! stale true)
+      (set! dispose-fns init-dispose-fns)
+      (set! hooks -hooks/init-hooks))
     IMeta
     (-meta [this] meta)
     #?@(:clj [clojure.lang.IReference

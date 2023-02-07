@@ -27,8 +27,10 @@
     (swap! !state assoc :init-fn init-fn)
     (let [cache (:cache @!state)]
       (swap! !state update :cache empty)
-      (doseq [[args old-rx] cache]
-        (r/become old-rx (c/fn [_] (new-entry! !state args)))))
+      (doseq [[args old-rx] cache
+              :let [to (r/become old-rx (apply init-fn args))]]
+        (add-on-dispose! to (c/fn [_] (swap! !state update :cache dissoc args)))
+        (swap! !state assoc-in [:cache args] to)))
     f))
 
 (c/defn constructor-fn [!state]
