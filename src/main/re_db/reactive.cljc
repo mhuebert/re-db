@@ -125,20 +125,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #_(defn become
-  "Moves all watches from `old-ref` to a new ref, and calls `notify-watches` if the
-   value has changed. The new ref is created via `init-fn` after the old ref is disposed."
-  ;; https://gbracha.blogspot.com/2009/07/miracle-of-become.html
-  [old-ref init-fn]
-  (let [old-watches (get-watches old-ref)
-        old-val (peek old-ref)]
-    (dispose! old-ref)
-    (let [to (init-fn old-val)]
-      (doseq [[consumer f] old-watches]
-        (add-watch to consumer f))
-      (let [new-val @to]
-        (when (not= old-val new-val)
-          (notify-watches to old-val new-val)))
-      to)))
+    "Moves all watches from `old-ref` to a new ref, and calls `notify-watches` if the
+     value has changed. The new ref is created via `init-fn` after the old ref is disposed."
+    ;; https://gbracha.blogspot.com/2009/07/miracle-of-become.html
+    [old-ref init-fn]
+    (let [old-watches (get-watches old-ref)
+          old-val (peek old-ref)]
+      (dispose! old-ref)
+      (let [to (init-fn old-val)]
+        (doseq [[consumer f] old-watches]
+          (add-watch to consumer f))
+        (let [new-val @to]
+          (when (not= old-val new-val)
+            (notify-watches to old-val new-val)))
+        to)))
 
 (defprotocol IBecome
   "Redefine a reactive source while keeping its identity"
@@ -198,6 +198,37 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactive Atom - basic reactive value
 
+(defn step-initv
+  "Initializes step fn with initial value, returns new initial value"
+  [step initial-value]
+  (if step
+    (let [v (step initial-value)]
+      (case v
+        (::done ::no-op) nil
+        v))
+    initial-value))
+
+
+(defn- volatile-reducer
+  ([] (volatile! ::no-op))
+  ([acc] acc)
+  ([acc x] (vreset! acc x) acc))
+
+(defn make-step-fn
+  "Given a transducer, returns a step function that returns the next value,
+   or ::done, or ::no-op."
+  [xform]
+  (let [done? (volatile! false)
+        rfn (xform volatile-reducer)]
+    (fn [x]
+      (if @done?
+        ::done
+        (let [acc (rfn (rfn) x)]
+          (if (reduced? acc)
+            (do (vreset! done? true)
+                @@acc)
+            @acc))))))
+
 (util/support-clj-protocols
   (deftype RAtom [^:volatile-mutable state
                   ^:volatile-mutable watches
@@ -239,7 +270,7 @@
       (let [old-val state]
         (set! state new-val)
         (notify-watches this old-val new-val)
-        new-val))
+        state))
     ISwap
     (-swap! [this f] (reset! this (f state)))
     (-swap! [this f x] (reset! this (f state x)))
@@ -262,10 +293,10 @@
             init-dispose-fns
             init-detached
             init-meta))
-  ([initial-value & {:keys [meta detached on-dispose]
-                     :or {meta init-meta
-                          detached init-detached}}]
-   (->RAtom initial-value
+  ([init & {:keys [meta detached on-dispose xf]
+            :or {meta init-meta
+                 detached init-detached}}]
+   (->RAtom init
             init-watches
             (cond-> init-dispose-fns
                     on-dispose
@@ -288,25 +319,26 @@
      ^:volatile-mutable detached
      ^:volatile-mutable derefs
      ^:volatile-mutable hooks
+     ^:volatile-mutable step
      ^:volatile-mutable stale
      ^:volatile-mutable meta]
     IBecome
     (-become [this extracted]
-     (let [[compute-fn-2 state-2 detached-2 hooks-2 stale-2 meta-2] extracted]
-       ;; hooks are disposed, because they are controlled by the compute-fn.
-       ;; dispose-fns are not disposed, because they are controlled from 'outside'.
-       (-hooks/dispose-hooks! this) ;; new compute-fn can't reuse old hooks
-       (set! stale true)
-       (set! compute-fn compute-fn-2)
-       (set! state state-2)
-       (set! detached detached-2)
-       (set! hooks hooks-2)
-       (set! stale stale-2)
-       (set! meta meta-2)
-       (set! state state-2)
-       (when (seq watches) (compute! this))
-       this))
-    (-extract [this] [compute-fn state detached hooks stale meta])
+      (let [[compute-fn-2 state-2 detached-2 hooks-2 step-2 stale-2 meta-2] extracted]
+        ;; hooks are disposed, because they are controlled by the compute-fn.
+        ;; dispose-fns are not disposed, because they are controlled from 'outside'.
+        (-hooks/dispose-hooks! this) ;; new compute-fn can't reuse old hooks
+        (set! stale true)
+        (set! compute-fn compute-fn-2)
+        (set! state (when state-2 (step-initv step-2 state-2)))
+        (set! detached detached-2)
+        (set! hooks hooks-2)
+        (set! step step-2)
+        (set! stale stale-2)
+        (set! meta meta-2)
+        (when (seq watches) (compute! this))
+        this))
+    (-extract [this] @this [compute-fn state detached hooks step stale meta])
     IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))
@@ -354,15 +386,24 @@
     (peek [this] state)
     IReset
     (-reset! [this new-val]
-      (let [old-val state]
-        (set! state new-val)
-        (notify-watches this old-val new-val)
+      (let [old-val state
+            updated? (if (and step
+                              (not (error? new-val)))
+                       (let [v (step new-val)]
+                         (case v
+                           (::done ::no-op) false
+                           (do (set! state v)
+                               true)))
+                       (do (set! state new-val)
+                           true))]
+        (when updated?
+          (notify-watches this old-val new-val))
         new-val))
     ISwap
-    (-swap! [this f] (reset! this (f state)))
-    (-swap! [this f x] (reset! this (f state x)))
-    (-swap! [this f x y] (reset! this (f state x y)))
-    (-swap! [this f x y args] (reset! this (apply f state x y args)))
+    (-swap! [this f]  (reset! this (f @this)))
+    (-swap! [this f x] (reset! this (f @this x)))
+    (-swap! [this f x y] (reset! this (f @this x y)))
+    (-swap! [this f x y args] (reset! this (apply f @this x y args)))
     IWatchable
     (-add-watch [this key compute-fn]
 
@@ -393,8 +434,7 @@
     (compute! [this]
       (set! stale false)
       (let [new-val (compute this)]
-        (when (not= state new-val)
-          (reset! this new-val))
+        (reset! this new-val)
         this))
     (computes? [this] true)))
 
@@ -404,21 +444,24 @@
             meta
             on-dispose
             stale
-            detached]
+            detached
+            xf]
      :or {stale init-stale
           detached init-detached}}
     compute-fn]
-   (cond-> (->Reaction compute-fn
-                       init
-                       init-watches
-                       (cond-> init-dispose-fns
-                               on-dispose (conj on-dispose))
-                       detached
-                       init-derefs
-                       -hooks/init-hooks
-                       stale
-                       meta)
-           detached compute!)))
+   (let [step (when xf (make-step-fn xf))]
+     (cond-> (->Reaction compute-fn
+                         (when init (step-initv step init))
+                         init-watches
+                         (cond-> init-dispose-fns
+                                 on-dispose (conj on-dispose))
+                         detached
+                         init-derefs
+                         -hooks/init-hooks
+                         step
+                         stale
+                         meta)
+             detached compute!))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sessions - for repl/dev work, use reactions from within a session and
@@ -463,8 +506,8 @@
 
 (defn catch [!ref f]
   (re-db.reactive/reaction
-   (let [[error value] (deref-result !ref)]
-     (if error (f error) value))))
+    (let [[error value] (deref-result !ref)]
+      (if error (f error) value))))
 
 
 #?(:clj

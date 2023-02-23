@@ -7,7 +7,8 @@
             [re-db.triplestore :as ts]
             [re-db.reactive :as r]
             [re-db.macros :as macros]
-            [re-db.read :as read])
+            [re-db.read :as read]
+            [re-db.util :as u])
   #?(:cljs (:require-macros re-db.api)))
 
 (defonce ^:dynamic *conn* (mem/create-conn))
@@ -41,7 +42,7 @@
   (let [[options body] (macros/parse-reaction-args &form body)]
     `(let [conn# ~conn]
        (r/reaction ~options
-        (with-conn conn# ~@body)))))
+         (with-conn conn# ~@body)))))
 
 (defn entity [id] (read/entity *conn* id))
 
@@ -76,3 +77,12 @@
 
 (defn conn [] *conn*)
 (defn touch [entity] @entity)
+
+(comment
+ ;; maybe add this?
+ (defn retraction
+   "Returns a retraction transaction for the given entity or entity/attribute pair"
+   ([entity]
+    [:db/retractEntity (:db/id entity entity)])
+   ([entity a]
+    [:db/retract (:db/id entity entity) a])))

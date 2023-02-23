@@ -68,19 +68,18 @@
         [i hook new?] (-hooks/get-next-hook! owner :use-state)]
 
     (atom-like
-     (assoc (if new?
-              (-hooks/update-hook! owner i merge
-                {:hook/value (r/without-deref-capture (eval-fn initial-state))})
-              hook)
-       :hook/update-fn (fn [value]
-                         (let [old-value (:hook/value (-hooks/get-hook owner i))
-                               new-value (if (fn? value)
-                                           (r/without-deref-capture (value old-value))
-                                           value)]
-                           (-hooks/update-hook! owner i assoc :hook/value new-value)
-                           (when (not= old-value new-value)
-                             (r/compute! owner))
-                           new-value))))))
+     (if new?
+       (-hooks/update-hook! owner i merge
+         {:hook/value (r/without-deref-capture (eval-fn initial-state))
+          :hook/update-fn (fn [value]
+                            (let [old-value (:hook/value (-hooks/get-hook owner i))
+                                  new-value (if (fn? value)
+                                              (r/without-deref-capture (value old-value))
+                                              value)]
+                              (-hooks/update-hook! owner i assoc :hook/value new-value)
+                              (r/compute! owner)
+                              new-value))})
+       hook))))
 
 (defn use-reducer [f init]
   (let [[value update-fn] (use-state init)]
@@ -90,17 +89,17 @@
   (let [owner *owner*
         [i hook new?] (-hooks/get-next-hook! owner :use-state)]
     (atom-like
-     (assoc (if new?
-              (-hooks/update-hook! owner i merge
-                {:hook/value (r/without-deref-capture (eval-fn initial-state))})
-              hook)
-       :hook/update-fn (fn [value]
-                         (let [old-value (:hook/value (-hooks/get-hook owner i))
-                               new-value (if (fn? value)
-                                           (r/without-deref-capture (value old-value))
-                                           value)]
-                           (-hooks/update-hook! owner i assoc :hook/value new-value)
-                           new-value))))))
+     (if new?
+       (-hooks/update-hook! owner i merge
+         {:hook/value (r/without-deref-capture (eval-fn initial-state))
+          :hook/update-fn (fn [value]
+                            (let [old-value (:hook/value (-hooks/get-hook owner i))
+                                  new-value (if (fn? value)
+                                              (r/without-deref-capture (value old-value))
+                                              value)]
+                              (-hooks/update-hook! owner i assoc :hook/value new-value)
+                              new-value))})
+       hook))))
 
 (defn use-watch
   "Returns [old-value, new-value] when ref changes - initially [nil, value]"
@@ -116,13 +115,13 @@
 (defn use-deref
   "Returns deref'd value of atom, and re-renders parent when the atom notifies watches."
   [ref]
-  (let [[value set-value!] (use-state (r/peek ref))]
+  (let [[_ set-value!] (use-state (r/peek ref))]
     (use-effect
      (fn []
        (add-watch ref set-value! (fn [_ _ _ new-value]
                                    (set-value! new-value)))
        #(remove-watch ref set-value!)))
-    value))
+    (r/peek ref)))
 
 (defmacro with-let
   "Within a reaction, evaluates bindings once, memoizing the results."

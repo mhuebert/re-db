@@ -230,10 +230,10 @@
   (let [!latch (atom 0)]
     (r/session
      @(r/reaction
-       (hooks/use-effect
-        (fn []
-          (swap! !latch inc)
-          #(swap! !latch inc)))))
+        (hooks/use-effect
+         (fn []
+           (swap! !latch inc)
+           #(swap! !latch inc)))))
     (is (= 2 @!latch)
         "use-effect hook is disposed"))
 
@@ -257,8 +257,8 @@
     (is (= @!latch 6) "Reaction can be started and stopped multiple times via watch/unwatch"))
 
   (let [rx (r/reaction
-            (let [[v v!] (hooks/use-volatile 0)]
-              (v! inc)))]
+             (let [[v v!] (hooks/use-volatile 0)]
+               (v! inc)))]
     (is (= (r/session @rx) 1))
     (r/compute! rx)
     (is (= @rx 1)
@@ -308,109 +308,15 @@
 
 
 
-#_(deftest reactivity
-    (let [reader (reify
-                   r/IRecompute
-                   (-recompute! [_]))]
-      (db/transact! [{:db/id 1
-                      :name "Peter"}
-                     {:db/id 2
-                      :name "Victoria"}])
-
-      (testing "capture access patterns"
-
-        (is (do
-              (r/with-dependency-tracking! {:reader reader} (db/entity 1))
-              (= #{1} (-> (get-in @r/dependencies [reader db/*current-conn*])
-                          :e__)))
-            "entity pattern")
-
-
-        (is (do (r/with-dependency-tracking! {:reader reader}
-                                             (db/get 1 :name)
-                                             (db/get 1 :name))
-                (= #{[1 :name]} (-> (get-in @r/dependencies [reader db/*current-conn*])
-                                    :ea_)))
-            "entity-attr pattern")
-
-        (is (= #{[1 :name]
-                 (do
-                   (r/with-dependency-tracking! {:reader reader}
-                                                (db/get 1 :name)
-                                                (db/get 1 :dog))
-                   [1 :dog])} (-> (get-in @r/dependencies [reader db/*current-conn*])
-                                  :ea_))
-            "two entity-attr patterns")
-
-        (is (= {:e__ #{1}
-                :ea_ #{[1 :name]}}
-               (do
-                 (r/with-dependency-tracking! {:reader reader}
-                                              (db/get 1 :name)
-                                              (db/entity 1)
-                                              (db/get 1 :name))
-                 (-> (get-in @r/dependencies [reader db/*current-conn*])
-                     (select-keys [:e__ :ea_]))))
-            "entity pattern"))))
-
-#_(deftest compute
-
-    (testing "Can set a computed property"
-
-      (db/transact! [[:db/add :db/settings :name "Herman"]])
-
-      (d/compute! [:db/settings :name-x-2]
-                  (swap! eval-count inc)
-                  (apply str (take 2 (repeat (db/get :db/settings :name)))))
-
-      (is (= "HermanHerman" (db/get :db/settings :name-x-2)))
-      (is (= 1 @eval-count))
-
-      (testing "Update a computed value when a dependent value changes"
-        (db/transact! [[:db/add :db/settings :name "Lily"]])
-        (is (= "LilyLily" (db/get :db/settings :name-x-2)))
-        (is (= 2 @eval-count)))
-
-      (testing "Change a computed value"
-
-        (d/compute! [:db/settings :name-x-2]
-                    (swap! eval-count inc)
-                    (apply str (interpose " - " (take 2 (repeat (db/get :db/settings :name))))))
-
-        (is (= "Lily - Lily" (db/get :db/settings :name-x-2)))
-        (db/transact! [[:db/add :db/settings :name "Marvin"]])
-        (is (= "Marvin - Marvin" (db/get :db/settings :name-x-2))))
-
-      (testing "If a computed property references itself, does not cause loop"
-
-        ;; TODO
-        ;; model a proper computed-value graph to avoid cycles
-        ;; supply prev-value as `this`?
-
-        (d/compute! [:db/settings :name-x-2]
-                    (swap! eval-count inc)
-                    (str (db/get :db/settings :name-x-2) " x " (db/get :db/settings :name)))
-
-        (is (= "Marvin - Marvin x Marvin" (db/get :db/settings :name-x-2)))
-        (db/transact! [[:db/add :db/settings :name "Wow"]])
-        (is (= "Marvin - Marvin x Marvin x Wow" (db/get :db/settings :name-x-2))))
-
-
-      (testing "Clear a computed value"
-        (d/compute! [:db/settings :name-x-2] false)
-        (db/transact! [[:db/add :db/settings :name "Veronica"]])
-        (is (= 6 @eval-count)))))
-
-
 (deftest disposal
 
   (let [!latch (atom 0)]
     (r/session
      @(r/reaction
-       (hooks/use-effect
-        (fn []
-          (swap! !latch inc)
-          #(swap! !latch inc)))))
+        (hooks/use-effect
+         (fn []
+           (swap! !latch inc)
+           #(swap! !latch inc)))))
     (is (= 2 @!latch)
         "lazy (default) reaction is disposed"))
 
@@ -430,10 +336,10 @@
     (memo/def-memo $sub
       (fn []
         (r/reaction
-         (hooks/use-effect
-          (fn []
-            (swap! !latch inc)
-            #(swap! !latch inc))))))
+          (hooks/use-effect
+           (fn []
+             (swap! !latch inc)
+             #(swap! !latch inc))))))
 
     (r/session @($sub))
     (is (= @!latch 2) "Session immediately disposes"))
@@ -610,6 +516,7 @@
     (is (= [1 2 3 4]
            (mapv deref [-a a b c])))
     (r/become -a (r/atom 2))
+    (mapv deref [-a a b c])
     (is (= [2 3 4 5]
            (mapv deref [-a a b c])))
     (r/become a (xf/map (partial + 2) -a))
@@ -649,3 +556,104 @@
      (is (= (inc @a) @b))
      (is (= (inc @b) @c))))
   )
+
+(deftest reaction-xforms
+  (let [a (r/reaction {:xf (dedupe)} 0)
+        a's (xf/into [] a)]
+    (is (= [0] @a's))
+    (dotimes [n 3] (swap! a inc))
+    (is (= [0 1 2 3] @a's)))
+
+  (let [a (r/atom 0)
+        a's (xf/into [] a)]
+    (reset! a 0)
+    (reset! a 0)
+    (is (= [0 0 0] @a's)))
+
+  (let [a (r/reaction {:xf (dedupe)} 0)
+        a's (xf/into [] a)]
+    (reset! a 0)
+    (reset! a 0)
+    (is (= [0] @a's)))
+  )
+
+(deftest hooks
+
+  (r/session
+   (let [a (atom 1)
+         b (xf/transform a (clojure.core/map inc))]
+     (is (= @b 2))))
+
+
+  (r/session
+   (let [source (atom 1)
+         before-after (xf/transform source (xf/before:after))]
+     (is (= [nil 1] @before-after))))
+
+  (r/session
+   (let [source (atom 0)
+         before-after (xf/transform source (xf/before:after))]
+     (is (= [nil 0] @before-after))
+     (swap! source inc)
+     (is (= [0 1] @before-after))))
+
+
+  (r/session
+   (let [source (atom 0)
+         pairs (xf/transform source
+                 (xf/before:after)
+                 (take 5)
+                 (xf/into []))]
+     @pairs
+     (dotimes [_ 3]
+       (swap! source inc))
+     (is (= [[nil 0]
+             [0 1]
+             [1 2]
+             [2 3]] @pairs))))
+
+  (r/session
+   (let [source (r/reaction 0)
+         evens (xf/transform source
+                 (filter even?)
+                 (take 3)
+                 (xf/into []))]
+     (swap! source inc)
+     @evens
+     (swap! source inc)
+     @evens
+
+     ))
+
+
+  (let [st (r/make-step-fn (comp (dedupe)
+                                 (take 3)
+                                 (map identity)))]
+    (is (= [(st 1)
+            (st 2)
+            (st 2) ;; no-op
+            (st 3)
+            (st 4)]
+           [1
+            2
+            ::r/no-op
+            3
+            ::r/done]))))
+
+(let [-a (r/atom 1)
+      a (xf/map inc -a)]
+  (r/become a (xf/map dec -a)))
+
+(let [-a (r/atom 1)
+      a (xf/map inc -a)
+      b (xf/map inc a)
+      c (xf/map inc b)]
+  (is (= [1 2 3 4]
+         (mapv deref [-a a b c])))
+  (r/become -a (r/atom 2))
+  (mapv deref [-a a b c])
+  (is (= [2 3 4 5]
+         (mapv deref [-a a b c])))
+  (r/become a (xf/map (partial + 2) -a))
+  (is (= [2 4 5 6]
+         (mapv deref [-a a b c]))))
