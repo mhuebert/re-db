@@ -165,9 +165,9 @@
 (defn result-handlers
   "(client) Handlers for messages received by the client"
   ([] (result-handlers {}))
-  ([resolve-result]
+  ([handlers]
    {::result (fn [_ [id result]]
-               (transact-result resolve-result id result))}))
+               (transact-result handlers id result))}))
 
 (defn query-handlers
   "(server) Handlers for messages received by teh server"

@@ -1,7 +1,7 @@
 (ns re-db.sync.entity-diff-1
   (:require [re-db.sync :as-alias sync]
-            [re-db.sync.transit :refer [entity-pointer]]
-            [re-db.xform :as xf]))
+            [re-db.xform :as xf]
+            [re-db.api :as db]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity diffing - transacting only changes when a query updates
@@ -60,16 +60,20 @@
                     :else :value)]
     (assoc (case shape
              :value {:value new-value}
-             :entities/one {:value (entity-pointer new-value)
+             :entities/one {::id (:db/id new-value)
                             :txs [(diff-entity old-value new-value)]}
-             :entities/many {:value (mapv entity-pointer new-value)
+             :entities/many {::ids (mapv :db/id new-value)
                              :txs (diff-entities old-value new-value)})
       ::sync/init (case shape
                     :value {:value new-value}
-                    :entities/one {:value (entity-pointer new-value)
+                    :entities/one {::id (:db/id new-value)
                                    :txs [new-value]}
-                    :entities/many {:value (mapv entity-pointer new-value)
+                    :entities/many {::ids (mapv :db/id new-value)
                                     :txs new-value}))))
+
+(def result-handlers
+  {::id (fn [prev id] {:value (db/entity id)})
+   ::ids (fn [prev ids] {:value (mapv db/entity ids)})})
 
 (defn send-error [client-id id send-fn error]
   (send-fn client-id [:sync/tx

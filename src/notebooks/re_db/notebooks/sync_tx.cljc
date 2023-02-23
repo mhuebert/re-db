@@ -55,7 +55,7 @@
 (show-cljs
   (def channel
     (ws/connect :port 9062
-                :handlers (sync/result-handlers))))
+                :handlers (sync/result-handlers entity-diff/result-handlers))))
 
 ;; Show `:entity-1`
 (show-cljs
