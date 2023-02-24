@@ -13,6 +13,8 @@
 ;; In this namespace we'll sync the contents of an atom, !list.
 (defonce !list (atom ()))
 
+#_(reset! !list ())
+
 ;; Using the [editscript](https://github.com/juji-io/editscript) library, we transform a
 ;; ref into a stream of edits:
 
@@ -22,16 +24,16 @@
     (map (fn [[before after]]
            {::sync/editscript (-> (editscript/diff before after)
                                   (editscript/get-edits))
-            ::sync/init {:value after}}))))
+            ::sync/init after}))))
 
 ;; In the browser, we'll need an extra result-handler which handles editscript edits.
 ;; Result handlers are reducing functions which receive the previous value (typically
 ;; a map of :value or :error) and return a new result.
 
 (defn handle-editscript-result [prev edits]
-  {:value (editscript/patch
-           (:value prev)
-           (editscript/edits->script edits))})
+  (editscript/patch
+   (:value prev)
+   (editscript/edits->script edits)))
 
 ;; A websocket server (clj, runs on the jvm):
 #?(:clj
@@ -66,5 +68,5 @@
 
 ;; Show a log of events:
 (show-cljs
-  [:div.whitespace-pre-wrap.code.text-xs
-   (with-out-str (pprint @($log (:!last-message channel) 10)))])
+ [:div.whitespace-pre-wrap.code.text-xs
+  (with-out-str (pprint @($log (:!last-message channel) 10)))])

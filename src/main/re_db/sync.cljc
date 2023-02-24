@@ -132,7 +132,7 @@
   (alter-meta! !ref assoc ::query-id query) ;; mutate meta of !ref to include query-id for monitoring
   (swap! !watches update channel (fnil conj #{}) !ref)
   (add-watch !ref channel (fn [_ _ _ value]
-                            (send channel (wrap-result query (dissoc value ::init)))))
+                            (send channel (wrap-result query value))))
   (let [v @!ref]
     (send channel (wrap-result query (or (::init v)
                                          (dissoc v ::init))))))
@@ -236,7 +236,7 @@
    or joins results into a :value vector."
   [channel & qvecs]
   (r/reaction
-    (let [qs (mapv (comp deref (partial $query channel)) qvecs)]
-      (or (u/find-first qs :error)
-          (u/find-first qs :loading?)
-          {:value (into [] (map :value) qs)}))))
+   (let [qs (mapv (comp deref (partial $query channel)) qvecs)]
+     (or (u/find-first qs :error)
+         (u/find-first qs :loading?)
+         {:value (into [] (map :value) qs)}))))
