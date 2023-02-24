@@ -397,7 +397,7 @@
                        (do (set! state new-val)
                            true))]
         (when updated?
-          (notify-watches this old-val new-val))
+          (notify-watches this old-val state))
         new-val))
     ISwap
     (-swap! [this f]  (reset! this (f @this)))

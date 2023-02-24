@@ -34,7 +34,7 @@
   "Stream of :sync/snapshot events associating `id` with values of `!ref`"
   [!ref]
   (r/reaction
-    (try {:value @!ref}
+    (try {:value (hooks/use-deref !ref)}
          (catch #?(:clj Exception :cljs js/Error) e
            {:error e}))))
 
