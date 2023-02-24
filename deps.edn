@@ -12,7 +12,8 @@
                                   "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]
                        :extra-deps {datalevin/datalevin {:mvn/version "0.7.7"}}}
            :dev {:extra-paths ["classes"]
-                 :extra-deps {thheller/shadow-cljs {:mvn/version "2.20.20"}
+                 :extra-deps {rewrite-clj/rewrite-clj {:mvn/version "1.1.46"}
+                              thheller/shadow-cljs {:mvn/version "2.20.20"}
                               com.bhauman/cljs-test-display {#_#_:mvn/version "0.1.1"
                                                              :git/sha "76905766a8c13a95f2fb93ed2a54fa7b2343db20"
                                                              :git/url "https://github.com/mhuebert/cljs-test-display"}}}
