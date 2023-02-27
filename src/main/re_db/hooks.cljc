@@ -37,7 +37,7 @@
   ([f] (use-effect f nil))
   ([f deps]
    (let [owner *owner*
-         [i hook new?] (-hooks/get-next-hook! owner :use-state)]
+         [i hook new?] (-hooks/get-next-hook! owner :use-effect)]
      (when (or new? (not= (:hook/prev-deps hook) deps))
        (some-> (:hook/dispose hook) eval-fn)
        (-hooks/update-hook! owner i merge {:initialized? true :hook/dispose nil})
@@ -56,7 +56,7 @@
   ([f] (use-memo f nil))
   ([f deps]
    (let [owner *owner*
-         [i hook new?] (-hooks/get-next-hook! owner :use-state)]
+         [i hook new?] (-hooks/get-next-hook! owner :use-memo)]
      (:hook/value
       (if (or new? (not= (:prev-deps hook) deps))
         (-hooks/update-hook! owner i merge {:hook/value (r/without-deref-capture (eval-fn f))
@@ -87,7 +87,7 @@
 
 (defn use-volatile [initial-state]
   (let [owner *owner*
-        [i hook new?] (-hooks/get-next-hook! owner :use-state)]
+        [i hook new?] (-hooks/get-next-hook! owner :use-volatile)]
     (atom-like
      (if new?
        (-hooks/update-hook! owner i merge
