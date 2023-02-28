@@ -257,7 +257,7 @@
     (is (= @!latch 6) "Reaction can be started and stopped multiple times via watch/unwatch"))
 
   (let [rx (r/reaction
-             (let [[v v!] (hooks/use-volatile 0)]
+             (let [[v v!] (hooks/use-ref 0)]
                (v! inc)))]
     (is (= (r/session @rx) 1))
     (r/compute! rx)
