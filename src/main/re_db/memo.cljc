@@ -3,8 +3,7 @@
   (:refer-clojure :exclude [memoize fn defn])
   (:require [clojure.core :as c]
             [clojure.string :as str]
-            [re-db.reactive :as r :refer [add-on-dispose!]]
-            [re-db.macros :as macros])
+            [re-db.reactive :as r :refer [add-on-dispose!]])
   #?(:cljs (:require-macros re-db.memo)))
 
 ;; memoize, but with reference counting (& lifecycle)
@@ -71,7 +70,7 @@
   "Like defonce for `def-memo` and `defn-memo`"
   [expr]
   (let [name (second expr)]
-    `(when-not (macros/present? ~name)
+    `(when-not (r/var-present? ~name)
        ~expr)))
 
 (comment

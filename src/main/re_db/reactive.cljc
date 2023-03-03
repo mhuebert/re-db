@@ -1,8 +1,8 @@
 (ns re-db.reactive
   (:refer-clojure :exclude [atom peek catch])
-  (:require [re-db.macros :as macros]
-            [re-db.util :as util]
-            [re-db.impl.hooks :as -hooks])
+  (:require [clojure.walk :as walk]
+            [re-db.impl.hooks :as -hooks]
+            [re-db.util :as util])
   #?(:cljs (:require-macros re-db.reactive)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -25,12 +25,51 @@
   (detach! [this] "Detach from graph - computes immediately and remains active until explicitly disposed")
   (detached? [this]))
 
+(def init-meta {})
+(def init-stale true)
+(def init-watches {})
+(def init-dispose-fns [])
+(def init-detached false)
+(def init-derefs #{})
+
 (defprotocol ITrackDerefs
   "for implicitly recording dependencies via `deref`"
   (get-derefs [this])
   (set-derefs! [this new-derefs]))
 
 (def ^:dynamic *captured-derefs* nil)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Deref tracking
+
+#?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
+
+(defn collect-deref! [producer]
+  #?(:cljs (reagent-notify-deref-watcher! producer))
+  (some-> *captured-derefs* (vswap! conj producer)))
+
+(defn handle-new-derefs! [consumer new-derefs]
+  (let [derefs (get-derefs consumer)
+        [added removed] (util/set-diff (util/guard derefs seq)
+                                       (util/guard new-derefs seq))]
+    (doseq [producer added] (add-watch producer consumer (fn [_ _ _ _] (compute! consumer))))
+    (doseq [producer removed] (remove-watch producer consumer))
+    (set-derefs! consumer new-derefs)
+    consumer))
+
+(defn with-deref-capture!* [owner f]
+  (binding [*captured-derefs* (volatile! init-derefs)]
+    (let [out (f)
+          new-derefs @*captured-derefs*]
+      (handle-new-derefs! owner new-derefs)
+      out)))
+
+(defmacro with-deref-capture! [owner & body]
+  `(with-deref-capture!* ~owner (fn [] ~@body)))
+
+(defn without-deref-capture* [f]
+  (binding [*captured-derefs* nil] (f)))
+
+(defmacro without-deref-capture [& body] `(without-deref-capture* (fn [] ~@body)))
 
 (defprotocol IPeek
   "for reading reactive values without triggering a dependency relationship.
@@ -57,7 +96,7 @@
   (computes? [this] false)
 
   IPeek
-  (peek [this] (macros/without-deref-capture @this)))
+  (peek [this] (binding [*captured-derefs* nil] @this)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Notify
@@ -115,6 +154,9 @@
   "Owner of the current reactive computation"
   nil)
 
+(defn with-owner* [owner f]
+  (binding [*owner* owner] (f)))
+
 ;; for reagent compatibility
 #?(:cljs (defonce get-reagent-context (constantly nil)))
 
@@ -151,49 +193,32 @@
   (assert (identical? (type from) (type to)) "`become` requires reactive values of the same type")
   (-become from (-extract to)))
 
+(defn var-present?:impl [form env name]
+  (if (:ns env)
+    `(~'exists? ~name)
+    `(bound? (def ~name))))
+
+(defmacro var-present? [name]
+  (var-present?:impl &form &env name))
+
+(defn redef:impl [form env name doc rx]
+  (let [name (cond-> name doc (with-meta {:doc doc}))
+        rx-sym (gensym "rx")]
+    `(do (declare ~name)
+         (let [~rx-sym ~rx]
+           (if (var-present? ~name)
+             ~(if (:ns env)
+                `(become ~name ~rx-sym)
+                `(do (become ~name ~rx-sym)
+                     (var ~name))))
+           (def ~name ~rx-sym)))))
+
 (defmacro redef
   "Reactive `def` - value should be a reactive value. If name already exists, migrates watches to the new reactive value."
-  ([name doc rx] `(redef ~(with-meta name {:doc doc}) ~rx))
-  ([name rx]
-   (let [rx-sym (gensym "rx")]
-     `(do (declare ~name)
-          (let [~rx-sym ~rx]
-            (if (macros/present? ~name)
-              ~(if (:ns &env)
-                 `(become ~name ~rx-sym)
-                 `(do (become ~name ~rx-sym)
-                      (var ~name))))
-            (def ~name ~rx-sym))))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Deref tracking
-
-#?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
-
-(defn collect-deref! [producer]
-  #?(:cljs (reagent-notify-deref-watcher! producer))
-  (some-> *captured-derefs* (vswap! conj producer)))
-
-(defn handle-new-derefs! [consumer new-derefs]
-  (let [derefs (get-derefs consumer)
-        [added removed] (util/set-diff (util/guard derefs seq)
-                                       (util/guard new-derefs seq))]
-    (doseq [producer added] (add-watch producer consumer (fn [_ _ _ _] (compute! consumer))))
-    (doseq [producer removed] (remove-watch producer consumer))
-    (set-derefs! consumer new-derefs)
-    consumer))
+  ([name doc rx] (redef:impl &form &env name doc rx))
+  ([name rx] (redef:impl &form &env name nil rx)))
 
 (defn dispose-derefs! [consumer] (handle-new-derefs! consumer nil))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Initial values
-
-(def init-meta {})
-(def init-stale true)
-(def init-watches {})
-(def init-dispose-fns [])
-(def init-detached false)
-(def init-derefs #{})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactive Atom - basic reactive value
@@ -250,7 +275,7 @@
       (when-not detached
         (set! detached true)))
     (add-on-dispose! [this f]
-      (macros/set-swap! dispose-fns conj f))
+      (util/set-swap! dispose-fns conj f))
     (dispose! [this]
       (doseq [f dispose-fns] (f this))
       (set! dispose-fns init-dispose-fns))
@@ -278,10 +303,10 @@
     (-swap! [this f x y args] (reset! this (apply f state x y args)))
     IWatchable
     (-add-watch [this key f]
-      (macros/set-swap! watches assoc key f)
+      (util/set-swap! watches assoc key f)
       this)
     (-remove-watch [this key]
-      (macros/set-swap! watches dissoc key)
+      (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
         (dispose! this))
       this)))
@@ -349,7 +374,7 @@
         (compute! this))
       this)
     (add-on-dispose! [this f]
-      (macros/set-swap! dispose-fns conj f))
+      (util/set-swap! dispose-fns conj f))
     (dispose! [this]
       (dispose-derefs! this)
       (-hooks/dispose-hooks! this)
@@ -400,7 +425,7 @@
           (notify-watches this old-val state))
         new-val))
     ISwap
-    (-swap! [this f]  (reset! this (f @this)))
+    (-swap! [this f] (reset! this (f @this)))
     (-swap! [this f x] (reset! this (f @this x)))
     (-swap! [this f x y] (reset! this (f @this x y)))
     (-swap! [this f x y args] (reset! this (apply f @this x y args)))
@@ -411,10 +436,10 @@
      ;; so that the watch-fn is not called here)
       (when stale (compute! this))
 
-      (macros/set-swap! watches assoc key compute-fn)
+      (util/set-swap! watches assoc key compute-fn)
       this)
     (-remove-watch [this key]
-      (macros/set-swap! watches dissoc key)
+      (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
         (dispose! this))
       this)
@@ -425,12 +450,12 @@
     (stale? [this] stale)
     (set-stale! [this is-stale] (set! stale is-stale))
     (compute [this]
-      (macros/with-owner this
-        (macros/with-hook-support!
-         (macros/with-deref-capture! this
-           (try (compute-fn)
-                (catch #?(:cljs js/Error :clj Exception) e
-                  e))))))
+      (binding [*owner* this
+                -hooks/*hook-i* (volatile! -1)]
+        (re-db.reactive/with-deref-capture! this
+          (try (compute-fn)
+               (catch #?(:cljs js/Error :clj Exception) e
+                 e)))))
     (compute! [this]
       (set! stale false)
       (let [new-val (compute this)]
@@ -484,11 +509,104 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Macros
 
-(defmacro session [& body] `(macros/session ~@body))
-(defmacro without-deref-capture [& body] `(macros/without-deref-capture ~@body))
-(defmacro static [& body] `(macros/without-deref-capture ~@body))
-(defmacro reaction [& body] `(macros/reaction ~@body))
-(defmacro reaction! [& body] `(detach! (macros/reaction ~@body)))
+(defmacro with-owner [owner & body]
+  `(with-owner* ~owner (fn [] ~@body)))
+
+(defn dev-meta [form]
+  {:display-name (str *ns* "@"
+                      (:line (meta form))
+                      ":"
+                      (:column (meta form)))})
+
+(defn parse-reaction-args [form args & [options]]
+  (-> (if (and (map? (first args)) (second args))
+        [(first args) (rest args)]
+        [{} args])
+      (update-in [0 :meta] merge (dev-meta form))
+      (update 0 merge options)))
+
+(defmacro reaction
+  "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
+   when they change. Disposes self when last watch is removed."
+  [& body]
+  (let [[options body] (parse-reaction-args &form body)]
+    `(make-reaction ~options (fn [] ~@body))))
+
+(defmacro reaction!
+  "Returns a detached reaction: computes immediately, remains active until explicitly disposed."
+  [& body]
+  (let [[options body] (parse-reaction-args &form body {:detached true})]
+    `(make-reaction ~options (fn [] ~@body))))
+
+(defn session* [f]
+  (let [rx (make-reaction {:detached true} f)
+        out @rx]
+    (dispose! rx)
+    out))
+
+(defmacro session
+  "Evaluate body in a reaction which is immediately disposed"
+  [& body]
+  `(session* (fn [] ~@body)))
+
+(defn with-session* [session f]
+  (re-db.reactive/with-owner session
+    (binding [*captured-derefs* (volatile! init-derefs)]
+      (let [out (f)
+            new-derefs @*captured-derefs*]
+        (doseq [producer new-derefs] (add-watch producer session (fn [_ _ _ _])))
+        (set-derefs! session (into (get-derefs session) new-derefs))
+        out))))
+
+(defmacro with-session
+  "Evaluates body, accumulating dependencies in session (for later disposal)"
+  [session & body]
+  `(with-session* ~session (fn [] ~@body)))
+
+(defn dequote [x]
+  (cond-> x
+          (and (seq? x) (= 'quote (first x)))
+          second))
+
+(defn defpartial:impl [form env name args]
+  (let [[name args] (if (string? (first args))
+                      [(with-meta name {:doc (first args)}) (rest args)]
+                      [name args])
+        [{:keys [f]} & arglists] args
+        f (dequote f)]
+    `(defn ~name
+       ~@(for [argv arglists
+               :let [argv (if (list? argv) (first argv) argv)]]
+           (list argv (walk/postwalk (fn [x]
+                                       (if (list? x)
+                                         (mapcat (fn [x] (if (= x '_) argv [x])) x)
+                                         x)) f))))))
+
+(defmacro defpartial
+  "Defines a partially-applied function with static arities
+   and arbitrary
+
+  Syntax is like `defn` with an options map containing :f,
+  an expression containing `_` where args should be spliced in
+
+  eg
+  (defpartial add-to-1 {:f `(+ 1 _)} ([x]) ([x y]))"
+  [name & args]
+  (defpartial:impl &form &env name args))
+
+(comment
+ '(defpartial f {:f '(a/f _ *db*)}
+              ([a])
+              ([a b]))
+ '(fn f
+    ([a] (a/f a *db*))
+    ([a b] (a/f a b *db*)))
+
+ (macroexpand-1
+  '(re-db.reactive/defpartial
+    get {:f '(read/get *db* _)}
+    ([id attr])
+    ([id attr not-found]))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Error handling

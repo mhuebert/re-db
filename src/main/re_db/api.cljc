@@ -3,12 +3,9 @@
   (:refer-clojure :exclude [get contains? select-keys namespace bound-fn])
   (:require [re-db.in-memory :as mem]
             [re-db.integrations.in-memory]
-            [re-db.macros :as m :refer [defpartial]]
             [re-db.triplestore :as ts]
-            [re-db.reactive :as r]
-            [re-db.macros :as macros]
-            [re-db.read :as read]
-            [re-db.util :as u])
+            [re-db.reactive :as r :refer [defpartial]]
+            [re-db.read :as read])
   #?(:cljs (:require-macros re-db.api)))
 
 (defonce ^:dynamic *conn* (mem/create-conn))
@@ -39,7 +36,7 @@
 (defmacro bound-reaction
   "Returns a reaction which evaluates `body` with *conn* bound to the provided value."
   [conn & body]
-  (let [[options body] (macros/parse-reaction-args &form body)]
+  (let [[options body] (r/parse-reaction-args &form body)]
     `(let [conn# ~conn]
        (r/reaction ~options
          (with-conn conn# ~@body)))))
@@ -54,7 +51,7 @@
 
 (defn where [clauses] (read/where *conn* clauses))
 
-(m/defpartial pull {:f '(read/pull *conn* _)}
+(defpartial pull {:f '(read/pull *conn* _)}
   ([pull-expr])
   ([pull-expr e])
   ([options pull-expr e]))
@@ -68,11 +65,11 @@
     ([options-2 pull-expr e]
      (pull (merge options options-2) pull-expr e))))
 
-(m/defpartial transact! {:f '(read/transact! *conn* _)}
+(defpartial transact! {:f '(read/transact! *conn* _)}
   ([txs])
   ([txs options]))
 
-(m/defpartial merge-schema! {:f '(ts/-merge-schema (ts/db *conn*) *conn* _)}
+(defpartial merge-schema! {:f '(ts/-merge-schema (ts/db *conn*) *conn* _)}
   [schema])
 
 (defn conn [] *conn*)

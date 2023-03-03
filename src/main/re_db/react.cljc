@@ -19,11 +19,11 @@
       selector
       isEqual)))
 
-#?(:cljs
-   (defn use-deps
-     "Wraps a value to pass as React `deps`, using a custom equal? check (default: clojure.core/=)"
-     ([deps] (use-deps deps =))
-     ([deps equal?]
+(defn use-deps
+  "Wraps a value to pass as React `deps`, using a custom equal? check (default: clojure.core/=)"
+  ([deps] (use-deps deps =))
+  ([deps equal?]
+   #?(:cljs
       (let [counter (react/useRef 0)
             prev-deps (react/useRef deps)
             changed? (not (equal? deps (j/get prev-deps :current)))]
@@ -31,18 +31,23 @@
         (when changed? (j/update! counter :current inc))
         (array (j/get counter :current))))))
 
+
+(defn use-derefs* [f]
+  #?(:cljs
+     (let [!derefs (useCallback (volatile! r/init-derefs) (cljs.core/array))
+           out (binding [r/*captured-derefs* (doto !derefs (vreset! r/init-derefs))] (f))
+           subscribe (useCallback (fn [changed!]
+                                    (doseq [ref @!derefs] (add-watch ref !derefs (fn [_ _ _ _] (changed!))))
+                                    #(doseq [ref @!derefs] (remove-watch ref !derefs)))
+                                  (use-deps @!derefs))] ;; re-subscribe when derefs change (by identity, not value)
+       (useSyncExternalStoreWithSelector subscribe
+                                         #(mapv r/peek @!derefs) ;; get-snapshot (reads values of derefs)
+                                         nil ;; no server snapshot
+                                         identity ;; we don't need to transform the snapshot
+                                         =) ;; use Clojure's = for equality check
+       out)))
+
 (defmacro use-derefs
   ;; "safely" subscribe to arbitrary derefs
   [& body]
-  `(let [!derefs# (~'re-db.react/useCallback (volatile! r/init-derefs) (cljs.core/array))
-         out# (binding [r/*captured-derefs* (doto !derefs# (vreset! r/init-derefs))] ~@body)
-         subscribe# (useCallback (fn [changed!#]
-                                   (doseq [ref# @!derefs#] (add-watch ref# !derefs# (fn [_# _# o# n#] (changed!#))))
-                                   #(doseq [ref# @!derefs#] (remove-watch ref# !derefs#)))
-                                 (use-deps @!derefs#))] ;; re-subscribe when derefs change (by identity, not value)
-     (useSyncExternalStoreWithSelector subscribe#
-                                       #(mapv r/peek @!derefs#) ;; get-snapshot (reads values of derefs)
-                                       nil ;; no server snapshot
-                                       identity ;; we don't need to transform the snapshot
-                                       =) ;; use Clojure's = for equality check
-     out#))
+  `(use-derefs* (fn [] ~@body)))

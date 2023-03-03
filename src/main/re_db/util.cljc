@@ -8,6 +8,9 @@
 
 (defn guard [x f] (when (f x) x))
 
+(defmacro set-swap! [sym f & args]
+  `(set! ~sym (~f ~sym ~@args)))
+
 (defn set-replace [s old new]
   (if (identical? old new)
     s
