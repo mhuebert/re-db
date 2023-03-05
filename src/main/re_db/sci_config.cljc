@@ -3,6 +3,9 @@
             [re-db.reactive :as r]
             [re-db.react]))
 
+;; requires sci 44f4af63057e3b76c3fb5690fbc7611e9a1ac5ff or later (March 5, 2023)
+;; (for fixes to defprotocol)
+
 (defn ^:macro redef
   ([form env name rx] (r/redef:impl form env name nil rx))
   ([form env name doc rx] (r/redef:impl form env name doc rx)))
@@ -22,16 +25,12 @@
 
 (def re-db-reactive-ns (sci/create-ns 're-db.reactive nil))
 (def re-db-reactive-namespace
-  (merge #_(sci/copy-ns re-db.reactive re-db-reactive-ns)
+  (merge (sci/copy-ns re-db.reactive re-db-reactive-ns)
          {'var-present? (sci/copy-var var-present? re-db-reactive-ns)
-          'become (sci/copy-var r/become re-db-reactive-ns)
           'redef (sci/copy-var redef re-db-reactive-ns)
           'reaction (sci/copy-var reaction re-db-reactive-ns)
           'reaction! (sci/copy-var reaction! re-db-reactive-ns)
-          'session (sci/copy-var session re-db-reactive-ns)
-          'session* (sci/copy-var r/session* re-db-reactive-ns)
-          'atom (sci/copy-var r/atom re-db-reactive-ns)
-          '*owner* (sci/copy-var r/*owner* re-db-reactive-ns)}))
+          'session (sci/copy-var session re-db-reactive-ns)}))
 
 (defn ^:macro use-derefs [form env & body]
   `(re-db.react/use-derefs* (fn [] ~@body)))
