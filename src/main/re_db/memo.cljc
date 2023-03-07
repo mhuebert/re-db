@@ -3,7 +3,8 @@
   (:refer-clojure :exclude [memoize fn defn])
   (:require [clojure.core :as c]
             [clojure.string :as str]
-            [re-db.reactive :as r :refer [add-on-dispose!]])
+            [re-db.reactive :as r :refer [add-on-dispose!]]
+            [re-db.util :refer [sci-macro]])
   #?(:cljs (:require-macros re-db.memo)))
 
 ;; memoize, but with reference counting (& lifecycle)
@@ -38,26 +39,29 @@
   (constructor-fn (atom {:cache {}
                          :init-fn f})))
 
-(defmacro fn-memo [& args]
-  `(memoize (c/fn ~@args)))
+(sci-macro
+ (defmacro fn-memo [& args]
+   `(memoize (c/fn ~@args))))
 
-(defmacro def-memo
-  "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
-   it will be removed from the memo cache when the last reference is removed."
-  ([name doc f] `(re-db.memo/def-memo ~(with-meta name {:doc doc}) ~f))
-  ([name f]
-   (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
-   `(do (defonce ~name (memoize nil))
-        (reset-fn! ~name ~f)
-        ~name)))
+(sci-macro
+ (defmacro def-memo
+   "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
+    it will be removed from the memo cache when the last reference is removed."
+   ([name doc f] `(re-db.memo/def-memo ~(with-meta name {:doc doc}) ~f))
+   ([name f]
+    (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
+    `(do (defonce ~name (memoize nil))
+         (reset-fn! ~name ~f)
+         ~name))))
 
 (c/defn- without-docstring [args] (cond-> args (string? (first args)) rest))
 
-(defmacro defn-memo
-  "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
-   it will be removed from the memo cache when the last reference is removed."
-  [name & args]
-  `(def-memo ~name (c/fn ~name ~@(without-docstring args))))
+(sci-macro
+ (defmacro defn-memo
+   "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
+    it will be removed from the memo cache when the last reference is removed."
+   [name & args]
+   `(def-memo ~name (c/fn ~name ~@(without-docstring args)))))
 
 (c/defn dispose! [memoized]
   (let [!state (::state (meta memoized))]
@@ -66,12 +70,13 @@
     (swap! !state update :cache empty))
   memoized)
 
-(defmacro once
-  "Like defonce for `def-memo` and `defn-memo`"
-  [expr]
-  (let [name (second expr)]
-    `(when-not (r/var-present? ~name)
-       ~expr)))
+(sci-macro
+ (defmacro once
+   "Like defonce for `def-memo` and `defn-memo`"
+   [expr]
+   (let [name (second expr)]
+     `(when-not (r/var-present? ~name)
+        ~expr))))
 
 (comment
 

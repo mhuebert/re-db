@@ -2,8 +2,8 @@
   (:refer-clojure :exclude [atom peek catch])
   (:require [clojure.walk :as walk]
             [re-db.impl.hooks :as -hooks]
-            [re-db.util :as util])
-  #?(:cljs (:require-macros re-db.reactive)))
+            [re-db.util :as util :refer [sci-macro]])
+  #?(:cljs (:require-macros [re-db.reactive])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Protocols
@@ -63,13 +63,16 @@
       (handle-new-derefs! owner new-derefs)
       out)))
 
-(defmacro with-deref-capture! [owner & body]
-  `(with-deref-capture!* ~owner (fn [] ~@body)))
+(sci-macro
+  (defmacro with-deref-capture! [owner & body]
+    `(with-deref-capture!* ~owner (fn [] ~@body))))
 
 (defn without-deref-capture* [f]
   (binding [*captured-derefs* nil] (f)))
 
-(defmacro without-deref-capture [& body] `(without-deref-capture* (fn [] ~@body)))
+(sci-macro
+  (defmacro without-deref-capture [& body]
+    `(without-deref-capture* (fn [] ~@body))))
 
 (defprotocol IPeek
   "for reading reactive values without triggering a dependency relationship.
@@ -196,27 +199,25 @@
 (defn var-present?:impl [form env name]
   (if (:ns env)
     `(~'exists? ~name)
-    `(bound? (def ~name))))
+    `(~'bound? (def ~name))))
 
-(defmacro var-present? [name]
-  (var-present?:impl &form &env name))
+(sci-macro
+  (defmacro var-present? [name]
+    (var-present?:impl &form &env name)))
 
-(defn redef:impl [form env name doc rx]
-  (let [name (cond-> name doc (with-meta {:doc doc}))
-        rx-sym (gensym "rx")]
-    `(do (declare ~name)
-         (let [~rx-sym ~rx]
-           (if (var-present? ~name)
-             ~(if (:ns env)
-                `(become ~name ~rx-sym)
-                `(do (become ~name ~rx-sym)
-                     (var ~name))))
-           (def ~name ~rx-sym)))))
-
-(defmacro redef
-  "Reactive `def` - value should be a reactive value. If name already exists, migrates watches to the new reactive value."
-  ([name doc rx] (redef:impl &form &env name doc rx))
-  ([name rx] (redef:impl &form &env name nil rx)))
+(sci-macro
+  (defmacro redef
+    "Reactive `def` - value should be a reactive value. If name already exists, migrates watches to the new reactive value."
+    ([name doc rx]
+     (let [name (cond-> name doc (with-meta {:doc doc}))
+           rx-sym (gensym "rx")]
+       `(do (declare ~name)
+            (let [~rx-sym ~rx]
+              (if (var-present? ~name)
+                (do (become ~name ~rx-sym)
+                    (var ~name)))
+              (def ~name ~rx-sym)))))
+    ([name rx] `(redef ~name nil ~rx))))
 
 (defn dispose-derefs! [consumer] (handle-new-derefs! consumer nil))
 
@@ -349,7 +350,7 @@
      ^:volatile-mutable meta]
     IBecome
     (-become [this extracted]
-      (let [[compute-fn-2 state-2 detached-2 hooks-2 step-2 stale-2 meta-2] extracted]
+      (let [[compute-fn-2 state-2 detached-2 step-2 stale-2 meta-2] extracted]
         ;; hooks are disposed, because they are controlled by the compute-fn.
         ;; dispose-fns are not disposed, because they are controlled from 'outside'.
         (-hooks/dispose-hooks! this) ;; new compute-fn can't reuse old hooks
@@ -357,13 +358,12 @@
         (set! compute-fn compute-fn-2)
         (set! state (when state-2 (step-initv step-2 state-2)))
         (set! detached detached-2)
-        (set! hooks hooks-2)
         (set! step step-2)
         (set! stale stale-2)
         (set! meta meta-2)
         (when (seq watches) (compute! this))
         this))
-    (-extract [this] @this [compute-fn state detached hooks step stale meta])
+    (-extract [this] @this [compute-fn state detached step stale meta])
     IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))
@@ -509,8 +509,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Macros
 
-(defmacro with-owner [owner & body]
-  `(with-owner* ~owner (fn [] ~@body)))
+(sci-macro
+  (defmacro with-owner [owner & body]
+    `(with-owner* ~owner (fn [] ~@body))))
 
 (defn dev-meta [form]
   {:display-name (str *ns* "@"
@@ -524,19 +525,20 @@
         [{} args])
       (update-in [0 :meta] merge (dev-meta form))
       (update 0 merge options)))
+(sci-macro
+  (defmacro reaction
+    "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
+     when they change. Disposes self when last watch is removed."
+    [& body]
+    (let [[options body] (parse-reaction-args &form body)]
+      `(make-reaction ~options (fn [] ~@body)))))
 
-(defmacro reaction
-  "Returns a lazy derefable reactive source computed from `body`. Captures dependencies and recomputes
-   when they change. Disposes self when last watch is removed."
-  [& body]
-  (let [[options body] (parse-reaction-args &form body)]
-    `(make-reaction ~options (fn [] ~@body))))
-
-(defmacro reaction!
-  "Returns a detached reaction: computes immediately, remains active until explicitly disposed."
-  [& body]
-  (let [[options body] (parse-reaction-args &form body {:detached true})]
-    `(make-reaction ~options (fn [] ~@body))))
+(sci-macro
+  (defmacro reaction!
+    "Returns a detached reaction: computes immediately, remains active until explicitly disposed."
+    [& body]
+    (let [[options body] (parse-reaction-args &form body {:detached true})]
+      `(make-reaction ~options (fn [] ~@body)))))
 
 (defn session* [f]
   (let [rx (make-reaction {:detached true} f)
@@ -544,10 +546,11 @@
     (dispose! rx)
     out))
 
-(defmacro session
-  "Evaluate body in a reaction which is immediately disposed"
-  [& body]
-  `(session* (fn [] ~@body)))
+(sci-macro
+  (defmacro session
+    "Evaluate body in a reaction which is immediately disposed"
+    [& body]
+    `(session* (fn [] ~@body))))
 
 (defn with-session* [session f]
   (re-db.reactive/with-owner session
@@ -558,10 +561,11 @@
         (set-derefs! session (into (get-derefs session) new-derefs))
         out))))
 
-(defmacro with-session
-  "Evaluates body, accumulating dependencies in session (for later disposal)"
-  [session & body]
-  `(with-session* ~session (fn [] ~@body)))
+(sci-macro
+  (defmacro with-session
+    "Evaluates body, accumulating dependencies in session (for later disposal)"
+    [session & body]
+    `(with-session* ~session (fn [] ~@body))))
 
 (defn dequote [x]
   (cond-> x
@@ -582,31 +586,32 @@
                                          (mapcat (fn [x] (if (= x '_) argv [x])) x)
                                          x)) f))))))
 
-(defmacro defpartial
-  "Defines a partially-applied function with static arities
-   and arbitrary
+(sci-macro
+  (defmacro defpartial
+    "Defines a partially-applied function with static arities
+     and arbitrary
 
-  Syntax is like `defn` with an options map containing :f,
-  an expression containing `_` where args should be spliced in
+    Syntax is like `defn` with an options map containing :f,
+    an expression containing `_` where args should be spliced in
 
-  eg
-  (defpartial add-to-1 {:f `(+ 1 _)} ([x]) ([x y]))"
-  [name & args]
-  (defpartial:impl &form &env name args))
+    eg
+    (defpartial add-to-1 {:f `(+ 1 _)} ([x]) ([x y]))"
+    [name & args]
+    (defpartial:impl &form &env name args)))
 
 (comment
  '(defpartial f {:f '(a/f _ *db*)}
-              ([a])
-              ([a b]))
+    ([a])
+    ([a b]))
  '(fn f
     ([a] (a/f a *db*))
     ([a b] (a/f a b *db*)))
 
  (macroexpand-1
   '(re-db.reactive/defpartial
-    get {:f '(read/get *db* _)}
-    ([id attr])
-    ([id attr not-found]))))
+     get {:f '(read/get *db* _)}
+     ([id attr])
+     ([id attr not-found]))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Error handling

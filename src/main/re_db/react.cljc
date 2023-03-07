@@ -2,7 +2,8 @@
   (:require #?(:cljs ["react" :as react])
             #?(:cljs ["use-sync-external-store/with-selector" :as with-selector])
             [applied-science.js-interop :as j]
-            [re-db.reactive :as r])
+            [re-db.reactive :as r]
+            [re-db.util :refer [sci-macro]])
   #?(:cljs (:require-macros re-db.react)))
 
 (defn useEffect [f deps] #?(:cljs (react/useEffect f deps)))
@@ -47,7 +48,8 @@
                                          =) ;; use Clojure's = for equality check
        out)))
 
-(defmacro use-derefs
-  ;; "safely" subscribe to arbitrary derefs
-  [& body]
-  `(use-derefs* (fn [] ~@body)))
+(sci-macro
+ (defmacro use-derefs
+   ;; "safely" subscribe to arbitrary derefs
+   [& body]
+   `(use-derefs* (fn [] ~@body))))
