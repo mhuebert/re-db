@@ -82,7 +82,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Default implementations
 
-(extend-type #?(:clj Object :cljs object)
+(extend-type #?(:clj Object :cljs default)
   IReactiveValue
   (get-watches [this] nil)
   (set-watches! [this new-watches] this)

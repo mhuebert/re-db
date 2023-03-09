@@ -146,7 +146,7 @@
   [ref]
   (if-react
    (let [id (react/useCallback (j/lit {}))]
-     (~'use-sync-external-store
+     (useSyncExternalStore
       (react/useCallback
        (fn [changed!]
          (add-watch ref id (fn [_ _ _ _] (changed!)))
