@@ -193,7 +193,10 @@
 (defn become [from to]
   ;; unclear:
   ;; - dispose-fns, should they be called?
-  (assert (identical? (type from) (type to)) "`become` requires reactive values of the same type")
+  (assert (= (count (-extract from)) (count (-extract to)))
+          (str "`become` requires reactive values of the same type"
+               {:from (count (-extract from))
+                :to (count (-extract to))}))
   (-become from (-extract to)))
 
 (defn var-present?:impl [form env name]
