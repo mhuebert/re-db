@@ -1,9 +1,10 @@
 (ns re-db.xform
-  (:refer-clojure :exclude [into map])
+  (:refer-clojure :exclude [into map ->])
   (:require [re-db.hooks :as hooks]
             [re-db.reactive :as r]
             [re-db.util :as util]
-            [re-db.xform.reducers :as reducers]))
+            [re-db.xform.reducers :as reducers])
+  #?(:cljs (:require-macros re-db.xform)))
 
 (defn transform
   "Streams values from ref into a new ratom, applying any supplied xforms (transducers)"
@@ -15,6 +16,10 @@
 (defn map [f source]
   (r/reaction {:xf (clojure.core/map f)}
     (hooks/use-deref source)))
+
+(util/sci-macro
+  (defmacro -> [ref & forms]
+    `(map (fn [x#] (clojure.core/-> x# ~@forms)) ~ref)))
 
 (defn compr [rfn f]
   (fn

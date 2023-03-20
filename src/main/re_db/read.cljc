@@ -98,8 +98,9 @@
      (-depend-on-triple! conn db id nil nil)
      (ts/eav db id)))
   ([conn db e a]
-   (-depend-on-triple! conn db e a nil)
-   (ts/eav db e a)))
+   (when-let [id (-resolve-e conn db e)]
+     (-depend-on-triple! conn db e a nil)
+     (ts/eav db id a))))
 
 (defn- -ave [conn db a v]
   (when-let [v (resolve-v conn db a v)]
