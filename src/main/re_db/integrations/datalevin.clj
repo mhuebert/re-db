@@ -2,47 +2,37 @@
   (:require [datalevin.core :as d]
             datalevin.datom
             [datalevin.db :as db]
-            [re-db.protocols :as rp]
+            [re-db.triplestore :as ts]
             [re-db.schema :as s])
   (:import datalevin.db.DB
            datalevin.datom.Datom))
 
-;; installing lmdb on M1: https://github.com/lmdbjava/native/issues/10#issuecomment-984467831
-
-(comment
- (def conn (d/get-conn "/tmp/datalevin/1" {}))
- (defn db [] @conn)
-
- (merge {} (rp/merge-schema conn {(keyword (str "name" (rand-int 999999)))
-                                  (merge s/unique-id
-                                         s/string)})))
-
 (defn- v [^datalevin.datom.Datom d] (.-v d))
 
 (extend-type datalevin.db.DB
-  rp/ITriple
+  ts/ITripleStore
   (eav
     ([db e a]
      (let [datoms (d/datoms db :eavt e a)]
-       (if (rp/many? db a)
+       (if (ts/many? db a)
          (mapv v datoms)
          (some-> (first datoms) v))))
-    ([db e] (rp/datoms->map db (d/datoms db :eavt e))))
+    ([db e] (ts/datoms->map db (d/datoms db :eavt e))))
   (ave [db a v] (into #{} (map (fn [^datalevin.datom.Datom d] (.-e d))) (d/datoms db :ave a v)))
   (ae [db a] (into #{} (map (fn [^datalevin.datom.Datom d] (.-e d))) (d/datoms db :ave a)))
   (datom-a [db a] a)
   (get-schema [db a] ((db/-schema db) a))
-  (id->ident [db e] (or (rp/eav db e :db/ident) e))
+  (id->ident [db e] (or (ts/eav db e :db/ident) e))
   (ref?
-    ([this a] (rp/ref? this a (rp/get-schema this a)))
+    ([this a] (ts/ref? this a (ts/get-schema this a)))
     ([this a schema] (= :db.type/ref (:db/valueType schema))))
   (unique?
-    ([this a] (rp/unique? this a (rp/get-schema this a)))
+    ([this a] (ts/unique? this a (ts/get-schema this a)))
     ([this a schema] (:db/unique schema)))
   (many?
-    ([this a] (rp/many? this a (rp/get-schema this a)))
+    ([this a] (ts/many? this a (ts/get-schema this a)))
     ([this a schema] (= :db.cardinality/many (:db/cardinality schema))))
-  (doto-report-triples [this f report]
+  (report-triples [this report f]
     (doseq [^datalevin.datom.Datom datom (:tx-data report)]
       (f (.-e datom) (.-a datom) (.-v datom))))
   (-transact
@@ -55,7 +45,7 @@
  (clojure.java.shell/sh "arch")
 
  (def conn (d/get-conn "/tmp/datalevin/mydb" {}))
- (rp/get-schema @conn :a)
+ (ts/get-schema @conn :a)
 
  (:require '[clojure.java.shell :as sh])
 

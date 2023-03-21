@@ -1,10 +1,10 @@
 (ns re-db.integrations.in-memory
-  (:require [re-db.protocols :as rp]
+  (:require [re-db.triplestore :as ts]
             [re-db.fast :as fast]
             [re-db.in-memory :as mem]))
 
 (extend-type #?(:cljs default :clj java.lang.Object)
-  rp/ITriple
+  ts/ITripleStore
   (eav
     ([db e] (some-> (fast/gets db :eav e) (assoc :db/id e)))
     ([db e a] (fast/gets db :eav e a)))
@@ -45,7 +45,7 @@
     ([db conn txs] (mem/transact! conn txs))
     ([db conn txs opts] (mem/transact! conn txs opts)))
   (-merge-schema [db conn schema] (mem/merge-schema! conn schema))
-  (doto-report-triples [db f report]
+  (report-triples [db report f]
     (let [many? (memoize (fn [a] (mem/many? (mem/get-schema (:db-after report) a))))]
       (doseq [[e a v pv] (:datoms report)]
         (if (many? a)

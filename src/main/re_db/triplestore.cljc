@@ -1,14 +1,18 @@
-(ns re-db.protocols)
+(ns re-db.triplestore
+  "Triplestore abstraction")
 
 (defprotocol IConn
   (db [conn]))
 
-(extend-type #?(:cljs cljs.core.Atom
-                :clj clojure.lang.Atom)
-  IConn
-  (db [conn] @conn))
+(extend-protocol IConn
+  #?(:cljs cljs.core.Atom
+     :clj  clojure.lang.Atom)
+  (db [conn] @conn)
+  #?(:cljs default
+     :clj java.lang.Object)
+  (db [_] nil))
 
-(defprotocol ITriple
+(defprotocol ITripleStore
   (eav [db e a] [db e])
   (ave [db a v])
   (ae [db a])
@@ -19,10 +23,17 @@
   (many? [db a] [db a schema])
   (id->ident [db e] "Returns :db/ident if it exists for e")
 
-  (doto-report-triples [db f report])
+  (report-triples [db report f] "Calls (f e a v) for each triple in a tx-report")
   ;; fns that operate on a connection, but dispatch on db-type
   (-transact [db conn txs] [db conn txs options])
   (-merge-schema [db conn schema]))
+
+(defn triples
+  "Returns triples"
+  [db report]
+  (let [out (volatile! [])]
+    (report-triples db report (fn [e a v] (vswap! out conj [e a v])))
+    @out))
 
 (defn get-db [conn the-db] (or the-db (db conn)))
 

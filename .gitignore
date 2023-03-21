@@ -5,4 +5,7 @@ node_modules
 *.iml
 **/js/**
 .cache
-src/main/re_db/scratch
+src/**/scratch
+classes/**/scratch
+.clerk
+public/clerk

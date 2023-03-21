@@ -69,7 +69,3 @@
   "Returns conn with db-value at `tx`"
   [!history tx]
   (atom (db-as-of @!history tx)))
-
-(defn rx-as-of [rx db]
-  (binding [read/*db* db]
-    (r/compute rx)))

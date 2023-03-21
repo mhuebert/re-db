@@ -1,4 +1,5 @@
-(ns re-db.xform.reducers)
+(ns re-db.xform.reducers
+  (:refer-clojure :exclude [frequencies group-by]))
 
 (defn before:after
   ([] [])

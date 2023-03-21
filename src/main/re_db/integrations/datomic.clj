@@ -1,6 +1,6 @@
 (ns re-db.integrations.datomic
   (:require [datomic.api :as d]
-            [re-db.protocols :as rp]
+            [re-db.triplestore :as ts]
             [re-db.util :as u])
   (:import [datomic.peer LocalConnection Connection]
            [datomic.db Db]
@@ -9,14 +9,14 @@
 (defn- v [^Datom d] (.-v d))
 
 (extend-type Db
-  rp/ITriple
+  ts/ITripleStore
   (eav
     ([db e a]
      (let [datoms (d/datoms db :eavt e a)]
-       (if (rp/many? db a)
+       (if (ts/many? db a)
          (mapv v datoms)
          (some-> (first datoms) v))))
-    ([db e] (rp/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
+    ([db e] (ts/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
   (ave [db a v]
     (if (:db/index (d/entity db a))
       (into #{} (map :e) (d/datoms db :avet a v))
@@ -48,12 +48,12 @@
                                      (for [[k v] m]
                                        [:db/add id k v]))))
                            schema)))
-  (doto-report-triples [db f report] (doseq [[e a v] (:tx-data report)] (f e a v))))
+  (report-triples [db report f] (doseq [[e a v] (:tx-data report)] (f e a v))))
 
 (extend-type LocalConnection
-  rp/IConn
+  ts/IConn
   (db [conn] (d/db conn)))
 
 (extend-type Connection
-  rp/IConn
+  ts/IConn
   (db [conn] (d/db conn)))

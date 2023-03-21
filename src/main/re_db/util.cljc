@@ -8,6 +8,22 @@
 
 (defn guard [x f] (when (f x) x))
 
+(defmacro set-swap! [sym f & args]
+  `(set! ~sym (~f ~sym ~@args)))
+
+(defmacro sci-macro [form]
+  (if (:ns &env)
+    (let [[_defmacro name & body] form
+          [doc body] (if (string? (first body))
+                       [(first body) (rest body)]
+                       [nil body])
+          arities (if (vector? (first body)) (list body) body)
+          arities (map (fn [[argv & body]] (list* (into '[&form &env] argv) body)) arities)]
+      `(defn ~(vary-meta name assoc :sci/macro true)
+         ~@(when doc [doc])
+         ~@arities))
+    form))
+
 (defn set-replace [s old new]
   (if (identical? old new)
     s
@@ -49,6 +65,9 @@
 
     ISwap clojure.lang.IAtom
     -swap! swap
+
+    IIndexed clojure.lang.Indexed
+    -nth nth
 
     IWatchable clojure.lang.IRef
     -add-watch addWatch

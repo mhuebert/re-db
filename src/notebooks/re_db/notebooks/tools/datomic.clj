@@ -1,4 +1,4 @@
-(ns re-db.notebooks.datomic
+(ns re-db.notebooks.tools.datomic
   (:require [datomic.api :as d]))
 
 (def db-uri "datomic:mem://foo")

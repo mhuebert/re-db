@@ -1,43 +1,25 @@
 (ns re-db.xform
-  (:refer-clojure :exclude [map into])
-  (:require [re-db.reactive :as r]
-            [re-db.xform.reducers :as reducers]))
-
-(defn step [xform]
-  (let [rfn (xform conj)
-        done? (volatile! false)]
-    (fn [x]
-      (if @done?
-        ::done
-        (let [acc (rfn [] x)
-              is-reduced? (reduced? acc)
-              _ (when is-reduced? (vreset! done? true))
-              acc (if is-reduced?
-                    (rfn @acc)
-                    acc)]
-          (case (count acc)
-            0 ::no-op
-            1 (first acc)
-            acc))))))
+  (:refer-clojure :exclude [into map ->])
+  (:require [re-db.hooks :as hooks]
+            [re-db.reactive :as r]
+            [re-db.util :as util]
+            [re-db.xform.reducers :as reducers])
+  #?(:cljs (:require-macros re-db.xform)))
 
 (defn transform
   "Streams values from ref into a new ratom, applying any supplied xforms (transducers)"
-  [source & xforms]
-  (let [key (gensym "stream")
-        out (r/atom nil)
-        f (step (apply comp xforms))
-        handle-value (fn [value]
-                       (let [v (f value)]
-                         (case v
-                           ::no-op nil
-                           ::done (remove-watch source key)
-                           (reset! out v))))]
-    (handle-value @source)
-    (add-watch source key (fn [_ _ _ value] (handle-value value)))
-    (doto out (r/add-on-dispose! (fn [_] (remove-watch source key))))))
+  [ref & xforms]
+  (r/reaction
+    {:xf (apply comp xforms)}
+    (hooks/use-deref ref)))
 
 (defn map [f source]
-  (transform source (clojure.core/map f)))
+  (r/reaction {:xf (clojure.core/map f)}
+    (hooks/use-deref source)))
+
+(util/sci-macro
+  (defmacro -> [ref & forms]
+    `(map (fn [x#] (clojure.core/-> x# ~@forms)) ~ref)))
 
 (defn compr [rfn f]
   (fn
@@ -69,8 +51,8 @@
 (defn into
   ;; returns transducer, conj's values into init
   ([init] (reducing-transducer conj init))
-  ([init source] (transform source (reducing-transducer conj init)))
-  ([init xform source] (transform source (comp xform (reducing-transducer conj init)))))
+  ([init source] (r/compute! (transform source (reducing-transducer conj init))))
+  ([init xform source] (r/compute! (transform source (comp xform (reducing-transducer conj init))))))
 
 (defn before:after
   "Stateful transducer, returns a before/after tuple for successive values, starting with nil."
@@ -78,36 +60,3 @@
   (reducing-transducer reducers/before:after))
 
 (def sliding-window (comp reducing-transducer reducers/sliding-window))
-
-(comment
-
- (r/session
-  (let [source (atom 1)
-        before-after (transform source (before:after))]
-    @before-after))
-
- (r/session
-  (let [source (atom 1)
-        before-after (transform source (before:after))]
-    (reset! source 2)
-    @before-after))
-
-
- (r/session
-  (let [source (atom 1)
-        pairs (transform source
-                           (before:after)
-                           (take 5)
-                           (into []))]
-    (dotimes [n 10]
-      (reset! source n))
-    @pairs))
-
- (r/session
-  (let [source (atom 0)
-        evens (transform source
-                         (filter even?)
-                         (take 3)
-                         (into []))]
-    (dotimes [n 10] (reset! source (inc n)))
-    @evens)))

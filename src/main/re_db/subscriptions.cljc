@@ -1,67 +1,36 @@
 (ns re-db.subscriptions
-  "Subscriptions: named reactive computations cached globally for deduplication of effort"
-  (:refer-clojure :exclude [def])
-  (:require [re-db.reactive :as r :refer [add-on-dispose! dispose!]])
+  "Registry of named subscriptions (memoized reactive computations)"
+  (:require
+   [re-db.memo :as memo]
+   [re-db.reactive :as r])
   #?(:cljs (:require-macros re-db.subscriptions)))
 
-(defonce !subscription-defs (atom {}))
-;; map of {svec, sub}
-(defonce !subscription-cache (atom {}))
+(defonce !subscriptions (atom {}))
 
 (defn subscription
   "Finds or creates a subscription for the given svec, a vector of [id & args]"
-  [svec]
-  (or (@!subscription-cache svec)
-      (let [[id & args] svec
-            init-fn (if (fn? id) id (@!subscription-defs id))
-            _ (when-not init-fn
-                (prn (str "Subscription not defined: " id) svec))
-            sub (doto (apply init-fn args)
-                  (->> (swap! !subscription-cache assoc svec)))]
-        (add-on-dispose! sub (fn [_]
-                               (swap! !subscription-cache dissoc svec)))
-        sub)))
-
-(defn sub
-  "Returns current value of subscription for the given svec, a vector of [id & args]"
-  [svec] @(subscription svec))
+  ([[id & args] not-found]
+   (if-let [memoized (@!subscriptions id)]
+     (apply memoized args)
+     not-found))
+  ([svec]
+   (let [v (subscription svec ::not-found)]
+     (if (= ::not-found v)
+       (throw (ex-info (str "Subscription not defined: " (first svec)) {:svec svec}))
+       v))))
 
 (defn register
   "Define a subscription by providing an id and constructor function, which should
    return a type that implements IDispose (clj) or IDisposable (cljs)"
   [id f]
-  (let [pre-existing? (@!subscription-defs id)]
-    (swap! !subscription-defs assoc id f)
-    #?(:clj
-       (when pre-existing? ;; update existing instances
-         (doseq [[svec old-rx] @!subscription-cache
-                 :when (= id (first svec))
-                 :let [old-watches (r/get-watches old-rx)
-                       oldval @old-rx]]
-           (r/dispose! old-rx)
-           (swap! !subscription-cache dissoc svec)
-           (r/migrate-watches! old-watches oldval (subscription svec))))))
-
+  (if-let [memoized (@!subscriptions id)]
+    (memo/reset-fn! memoized f)
+    (swap! !subscriptions assoc id (memo/memoize f)))
   id)
 
 (defn clear-subscription-cache! []
-  (try
-    (doseq [sub (vals @!subscription-cache)] (when (satisfies? r/IDispose sub) (dispose! sub))))
-  (swap! !subscription-cache empty))
-
-(defmacro def
-  "Registers a subscription for name, returns subscription constructor function.
-
-  Eg. in my-app.core,
-  (s/def $my-sub (fn [x] ..))
-
-  ($my-sub :foo) is the same as (subscribe ['my-app.core/$my-sub :foo])
-
-   An id is made from `name`, qualified to the current namespace."
-  [name f]
-  (let [id (symbol (str *ns*) (str name))]
-    `(do (register '~id ~f)
-         (defn ~name [& args#] (subscription (into ['~id] args#))))))
+  (doseq [memoized (vals @!subscriptions)] (memo/dispose! memoized))
+  (swap! !subscriptions empty))
 
 (comment
  (clear-subscription-cache!)

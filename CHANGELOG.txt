@@ -1,0 +1,34 @@
+Breaking changes:
+
+- Renamed `:re-db/sync-tx` to `:re-db.sync/tx` for consistency
+
+- in re-db.sync.client:
+  - renamed `on-handshake!` to `on-open`
+  - renamed `$query` to `$watch`
+  - removed `all`
+  - `$watch`, ``$all` now take `channel` as 1st parameter
+  - messages are no longer queued before connection. We already keep track of active queries and re-initialize
+    on re-connect, this should be sufficient.
+  - added `on-close` fn for clean-up
+  - removed `transact-txs`
+- in re-db.sync.server:
+  - renamed `watch-ref` to `watch`
+  - renamed `unwatch-ref` to `unwatch`
+  - if a ref's value has `:re-db.sync/snapshot` metadata, it will be sent
+    as a starting value when a new client starts a watch.
+- moved transit code to `re-db.sync.transit`
+- moved diffing code to `re-db.sync.entity-diff-1`
+- `re-db.subscriptions/subscription` accepts optional not-found parameter,
+  otherwise throws if id is not registered.
+- added `re-db.subscriptions/defonce`
+- changed the format of server->client messages to `[operation ref-id & args]`
+- added `on-dispose` hook
+- `re-db.xform/transform` is now lazy
+- reactions now permit invalidation outside a reactive context.
+  this was due to frequent issues with inadvertent dereferencing (eg. often by Clerk, but not only).
+  Remains an open question how to handle these lifecycles well.
+- removed `re-db.subscriptions`, replaced with `re-db.memo` which does not use global state
+- removed `migrate-watches`, added `become`
+
+Other changes:
+- reagent integration is now cljc

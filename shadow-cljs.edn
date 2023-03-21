@@ -1,7 +1,12 @@
 {:deps {:aliases [:bench :clerk :datomic :test]}
- :dev-http {8008 "public"}
  :builds
- {:test
+ {:clerk
+  {:target :esm
+   :output-dir "public/clerk"
+   :modules {:clerk {:entries [re-db.notebooks.index]}}
+   :devtools {:http-port 8008
+              :http-root "public"}}
+  :test
   {:target :browser-test
    :test-dir "public/test"
    :ns-regexp "-test$"

@@ -14,11 +14,10 @@
 (deftype EAtom [conn e default]
   IDeref
   (-deref [this]
-    (let [conn (resolve-conn conn)]
-      (util/some-or (read/eav conn @conn ::local-state e) default)))
+    (read/get (resolve-conn conn) ::local-state e default))
   IReset
   (-reset! [this new-value]
-    (db/transact! (resolve-conn conn) [[:db/add ::local-state e new-value]]))
+    (read/transact! (resolve-conn conn) [[:db/add ::local-state e new-value]]))
   ISwap
   (-swap! [this f] (reset! this (f @this)))
   (-swap! [this f a] (reset! this (f @this a)))
@@ -41,6 +40,7 @@
             :or {key :singleton
                  conn :re-db.api/conn}}]
   (let [e (or id {location key})]
-    (r/add-on-dispose! owner (fn [_] (some-> (resolve-conn conn)
-                                             (db/transact! [[:db/retract ::local-state e]]))))
+    (r/add-on-dispose! owner
+                       (fn [_]
+                         (read/transact! conn [[:db/retract ::local-state e]])))
     (EAtom. conn e default)))

@@ -1,13 +1,12 @@
 (ns re-db.in-memory-test
-  (:require #?(:clj [clojure.test :refer [deftest is testing]]
+  (:require #?(:clj  [clojure.test :refer [deftest is testing]]
                :cljs [cljs.test :refer [deftest is testing]])
             [re-db.in-memory :as mem]
-            [re-db.api :as d]
-            [re-db.read :refer [entity #?(:cljs Entity) pull]]
+            [re-db.api :as db :refer [entity pull]]
+            [re-db.read :as read :refer [#?(:cljs Entity)]]
             [re-db.schema :as schema]
             [re-db.util :as util]
-            [re-db.test-helpers :refer [throws]]
-            [re-db.in-memory :as db])
+            [re-db.test-helpers :refer [throws]])
   #?(:clj (:import [re_db.read Entity])))
 
 (defn ids [entities] (util/guard (into #{} (map :db/id) entities)
@@ -53,20 +52,20 @@
   (let [conn (mem/create-conn pets-schema)
         tx-report (mem/transact! conn pets-tx)
         db-data #(dissoc % :tx :schema :tempids)]
-    (d/with-conn conn
+    (db/with-conn conn
       (is (= (db-data @conn)
              (db-data @(doto (mem/create-conn pets-schema)
-                        (mem/transact! [[:db/datoms (:datoms tx-report)]]))))
+                         (mem/transact! [[:db/datoms (:datoms tx-report)]]))))
           :db/datoms)
 
       (is (= (db-data @(mem/create-conn pets-schema))
              (db-data (let [conn (mem/create-conn pets-schema)
-                           {:keys [datoms]} (mem/transact! conn pets-tx)]
-                       (mem/transact! conn [[:db/datoms-reverse datoms]])
-                       @conn))
+                            {:keys [datoms]} (mem/transact! conn pets-tx)]
+                        (mem/transact! conn [[:db/datoms-reverse datoms]])
+                        @conn))
              (db-data @(doto (mem/create-conn pets-schema)
-                        (mem/transact! [[:db/datoms (:datoms tx-report)]
-                                        [:db/datoms-reverse (:datoms tx-report)]]))))
+                         (mem/transact! [[:db/datoms (:datoms tx-report)]
+                                         [:db/datoms-reverse (:datoms tx-report)]]))))
           :db/datoms-reverse)
 
       #_(is (= {:db/id "fred"
@@ -89,32 +88,32 @@
                 :pet/collar-nr (merge schema/one
                                       schema/unique-id
                                       {:db.type/valueType :db.type/bigint})}]
-    (d/with-conn (doto (mem/create-conn schema)
-                   (mem/transact! [{:db/id "fred"
-                                    :email "fred@eg.com"
-                                    :friend {:email "matt@eg.com"}
-                                    :pets #{{:pet/collar-nr 1}
-                                            {:pet/collar-nr 2}}}
-                                   {:email "matt@eg.com"}
-                                   {:email "matt@eg.com"
-                                    :name "Matt"}
-                                   {:pet/collar-nr 1
-                                    :pet/name "pookie"}
-                                   {:pet/collar-nr 2
-                                    :pet/name "fido"}
-                                   {:db/id [:email "peter@eg.com"]
-                                    :name "Peter"}
-                                   {:email "peter@eg.com"
-                                    :age 32}
-                                   {:email "rabbit@eg.com"
-                                    :owner {:db/id "fred"} ;; db/id map as ref
-                                    :name "Rabbit"}]))
+    (db/with-conn (doto (mem/create-conn schema)
+                    (mem/transact! [{:db/id "fred"
+                                     :email "fred@eg.com"
+                                     :friend {:email "matt@eg.com"}
+                                     :pets #{{:pet/collar-nr 1}
+                                             {:pet/collar-nr 2}}}
+                                    {:email "matt@eg.com"}
+                                    {:email "matt@eg.com"
+                                     :name "Matt"}
+                                    {:pet/collar-nr 1
+                                     :pet/name "pookie"}
+                                    {:pet/collar-nr 2
+                                     :pet/name "fido"}
+                                    {:db/id [:email "peter@eg.com"]
+                                     :name "Peter"}
+                                    {:email "peter@eg.com"
+                                     :age 32}
+                                    {:email "rabbit@eg.com"
+                                     :owner {:db/id "fred"} ;; db/id map as ref
+                                     :name "Rabbit"}]))
       (is (= {:email "fred@eg.com"}
              (->> (entity [:email "rabbit@eg.com"])
                   :owner
-                  (pull [:email]))))
+                  (db/pull [:email]))))
       (is (= {:email "matt@eg.com"}
-             (pull [:email] [:email "matt@eg.com"])))
+             (db/pull [:email] [:email "matt@eg.com"])))
       (is (= (-> (entity "fred")
                  :friend
                  :db/id)
@@ -140,36 +139,36 @@
 (defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
 (deftest tempids
-  (d/with-conn (doto (mem/create-conn {:email schema/unique-id
-                                       :friends (merge schema/ref
-                                                       schema/many)})
-                 (mem/transact! [{:db/id -1
-                                  :email "fred@x.com"}
-                                 {:db/id -2
-                                  :email "matt@x.com"
-                                  :friends [-1]}
-                                 {:db/id -3
-                                  :email "herman@x.com"
-                                  :friends [-1]}]))
-    (is (= (d/entity [:email "fred@x.com"])
-           (first (:friends (d/entity [:email "matt@x.com"])))))
-    (is (= #{(d/entity [:email "matt@x.com"])
-             (d/entity [:email "herman@x.com"])}
-           (set (:_friends (d/entity [:email "fred@x.com"])))))
-    (is (not= -1 (:db/id (d/entity [:email "fred@x.com"]))))))
+  (db/with-conn (doto (mem/create-conn {:email schema/unique-id
+                                        :friends (merge schema/ref
+                                                        schema/many)})
+                  (mem/transact! [{:db/id -1
+                                   :email "fred@x.com"}
+                                  {:db/id -2
+                                   :email "matt@x.com"
+                                   :friends [-1]}
+                                  {:db/id -3
+                                   :email "herman@x.com"
+                                   :friends [-1]}]))
+    (is (= (db/entity [:email "fred@x.com"])
+           (first (:friends (db/entity [:email "matt@x.com"])))))
+    (is (= #{(db/entity [:email "matt@x.com"])
+             (db/entity [:email "herman@x.com"])}
+           (set (:_friends (db/entity [:email "fred@x.com"])))))
+    (is (not= -1 (:db/id (db/entity [:email "fred@x.com"]))))))
 
 (deftest lookup-refs
-  (d/with-conn (doto (mem/create-conn {:email {:db/unique :db.unique/identity}
-                                       :friend {:db/valueType :db.type/ref}})
-                 (mem/transact! [{:db/id "fred"
-                                  :email "fred@eg.com"
-                                  :friend [:email "matt@eg.com"]}
-                                 {:email "matt@eg.com"
-                                  :friend [:email "fred@eg.com"]}
-                                 {:db/id "herman"
-                                  :friend {:email "peter@eg.com"}}]))
-    (is (= (d/get "fred")
-           (d/get [:email "fred@eg.com"]))
+  (db/with-conn (doto (mem/create-conn {:email {:db/unique :db.unique/identity}
+                                        :friend {:db/valueType :db.type/ref}})
+                  (mem/transact! [{:db/id "fred"
+                                   :email "fred@eg.com"
+                                   :friend [:email "matt@eg.com"]}
+                                  {:email "matt@eg.com"
+                                   :friend [:email "fred@eg.com"]}
+                                  {:db/id "herman"
+                                   :friend {:email "peter@eg.com"}}]))
+    (is (= (db/get "fred")
+           (db/get [:email "fred@eg.com"]))
         "Can substitute unique attr for id (à la 'lookup refs')")
     (is (= "matt@eg.com"
            (-> (entity "fred")
@@ -193,9 +192,9 @@
 
 (deftest basic
 
-  (d/with-conn {:dog {:db/index true}}
+  (db/with-conn {:dog {:db/index true}}
     (let [tx-log (atom [])
-          conn (d/conn)]
+          conn (db/conn)]
 
       (is (map? @conn) "DB is an atom")
 
@@ -209,36 +208,36 @@
              [["herman" :occupation "teacher" nil]])
           "Tx-log listener called with datoms")
 
-      (is (= {:db/id "herman" :occupation "teacher"} (d/get "herman"))
+      (is (= {:db/id "herman" :occupation "teacher"} (db/get "herman"))
           "Entity is returned as it was inserted")
 
-      (is (= "herman" (:db/id (d/get "herman")))
+      (is (= "herman" (:db/id (db/get "herman")))
           "Entity is returned with :db/id attribute")
 
-      (is (= "teacher" (d/get "herman" :occupation))
+      (is (= "teacher" (db/get "herman" :occupation))
           "api/get an attribute of an entity")
 
-      (is (= 1 (count (d/where [[:occupation "teacher"]])))
+      (is (= 1 (count (db/where [[:occupation "teacher"]])))
           "Query on non-indexed attr")
 
       (mem/transact! conn [{:db/id "fred" :occupation "teacher"}])
 
-      (is (= 2 (count (d/where [[:occupation "teacher"]])))
+      (is (= 2 (count (db/where [[:occupation "teacher"]])))
           "Verify d/insert! and query on non-indexed field")
 
       (mem/transact! conn [[:db/retract "herman" :occupation]])
 
-      (is (nil? (d/get "herman" :occupation))
+      (is (nil? (db/get "herman" :occupation))
           "Retract attribute")
 
       (is (= [["herman" :occupation nil "teacher"]]
              (->clj (last @tx-log)))
           "retraction datom")
 
-      (is (= 1 (count (d/where [[:occupation "teacher"]])))
+      (is (= 1 (count (db/where [[:occupation "teacher"]])))
           "Retract non-indexed field")
 
-      (is (nil? (d/get "herman"))
+      (is (nil? (db/get "herman"))
           "Entity with no attributes is removed")
 
       (is (false? (contains? (get-in conn [:ave :db/id]) "herman"))
@@ -250,10 +249,10 @@
       (mem/transact! conn [{:db/id "me"
                             :dog nil}])
 
-      (is (empty? (d/where [[:dog "herman"]]))
+      (is (empty? (db/where [[:dog "herman"]]))
           "Setting a value to nil is equivalent to retracting it")
 
-      (is (not (contains? @(entity conn "me") :dog))
+      (is (not (contains? @(read/entity conn "me") :dog))
           "Nil in a map removes ")
 
       #_(is (= :error (try (mem/transact! conn [[:db/add "fred" :db/id "some-other-id"]])
@@ -262,127 +261,127 @@
             "Cannot change :db/id of entity")
 
       (testing "map txs are merged"
-        (d/with-conn {}
-          (d/transact! [{:db/id "a"
-                         :name/first "b"
-                         :name/last "c"}])
-          (d/transact! [{:db/id "a"
-                         :name/first "b1"}])
-          (is (= (d/get "a" :name/last) "c")))))))
+        (db/with-conn {}
+          (db/transact! [{:db/id "a"
+                          :name/first "b"
+                          :name/last "c"}])
+          (db/transact! [{:db/id "a"
+                          :name/first "b1"}])
+          (is (= (db/get "a" :name/last) "c")))))))
 
 
 (deftest refs
   (let [schema {:owner (merge schema/ref
                               schema/unique-value)}]
-    (d/with-conn (doto (mem/create-conn schema)
-                   (mem/transact! [{:db/id "fred"
-                                    :name "Fred"}
-                                   {:db/id "ball"
-                                    :name "Ball"
-                                    :owner "fred"}]))
+    (db/with-conn (doto (mem/create-conn schema)
+                    (mem/transact! [{:db/id "fred"
+                                     :name "Fred"}
+                                    {:db/id "ball"
+                                     :name "Ball"
+                                     :owner "fred"}]))
       (is (= {:name "Fred"
               :_owner [{:db/id "ball"}]}
-             (pull '[* :_owner] "fred"))
+             (db/pull '[* :_owner] "fred"))
           "reverse refs")))
 
-  (d/with-conn (doto (mem/create-conn {:authors {:db/valueType :db.type/ref
-                                                 :db/cardinality :db.cardinality/many}
-                                       :pet {:db/valueType :db.type/ref}})
-                 (mem/transact! [{:db/id "fred"
-                                  :name "Fred"
-                                  :pet {:db/id "fido"}}
-                                 {:db/id "mary"
-                                  :name "Mary"}
-                                 {:db/id "1"
-                                  :name "One"
-                                  :authors #{"fred" "mary"}}
-                                 #_[:db/add "1" :authors #{"fred" "mary"}]]))
+  (db/with-conn (doto (mem/create-conn {:authors {:db/valueType :db.type/ref
+                                                  :db/cardinality :db.cardinality/many}
+                                        :pet {:db/valueType :db.type/ref}})
+                  (mem/transact! [{:db/id "fred"
+                                   :name "Fred"
+                                   :pet {:db/id "fido"}}
+                                  {:db/id "mary"
+                                   :name "Mary"}
+                                  {:db/id "1"
+                                   :name "One"
+                                   :authors #{"fred" "mary"}}
+                                  #_[:db/add "1" :authors #{"fred" "mary"}]]))
     (is (= {:name "Fred"
             :_authors [{:db/id "1"}]
             :pet {:db/id "fido"}}
-           (pull '[* :_authors] "fred"))
+           (db/pull '[* :_authors] "fred"))
         "refs with cardinality-many")
     (is (= {:db/id "fido"}
-           (d/get "fido"))))
+           (db/get "fido"))))
 
-  (d/with-conn {:person/pet schema/ref
-                :pet/name schema/unique-id
-                :person/name schema/unique-id}
-    (d/transact! [{:person/name "Sue"
-                   :person/pet {:pet/name "Sup"}}
-                  {:person/name "Bob"}])
-    (is (nil? (:person/pet (d/entity [:person/name "Bob"]))))
-    (is (some? (:person/pet (d/entity [:person/name "Sue"]))))
-    (is (= 1 (count (d/where [:person/name
-                              (complement :person/pet)]))))
-    (is (= 1 (count (d/where [:person/name
-                              :person/pet]))))
-    (is (nil? (:person/pet (d/pull [:person/pet] [:person/name "Bob"]))))
-    (is (some? (:person/pet (d/pull [:person/pet] [:person/name "Sue"]))))))
+  (db/with-conn {:person/pet schema/ref
+                 :pet/name schema/unique-id
+                 :person/name schema/unique-id}
+    (db/transact! [{:person/name "Sue"
+                    :person/pet {:pet/name "Sup"}}
+                   {:person/name "Bob"}])
+    (is (nil? (:person/pet (db/entity [:person/name "Bob"]))))
+    (is (some? (:person/pet (db/entity [:person/name "Sue"]))))
+    (is (= 1 (count (db/where [:person/name
+                               (complement :person/pet)]))))
+    (is (= 1 (count (db/where [:person/name
+                               :person/pet]))))
+    (is (nil? (:person/pet (db/pull [:person/pet] [:person/name "Bob"]))))
+    (is (some? (:person/pet (db/pull [:person/pet] [:person/name "Sue"]))))))
 
 (deftest touch-refs
 
-  (d/with-conn {:children (merge schema/ref
-                                 schema/many)
-                :child (merge schema/ref
-                              schema/one)}
-    (d/transact! [{:db/id "A"
-                   :children #{"A.0"}}
-                  {:db/id "A.0"
-                   :children #{"A.1" #_"A"}}
-                  {:db/id "A.1"
-                   :children #{"A.2"}}
-                  {:db/id "A.2"
-                   :children #{"A.3"}}
-                  {:db/id "A.3"
-                   :children #{"A.4"}}
-                  {:db/id "B"
-                   :name "B"
-                   :child "B1"}
-                  {:db/id "B1"
-                   :name "B1"
-                   :child "B2"}
-                  {:db/id "B2"
-                   :name "B2"}])
+  (db/with-conn {:children (merge schema/ref
+                                  schema/many)
+                 :child (merge schema/ref
+                               schema/one)}
+    (db/transact! [{:db/id "A"
+                    :children #{"A.0"}}
+                   {:db/id "A.0"
+                    :children #{"A.1" #_"A"}}
+                   {:db/id "A.1"
+                    :children #{"A.2"}}
+                   {:db/id "A.2"
+                    :children #{"A.3"}}
+                   {:db/id "A.3"
+                    :children #{"A.4"}}
+                   {:db/id "B"
+                    :name "B"
+                    :child "B1"}
+                   {:db/id "B1"
+                    :name "B1"
+                    :child "B2"}
+                   {:db/id "B2"
+                    :name "B2"}])
 
-    (is (= (d/pull '[:db/id {:child :...}] "B")
+    (is (= (db/pull '[:db/id {:child :...}] "B")
            {:db/id "B"
             :child {:db/id "B1"
                     :child {:db/id "B2"}}}))
 
     (is (= [{:db/id "B1"}]
-           (-> (d/pull [:_child] "B2")
+           (-> (db/pull [:_child] "B2")
                :_child)))
 
     (is (= {:db/id "A.0"}
-           (-> (d/pull [:children] "A")
+           (-> (db/pull [:children] "A")
                :children first)))
 
     (is (= {:db/id "A.1"}
-           (-> (d/pull [{:children 1}] "A")
+           (-> (db/pull [{:children 1}] "A")
                :children first :children first)))
 
     (is (= {:db/id "A.2"}
-           (-> (d/pull [{:children 2}] "A")
+           (-> (db/pull [{:children 2}] "A")
                :children first :children first :children first)))
 
     (is (= [{:db/id "A.4" :children []}]
-           (-> (d/pull [:db/id {:children :...}] "A")
+           (-> (db/pull [:db/id {:children :...}] "A")
                :children first :children first :children first :children first :children)))))
 
 (deftest custom-db-operations
   ;; add an operation by
-  (d/with-conn {:db/tx-fns {:db/times-ten (fn [_db [_ e a v]]
-                                            [[:db/add e a (* 10 v)]])}}
-    (d/transact! [[:db/times-ten :matt :age 3.9]])
-    (is (= 39.0 (d/get :matt :age))
+  (db/with-conn {:db/tx-fns {:db/times-ten (fn [_db [_ e a v]]
+                                             [[:db/add e a (* 10 v)]])}}
+    (db/transact! [[:db/times-ten :matt :age 3.9]])
+    (is (= 39.0 (db/get :matt :age))
         "Custom db/operation can be specified in schema"))
 
-  (d/with-conn {:db/tx-fns {:db/times (fn [db [_ e a v]]
-                                        [[:db/add e a (* (:multiplier (mem/get-entity db :times) 0) v)]])}}
-    (d/transact! [[:db/add :times :multiplier 10]
-                  [:db/times :matt :age 3.9]])
-    (is (= 39.0 (d/get :matt :age))
+  (db/with-conn {:db/tx-fns {:db/times (fn [db [_ e a v]]
+                                         [[:db/add e a (* (:multiplier (mem/get-entity db :times) 0) v)]])}}
+    (db/transact! [[:db/add :times :multiplier 10]
+                   [:db/times :matt :age 3.9]])
+    (is (= 39.0 (db/get :matt :age))
         "custom db/operation can read from db")))
 
 #_(comment
@@ -397,63 +396,63 @@
    )
 
 (deftest cardinality-many
-  (d/with-conn (doto (mem/create-conn {:children (merge schema/many
-                                                        schema/ave)})
-                 (mem/transact! [{:db/id "fred"
-                                  :children #{"pete"}}]))
-    (let [conn (d/conn)]
+  (db/with-conn (doto (mem/create-conn {:children (merge schema/many
+                                                         schema/ave)})
+                  (mem/transact! [{:db/id "fred"
+                                   :children #{"pete"}}]))
+    (let [conn (db/conn)]
 
       (is (true? (contains? (get-in @conn [:ave :children]) "pete"))
           "cardinality/many attribute can be indexed")
 
       ;; second child
-      (d/transact! [[:db/add "fred" :children "sally"]])
+      (db/transact! [[:db/add "fred" :children "sally"]])
 
 
-      (is (= #{"sally" "pete"} (d/get "fred" :children))
+      (is (= #{"sally" "pete"} (db/get "fred" :children))
           "cardinality/many attribute returned as set")
       (is (= #{"fred"}
-             (ids (d/where [[:children "sally"]]))
-             (ids (d/where [[:children "pete"]])))
+             (ids (db/where [[:children "sally"]]))
+             (ids (db/where [[:children "pete"]])))
           "look up via cardinality/many index")
 
       (testing "remove value from cardinality/many attribute"
-        (d/transact! [[:db/retract "fred" :children "sally"]])
-        (is (= nil (ids (d/where [[:children "sally"]])))
+        (db/transact! [[:db/retract "fred" :children "sally"]])
+        (is (= nil (ids (db/where [[:children "sally"]])))
             "index is removed on retraction")
-        (is (= #{"fred"} (ids (d/where [[:children "pete"]])))
+        (is (= #{"fred"} (ids (db/where [[:children "pete"]])))
             "index remains for other value")
-        (is (= #{"pete"} (d/get "fred" :children))
+        (is (= #{"pete"} (db/get "fred" :children))
             "attribute has correct value"))
 
-      (testing "retracting entity with cardinality/many attribute"
-        (d/transact! [[:db/retractEntity "fred"]])
-        (is (= nil (d/get "fred"))))
-
-      (d/transact! [{:db/id "fred" :children #{"fido"}}])
-      (is (= #{"fido"} (d/get "fred" :children))
+      (db/transact! [{:db/id "fred" :children #{"fido"}}])
+      (is (= #{"fido"} (db/get "fred" :children))
           "Map transaction replaces entire set")
+
+      (testing "retracting entity with cardinality/many attribute"
+        (db/transact! [[:db/retractEntity "fred"]])
+        (is (= nil (db/get "fred"))))
 
       (testing "unique attrs, duplicates"
 
-        (d/with-conn {:ssn schema/unique-id
-                      :email schema/unique-id
-                      :pets (merge schema/many
-                                   schema/unique-value)}
+        (db/with-conn {:ssn schema/unique-id
+                       :email schema/unique-id
+                       :pets (merge schema/many
+                                    schema/unique-value)}
 
           ;; cardinality single
-          (d/transact! [[:db/add "fred" :ssn "123"]])
-          (is (= "fred" (:db/id (d/get [:ssn "123"]))))
-          (throws (d/transact! [[:db/add "herman" :ssn "123"]])
+          (db/transact! [[:db/add "fred" :ssn "123"]])
+          (is (= "fred" (:db/id (db/get [:ssn "123"]))))
+          (throws (db/transact! [[:db/add "herman" :ssn "123"]])
                   "Cannot have two entities with the same unique attr")
 
           ;; cardinality many
-          (d/transact! [[:db/add "fred" :pets "fido"]])
-          (is (= "fred" (:db/id (d/get [:pets "fido"]))))
-          (throws (d/transact! [[:db/add "herman" :pets "fido"]])
+          (db/transact! [[:db/add "fred" :pets "fido"]])
+          (is (= "fred" (:db/id (db/get [:pets "fido"]))))
+          (throws (db/transact! [[:db/add "herman" :pets "fido"]])
                   "Two entities with same unique :db.cardinality/many attr")
-          (throws (d/transact! [{:db/id "herman"
-                                 :pets #{"fido"}}])
+          (throws (db/transact! [{:db/id "herman"
+                                  :pets #{"fido"}}])
                   "Two entities with same unique :db.cardinality/many attr"))))))
 
 (deftest permissions
@@ -471,7 +470,7 @@
                                 :permission/group "group1"
                                 :permission/ability :permission.ability/manage}]))]
 
-    (->> (entity conn [:db/ident :person/current])
+    (->> (read/entity conn [:db/ident :person/current])
          :permission/_person
          (filter (comp #{:permission.ability/manage
                          :permission.ability/edit}
@@ -484,34 +483,34 @@
 
 
 (deftest where-queries
-  (d/with-conn {:person/id (merge
-                            schema/unique-id
-                            schema/ae)
-                :pet/id schema/unique-id
-                :person/pets (merge schema/many
-                                    schema/ref)}
-    (d/transact! [{:db/id 1
-                   :person/id 1
-                   :name "1"
-                   :pets #{[:pet/id 1.1]}}
-                  {:db/id 1.1
-                   :pet/id 1.1 :name "1.1"}
-                  {:db/id 2
-                   :person/id 2 :name "2"}
-                  {:db/id 2.1
-                   :pet/id 2.1 :name "2.1"}])
+  (db/with-conn {:person/id (merge
+                             schema/unique-id
+                             schema/ae)
+                 :pet/id schema/unique-id
+                 :person/pets (merge schema/many
+                                     schema/ref)}
+    (db/transact! [{:db/id 1
+                    :person/id 1
+                    :name "1"
+                    :pets #{[:pet/id 1.1]}}
+                   {:db/id 1.1
+                    :pet/id 1.1 :name "1.1"}
+                   {:db/id 2
+                    :person/id 2 :name "2"}
+                   {:db/id 2.1
+                    :pet/id 2.1 :name "2.1"}])
 
-    (is (= #{1 2} (ids (d/where [:person/id]))))
-    (is (= #{1.1 2.1} (ids (d/where [:pet/id]))))
-    (is (= #{1 2} (get-in @(d/conn) [:ae :person/id])))
+    (is (= #{1 2} (ids (db/where [:person/id]))))
+    (is (= #{1.1 2.1} (ids (db/where [:pet/id]))))
+    (is (= #{1 2} (get-in @(db/conn) [:ae :person/id])))
 
     ))
 
 (deftest equality
-  (d/with-conn {:email schema/unique-id}
-    (d/transact! [{:db/id "a"
-                   :name "b"
-                   :email "c"}])
+  (db/with-conn {:email schema/unique-id}
+    (db/transact! [{:db/id "a"
+                    :name "b"
+                    :email "c"}])
     (let [e1 (entity "a")
           e2 (entity "a")]
       (is (not (identical? @e1 @e2)))
@@ -525,8 +524,8 @@
       (is (= (hash e1) (hash e2))))))
 
 (deftest meta-impl
-  (d/with-conn {}
-    (let [entity (d/entity 0)
+  (db/with-conn {}
+    (let [entity (db/entity 0)
           m {:a 1}]
 
       (is (= m (meta (with-meta entity m))))
@@ -537,107 +536,107 @@
                     meta))))))
 
 (deftest reverse-lookups
-  (d/with-conn {:pet schema/ref
-                :tag-id schema/unique-id}
-    (d/transact! [{:db/id "owner"
-                   :pet [:tag-id "f1"]}
-                  {:tag-id "f1"}])
+  (db/with-conn {:pet schema/ref
+                 :tag-id schema/unique-id}
+    (db/transact! [{:db/id "owner"
+                    :pet [:tag-id "f1"]}
+                   {:tag-id "f1"}])
 
-    (is (some? (-> (d/entity [:tag-id "f1"])
+    (is (some? (-> (db/entity [:tag-id "f1"])
                    :_pet
                    first
                    deref))))
 
-  (d/with-conn {:system/id schema/unique-id
-                :system/notifications {:db/valueType :db.type/ref
-                                       :db/cardinality :db.cardinality/many}}
+  (db/with-conn {:system/id schema/unique-id
+                 :system/notifications {:db/valueType :db.type/ref
+                                        :db/cardinality :db.cardinality/many}}
     (let [s (util/random-uuid)
           n (util/random-uuid)]
-      (d/transact! [{:system/id s :system/notifications #{[:system/id n]}}])
-      (d/transact! [{:notification/kind :sms :system/id n}])
-      (is (= 1 (count (:system/notifications (d/entity [:system/id s]))))))))
+      (db/transact! [{:system/id s :system/notifications #{[:system/id n]}}])
+      (db/transact! [{:notification/kind :sms :system/id n}])
+      (is (= 1 (count (:system/notifications (db/entity [:system/id s]))))))))
 
 (deftest merge-schema
-  (let [conn (db/create-conn)]
-    (db/merge-schema! conn {:my/unique schema/unique-id
-                            :my/ref schema/ref})
-    (db/transact! conn [{:my/unique 1
-                         :my/ref {:my/unique 2 :my/name "Mr. Unique"}
-                         :my/other {:my/unique 3}}])
+  (let [conn (mem/create-conn)]
+    (mem/merge-schema! conn {:my/unique schema/unique-id
+                             :my/ref schema/ref})
+    (mem/transact! conn [{:my/unique 1
+                          :my/ref {:my/unique 2 :my/name "Mr. Unique"}
+                          :my/other {:my/unique 3}}])
     (is (= Entity
-           (-> (entity conn [:my/unique 1])
+           (-> (read/entity conn [:my/unique 1])
                :my/ref
                type)))
 
     (is (= "Mr. Unique"
-           (-> (entity conn [:my/unique 1])
+           (-> (read/entity conn [:my/unique 1])
                :my/ref
                :my/name)))
 
     (is (map?
-         (-> (entity conn [:my/unique 1])
+         (-> (read/entity conn [:my/unique 1])
              :my/other)))))
 
 (deftest add-missing-attribute
-  (let [conn (db/create-conn)]
-    (db/merge-schema! conn {:my/ref schema/ref})
-    (is (db/ref? (db/get-schema @conn :my/ref)))
-    (swap! conn db/add-missing-index :my/ref :ae)
-    (is (db/ref? (db/get-schema @conn :my/ref)))
+  (let [conn (mem/create-conn)]
+    (mem/merge-schema! conn {:my/ref schema/ref})
+    (is (mem/ref? (mem/get-schema @conn :my/ref)))
+    (swap! conn mem/add-missing-index :my/ref :ae)
+    (is (mem/ref? (mem/get-schema @conn :my/ref)))
     (is (some #{{:my/ref schema/ae}}
               (-> @conn :schema :db/runtime-changes)))))
 
 (deftest upsert-reverse
-  (d/with-conn {:name schema/unique-id
-                :pets (merge schema/ref
-                             schema/many)}
-    (d/transact! [{:name "Peter"}
-                  {:name "Mr. Rabbit"
-                   :_pets [[:name "Peter"]]}])
-    (is (= 1 (-> (d/entity [:name "Peter"])
+  (db/with-conn {:name schema/unique-id
+                 :pets (merge schema/ref
+                              schema/many)}
+    (db/transact! [{:name "Peter"}
+                   {:name "Mr. Rabbit"
+                    :_pets [[:name "Peter"]]}])
+    (is (= 1 (-> (db/entity [:name "Peter"])
                  :pets
                  count))
         "upsert-reverse: lookup ref")
 
-    (d/transact! [{:name "Mr. Porcupine"
-                   :_pets [{:db/id [:name "Sally"]
-                            :hair-color "brown"}]}
-                  {:name "Sally"
-                   :car-color "red"}])
+    (db/transact! [{:name "Mr. Porcupine"
+                    :_pets [{:db/id [:name "Sally"]
+                             :hair-color "brown"}]}
+                   {:name "Sally"
+                    :car-color "red"}])
 
     (is (= {:name "Sally"
             :hair-color "brown"
             :car-color "red"
             :pets [{:name "Mr. Porcupine"}]}
 
-           (d/pull '[* {:pets [:name]}] [:name "Sally"]))
+           (db/pull '[* {:pets [:name]}] [:name "Sally"]))
         "upsert-reverse: map")
 
-    (d/transact! [{:db/id -1
-                   :name "Joe"}
-                  {:name "Mr. Beaver"
-                   :_pets [-1]}])
+    (db/transact! [{:db/id -1
+                    :name "Joe"}
+                   {:name "Mr. Beaver"
+                    :_pets [-1]}])
 
     (is (= "Mr. Beaver"
-           (-> (d/entity [:name "Joe"])
-                 :pets
-                 first
-                 :name))
+           (-> (db/entity [:name "Joe"])
+               :pets
+               first
+               :name))
         "upsert-reverse: db/id")))
 
 (deftest upsert
 
- (d/with-conn {:system/name schema/unique-id
-               :system/id schema/unique-id
-               :person/worst-friend schema/ref
-               :person/best-friend schema/ref}
-   (d/transact! [{:db/id -1
-                  :person/name "Matt"
-                  :person/worst-friend [:system/id 1]
-                  :person/best-friend [:system/name "B"]}])
-   (is (thrown? #?(:cljs js/Error :clj Exception)
-                (d/transact! [{:system/id 1
-                               :system/name "B"}]))
-       "Lookup ref upsert gotcha: if we upsert two lookup refs separately, which refer to the same entity, that entity must
-        already be transacted otherwise the lookup refs will resolve to different entities.")))
+  (db/with-conn {:system/name schema/unique-id
+                 :system/id schema/unique-id
+                 :person/worst-friend schema/ref
+                 :person/best-friend schema/ref}
+    (db/transact! [{:db/id -1
+                    :person/name "Matt"
+                    :person/worst-friend [:system/id 1]
+                    :person/best-friend [:system/name "B"]}])
+    (is (thrown? #?(:cljs js/Error :clj Exception)
+                 (db/transact! [{:system/id 1
+                                 :system/name "B"}]))
+        "Lookup ref upsert gotcha: if we upsert two lookup refs separately, which refer to the same entity, that entity must
+         already be transacted otherwise the lookup refs will resolve to different entities.")))
 
