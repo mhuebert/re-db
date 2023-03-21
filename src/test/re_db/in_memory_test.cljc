@@ -416,7 +416,6 @@
              (ids (db/where [[:children "pete"]])))
           "look up via cardinality/many index")
 
-
       (testing "remove value from cardinality/many attribute"
         (db/transact! [[:db/retract "fred" :children "sally"]])
         (is (= nil (ids (db/where [[:children "sally"]])))
@@ -429,6 +428,10 @@
       (db/transact! [{:db/id "fred" :children #{"fido"}}])
       (is (= #{"fido"} (db/get "fred" :children))
           "Map transaction replaces entire set")
+
+      (testing "retracting entity with cardinality/many attribute"
+        (db/transact! [[:db/retractEntity "fred"]])
+        (is (= nil (db/get "fred"))))
 
       (testing "unique attrs, duplicates"
 

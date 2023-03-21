@@ -254,7 +254,12 @@
 ;; retracts each attribute in the entity
 (defn- retract-entity [db [_ e]]
   (reduce-kv (fn [db a v]
-               (retract-attr db [nil e a v]))
+               (if (many? (get-schema db a))
+                 (reduce (fn [db x]
+                              (retract-attr db [nil e a x]))
+                            db
+                            v)
+                 (retract-attr db [nil e a v])))
              db
              (get-entity db e)))
 
