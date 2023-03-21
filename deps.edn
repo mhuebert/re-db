@@ -5,7 +5,7 @@
         net.cgrand/macrovich {:mvn/version "0.2.1"}
         org.clojure/clojure {:mvn/version "1.11.1"}
         org.clojure/core.match {:mvn/version "1.0.0"}
-        reagent/reagent {:mvn/version "1.1.1"}}
+        reagent/reagent {:mvn/version "1.2.0"}}
  :aliases {:datomic {:extra-deps {com.datomic/datomic-free {:mvn/version "0.9.5697"}}}
            :datahike {:extra-deps {io.replikativ/datahike {:mvn/version "0.5.1504"}}}
            :datalevin {:jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
@@ -15,7 +15,7 @@
                  :extra-deps {org.babashka/sci {:mvn/version "0.7.39"
                                                 #_#_#_#_:git/url "https://github.com/babashka/sci"
                                                         :git/sha "50557c964d44533aa2d61ae7519d252ea83df24b"}rewrite-clj/rewrite-clj {:mvn/version "1.1.46"}
-                              thheller/shadow-cljs {:mvn/version "2.20.20"}
+                              thheller/shadow-cljs {:mvn/version "2.22.6"}
                               com.bhauman/rebel-readline-cljs {:mvn/version "0.1.3"
                                                                :exclusions [rewrite-cljs/rewrite-cljs]}
                               com.bhauman/cljs-test-display {#_#_:mvn/version "0.1.1"
