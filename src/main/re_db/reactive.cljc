@@ -544,10 +544,8 @@
       `(make-reaction ~options (fn [] ~@body)))))
 
 (defn session* [f]
-  (let [rx (make-reaction {:detached true} f)
-        out @rx]
-    (dispose! rx)
-    out))
+  (let [rx (make-reaction {:detached true} f)]
+    (try @rx (finally (dispose! rx)))))
 
 (sci-macro
   (defmacro session
