@@ -366,7 +366,7 @@
         (set! meta meta-2)
         (when (seq watches) (compute! this))
         this))
-    (-extract [this] @this [compute-fn state detached step stale meta])
+    (-extract [this] (peek this) [compute-fn state detached step stale meta])
     IReactiveValue
     (get-watches [this] watches)
     (set-watches! [this new-watches] (set! watches new-watches))
