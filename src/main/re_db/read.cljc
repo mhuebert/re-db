@@ -337,13 +337,13 @@
 
 (defn partial-pull
   "Defines a 3-arity pull function with default options"
-  [conn options]
+  [options]
   (fn pull-fn
-    ([pull-expr]
-     (fn [e] (pull-fn pull-expr e)))
-    ([pull-expr e]
+    ([conn pull-expr]
+     (fn [e] (pull-fn conn pull-expr e)))
+    ([conn pull-expr e]
      (pull conn options pull-expr e))
-    ([options-2 pull-expr e]
+    ([conn options-2 pull-expr e]
      (pull conn (merge options options-2) pull-expr e))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
