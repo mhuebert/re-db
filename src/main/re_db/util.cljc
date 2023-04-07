@@ -198,3 +198,17 @@
 
 (defn find-first [coll pred]
   (reduce (fn [_ x] (if (pred x) (reduced x) _)) nil coll))
+
+
+#?(:clj
+   (defmacro cond+ [& clauses]
+     (when-some [[test expr & rest] clauses]
+       (case test
+         :let `(let ~expr (cond+ ~@rest))
+         `(if ~test ~expr (cond+ ~@rest))))))
+
+#?(:clj
+   (defmacro raise [& fragments]
+     (let [msgs (butlast fragments)
+           data (last fragments)]
+       `(throw (ex-info (str ~@(map (fn [m#] (if (string? m#) m# (list 'pr-str m#))) msgs)) ~data)))))

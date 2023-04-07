@@ -125,18 +125,19 @@
                     (swap! log conj 2))
        (r/reaction! (read/depend-on-triple! conn nil nil 99)
                     (swap! log conj 3))
+       (swap! log empty)
 
        (db/transact! [[:db/add 1 :name "a"]])
-       (is (= @log [1 2 3 1]))
+       (is (= @log [1]))
 
        (db/transact! [[:db/add 2 :b "b"]])
-       (is (= @log [1 2 3 1]))
+       (is (= @log [1]))
 
        (db/transact! [[:db/add 2 :a "a"]])
-       (is (= @log [1 2 3 1 2]))
+       (is (= @log [1 2]))
 
        (db/transact! [[:db/add 3 :x 99]])
-       (is (= @log [1 2 3 1 2 3]))))))
+       (is (= @log [1 2 3]))))))
 
 (defn captured-patterns []
   (->> @r/*captured-derefs*

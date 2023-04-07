@@ -58,54 +58,64 @@
 
 (declare -resolve-e resolve-v)
 
-(defn- -depend-on-triple! [conn db e a v]
+(defn- -depend-on-triple! [conn db a-schema e a v]
   (when (and conn (r/owner))
     (let [e (-resolve-e conn db e)
-          a (ts/datom-a db a)
-          v (resolve-v conn db a v)]
+          a (when a (ts/datom-a db a))
+          v (if a
+              (resolve-v conn db a-schema a v)
+              v)]
       (r/collect-deref! ;; directly create dependency
        (or (fast/gets-some @!listeners conn e a v)
-            (make-listener! conn e a v)))
+           (make-listener! conn e a v)))
       nil)))
 
-(defn- -ae [conn db a]
-  (-depend-on-triple! conn db nil a nil)
-  (ts/ae db a))
+(defn- -ae [conn db a-schema a]
+  (-depend-on-triple! conn db a-schema nil a nil)
+  (ts/ae db a-schema a))
 
-(defn- -resolve-lookup-ref [conn db [a v :as e]]
-  (when-not (ts/unique? db a)
-    (throw (ex-info "Lookup ref attribute must be unique" {:lookup-ref e})))
-  (when (some? v)
-    (if (vector? v) ;; nested lookup ref
-      (-resolve-lookup-ref conn db [a (-resolve-lookup-ref conn db v)])
-      (do
-        (-depend-on-triple! conn db nil a v)
-        (first (ts/ave db a v))))))
+(defn- -resolve-lookup-ref
+  ([conn db lf]
+   (let [[a v] lf]
+     (-resolve-lookup-ref conn db (ts/get-schema db a) a v)))
+  ([conn db a-schema a v]
+   (when-not (ts/unique? db a-schema)
+     (throw (ex-info "Lookup ref attribute must be unique" {:lookup-ref [a v]})))
+   (when (some? v)
+     (if (vector? v) ;; nested lookup ref
+       (-resolve-lookup-ref conn db a-schema a (-resolve-lookup-ref conn db
+                                                                    (ts/get-schema db (v 0))
+                                                                    (v 0)
+                                                                    (v 1)))
+       (do
+         (-depend-on-triple! conn db a-schema nil a v)
+         (first (ts/ave db a-schema a v)))))))
 
 (defn- -resolve-e [conn db e]
   (if (vector? e)
     (-resolve-lookup-ref conn db e)
     (:db/id e e)))
 
-(defn- resolve-v [conn db a v]
+(defn- resolve-v [conn db a-schema a v]
   (cond->> v
-           (and v (ts/ref? db a))
+           (and v (ts/ref? db a-schema))
            (-resolve-e conn db)))
 
 (defn- -eav
   ([conn db e]
    (when-let [id (-resolve-e conn db e)]
-     (-depend-on-triple! conn db id nil nil)
+     (-depend-on-triple! conn db nil id nil nil)
      (ts/eav db id)))
-  ([conn db e a]
-   (when-let [id (-resolve-e conn db e)]
-     (-depend-on-triple! conn db e a nil)
-     (ts/eav db id a))))
+  ([conn db e a] (-eav conn db (ts/get-schema db a) e a))
+  ([conn db a-schema e a]
+   (when-let [e (-resolve-e conn db e)]
+     (-depend-on-triple! conn db a-schema e a nil)
+     (ts/eav db a-schema e a))))
 
-(defn- -ave [conn db a v]
-  (when-let [v (resolve-v conn db a v)]
-    (-depend-on-triple! conn db nil a v)
-    (ts/ave db a v)))
+(defn- -ave [conn db a-schema a v]
+  (when-let [v (resolve-v conn db a-schema a v)]
+    (-depend-on-triple! conn db a-schema nil a v)
+    (ts/ave db a-schema a v)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Entity API
@@ -132,29 +142,27 @@
 (def ref-wrapper-entity (delay (make-ref-wrapper entity)))
 (defn root-wrapper-default [_conn m] m)
 
-(defn get* [conn db e a ref-wrapper]
+(defn get* [conn db a-schema ref-wrapper e a]
   (if (= :db/id a)
     e
     (if-let [resolver (*attribute-resolvers* a)]
       (resolver (entity conn e))
       (let [is-reverse (u/reverse-attr? a)
             a (cond-> a is-reverse u/forward-attr)
-            a-schema (ts/get-schema db a)
-            is-ref (ts/ref? db a a-schema)
+            is-ref (ts/ref? db a-schema)
             v (if is-reverse
-                (ts/ave db a e)
-                (ts/eav db e a))]
-
+                (ts/ave db a-schema a e)
+                (ts/eav db a-schema e a))]
         (if is-reverse
-          (-depend-on-triple! conn db nil a e) ;; [_ a v]
-          (-depend-on-triple! conn db e a nil)) ;; [e a _]
-
+          (-depend-on-triple! conn db a-schema nil a e) ;; [_ a v]
+          (-depend-on-triple! conn db a-schema e a nil)) ;; [e a _]
         (if is-ref
           (if (or is-reverse
-                  (ts/many? db a a-schema))
+                  (ts/many? db a-schema))
             (mapv #(ref-wrapper conn %) v)
             (ref-wrapper conn v))
-          v)))))
+          v))))
+  )
 
 (defmacro -resolve-entity-e! [conn db e-sym e-resolved-sym]
   `(do (when-not ~e-resolved-sym
@@ -195,19 +203,19 @@
     (-lookup [o a]
       (let [db (ts/db conn)]
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-        (get* conn db e a @ref-wrapper-entity)))
+        (get* conn db (ts/get-schema db a) @ref-wrapper-entity e a)))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
         (let [db (ts/db conn)]
           (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-          (get* conn db e a ref-wrapper-noop))
+          (get* conn db (ts/get-schema db a) ref-wrapper-noop e a))
         (if-some [v (clojure.core/get o a)] v nf)))
     IDeref
     (-deref [this]
       (let [db (ts/db conn)]
         (when-let [e (re-db.read/-resolve-entity-e! conn db e e-resolved?)]
-          (-depend-on-triple! conn db e nil nil)
+          (-depend-on-triple! conn db nil e nil nil)
           (ts/eav db e))))
     ISeqable
     (-seq [this] (seq @this))))
@@ -225,17 +233,17 @@
 ;; Pull API
 ;;
 
-(defn- wrap-v [v conn many? f]
-  (if many?
+(defn- wrap-v [v conn is-many f]
+  (if is-many
     (mapv (fn [v] (f conn v)) v)
     (f conn v)))
 
 (defn- -wrap-refs [ref-wrapper conn db m]
   (reduce-kv (fn [m a v]
                (let [a-schema (ts/get-schema db a)]
-                 (if (ts/ref? db a a-schema)
+                 (if (ts/ref? db a-schema)
                    (assoc m a
-                            (if (ts/many? db a a-schema)
+                            (if (ts/many? db a-schema)
                               (into (empty v) (map #(ref-wrapper conn %)) v)
                               (ref-wrapper conn v)))
                    m))) m m))
@@ -258,7 +266,7 @@
       (fn pull [m i pullexpr]
         (if (= pullexpr '*)
           (do
-            (-depend-on-triple! conn db e nil nil)
+            (-depend-on-triple! conn db nil e nil nil)
             (merge m (when e (-wrap-refs ref-wrapper conn db (dissoc (ts/eav db e) :db/id)))))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
@@ -275,9 +283,9 @@
                 is-reverse (u/reverse-attr? a)
                 forward-a (cond-> a is-reverse u/forward-attr)
                 a-schema (ts/get-schema db forward-a)
-                v (val-fn (get* conn db e a ref-wrapper-noop))
-                is-ref (ts/ref? db a a-schema)
-                is-many (or (ts/many? db a a-schema) is-reverse)
+                v (val-fn (get* conn db a-schema ref-wrapper-noop e a))
+                is-ref (ts/ref? db a-schema)
+                is-many (or (ts/many? db a-schema) is-reverse)
                 v (cond (not is-ref) v
 
                         ;; ref without pull-expr
@@ -359,11 +367,11 @@
         (fn? v) (fn [entity] (v (clojure.core/get entity a)))
 
         (or (keyword? v)
-            (not (ts/ref? db a))) (fn [entity] (= v (clojure.core/get entity a)))
+            (not (ts/ref? db (ts/get-schema db a)))) (fn [entity] (= v (clojure.core/get entity a)))
 
         :else
         ;; refs - resolve `v` lookup-refs & compare to :db/id of the thing
-        (fn [entity] (= (resolve-v conn db a v)
+        (fn [entity] (= (resolve-v conn db (ts/get-schema db a) a v)
                         (:db/id (clojure.core/get entity a))))))))
 
 (defn where
@@ -372,12 +380,13 @@
         [clause & clauses] clauses
         _ (assert (not (fn? clause)) "where cannot begin with function (scans entire db)")
         entity-ids (if (keyword? clause)
-                     (-ae conn db clause)
-                     (let [[a v] clause]
+                     (-ae conn db (ts/get-schema db clause) clause)
+                     (let [[a v] clause
+                           a-schema (ts/get-schema db a)]
                        (if (fn? v)
-                         (filterv #(v (-eav conn db % a))
-                                  (-ae conn db a))
-                         (-ave conn db a v))))]
+                         (filterv #(v (-eav conn db a-schema % a))
+                                  (-ae conn db a-schema a))
+                         (-ave conn db a-schema a v))))]
     (->> entity-ids
          (into #{}
                (comp (map (partial entity conn))
@@ -396,7 +405,8 @@
    (u/some-or (get conn e a) not-found)))
 
 (defn depend-on-triple! [conn e a v]
-  (-depend-on-triple! conn (ts/db conn) e a v))
+  (let [db (ts/db conn)]
+    (-depend-on-triple! conn db (when a (ts/get-schema db a)) e a v)))
 
 (defn transact!
   ([conn txs]

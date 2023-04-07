@@ -1,14 +1,14 @@
 (ns re-db.integrations-test
-  (:require [clojure.string :as str]
+  (:require [taoensso.tufte :as tufte :refer (defnp p profiled profile)]
+            [clojure.string :as str]
             [clojure.test :refer [are deftest is]]
             [clojure.walk :as walk]
-            [datahike.api :as dh]
             [datalevin.core :as dl]
             [datomic.api :as dm]
+            [datascript.core :as ds]
             [re-db.api :as db]
             [re-db.hooks :as hooks]
             [re-db.in-memory :as mem]
-            [re-db.integrations.datahike]
             [re-db.integrations.datalevin]
             [re-db.integrations.datomic]
             [re-db.integrations.in-memory]
@@ -31,18 +31,30 @@
   (def db-uuid (random-uuid))
   (def mem-conn (mem/create-conn))
   (def dm-conn (dm/connect (doto (str "datomic:mem://db-" db-uuid) dm/create-database)))
-  (def dh-conn (let [config {:store {:backend :file :path "/tmp/example"}}]
-                 (do (try (dh/delete-database config) (catch Exception e))
-                     (try (dh/create-database config) (catch Exception e))
-                     (dh/connect config))))
   (def dl-conn (dl/get-conn (str "/tmp/datalevin/db-" db-uuid) {}))
 
   (def databases
     [{:id :datomic :conn dm-conn}
-     {:id :datahike :conn dh-conn}
      {:id :datalevin :conn dl-conn}
      {:id :in-memory :conn mem-conn}])
 
+  (def the-schema {:movie/title (merge schema/string
+                                       schema/one
+                                       schema/unique-id)
+
+                   :movie/genre (merge schema/string
+                                       schema/one)
+
+                   :movie/release-year (merge schema/long
+                                              schema/one)
+                   :movie/emotions (merge schema/ref
+                                          schema/many)
+                   :emotion/name (merge schema/string
+                                        schema/one
+                                        schema/unique-id)
+                   :movie/top-emotion (merge schema/ref
+                                             schema/one)
+                   })
 
   (defn transact! [txs]
     (mapv
@@ -69,23 +81,7 @@
                      {:movie/title "Mr. Bean"}])
 
   (doseq [{:keys [conn]} databases]
-    (ts/merge-schema conn {:movie/title (merge schema/string
-                                               schema/one
-                                               schema/unique-id)
-
-                           :movie/genre (merge schema/string
-                                               schema/one)
-
-                           :movie/release-year (merge schema/long
-                                                      schema/one)
-                           :movie/emotions (merge schema/ref
-                                                  schema/many)
-                           :emotion/name (merge schema/string
-                                                schema/one
-                                                schema/unique-id)
-                           :movie/top-emotion (merge schema/ref
-                                                     schema/one)
-                           }))
+    (ts/merge-schema conn the-schema))
   (transact! (for [name ["sad"
                          "happy"
                          "angry"
@@ -120,10 +116,10 @@
 
   (memo/defn-memo $emo-movies [conn emo-name]
     (db/bound-reaction conn
-                       (->> (db/entity [:emotion/name emo-name])
-                            :movie/_emotions
-                            (mapv :movie/title)
-                            set)))
+      (->> (db/entity [:emotion/name emo-name])
+           :movie/_emotions
+           (mapv :movie/title)
+           set)))
 
   (transact! initial-data)
 
@@ -177,12 +173,10 @@
                                            schema/one)})
 
   (let [[dm-conn
-         dh-conn
          dl-conn
          mem-conn] (map :conn databases)]
     (are [expr]
       (= (db/with-conn dm-conn expr)
-         (db/with-conn dh-conn expr)
          (db/with-conn dl-conn expr)
          (db/with-conn mem-conn expr))
 
@@ -200,12 +194,10 @@
            (db/pull '[:movie/emotions]))))
 
   (let [[dm-conn
-         dh-conn
          dl-conn
          mem-conn] (map :conn databases)]
     (are [expr]
       (= (db/with-conn dm-conn expr)
-         (db/with-conn dh-conn expr)
          (db/with-conn dl-conn expr)
          (db/with-conn mem-conn expr))
 
@@ -220,6 +212,17 @@
            (map :movie/title))
 
       )))
+
+(defn gen-movies [n]
+  (let [emo (mapv (fn [i] (str "emo-" i)) (range 100))
+        gen (mapv (fn [i] (str "gen-" i)) (range 100))
+        mov (mapv (fn [i] (str "mov-" i)) (range n))]
+    (for [m mov]
+      {:movie/title m
+       :movie/release-year (+ 1900 (rand-int 100))
+       :movie/genre (rand-nth gen)
+       :movie/emotions (mapv (fn [_] (hash-map :emotion/name (rand-nth emo)))
+                             (range (rand-int 10)))})))
 
 (deftest attribute-resolvers
   (binding [read/*attribute-resolvers* {:movie/title-lowercase
@@ -382,3 +385,87 @@
 ;; issues
 ;; - support for keywords-as-refs in re-db (? what does this even mean)
 ;; - support for resolving idents
+
+(comment
+
+ (let [movies (gen-movies 1000)]
+   (def ds-conn (ds/create-conn {:movie/title (merge schema/unique-id)
+                                 :movie/emotions (merge schema/ref
+                                                        schema/many)}))
+   (ds/transact! ds-conn movies)
+   (transact! movies)
+   nil)
+
+ (tufte/add-basic-println-handler! {})
+
+
+
+ (first (ds/q '[:find ?title
+                :where [?m :movie/title ?title]]
+              @ds-conn))
+
+ (profile {}
+   ;; DataScript Pull: 65 ms
+   (time
+    (p :datascript
+       (dotimes [_ 10000]
+         (ds/pull @ds-conn
+                  '[:movie/title
+                    {:movie/emotions [:emotion/name]}] [:movie/title "mov-991"]))))
+
+   ;; Re-DB Pull: 52 ms
+   (time
+    (p :re-db
+       (dotimes [_ 10000]
+         (read/pull mem-conn
+                    '[:movie/title
+                      {:movie/emotions [:emotion/name]}] [:movie/title "mov-991"]))))
+
+   ;; Datomic Pull: 79 ms
+   (time
+    (p :datomic
+       (dotimes [_ 10000]
+         (dm/pull (dm/db dm-conn)
+                  '[:movie/title
+                    {:movie/emotions [:emotion/name]}]
+                  [:movie/title "mov-991"]))))
+
+   ;; Datomic Pull via Re-DB: 247 ms
+   (time
+    (p :datomic-re-db
+       (dotimes [_ 10000]
+         (read/pull dm-conn
+                    '[:movie/title
+                      {:movie/emotions [:emotion/name]}]
+                    [:movie/title "mov-991"])))))
+
+ ;; QUESTIONS
+
+ ;; Datomic: use entid or aveet index?
+ (let [db (dm/db dm-conn)]
+   ;; RESULT: no significant difference between using entid vs (datoms .. :avet)
+   (time
+    (dotimes [_ 100000]
+      (dm/entid db [:movie/title "mov-990"])))
+   (time
+    (dotimes [_ 100000]
+      (first (map :e (dm/datoms db :avet :movie/title "mov-990"))))))
+
+ ;; Datomic: use d/attribute or d/entity?
+ (let [db (dm/db dm-conn)]
+   ;; RESULT: d/attribute is 50% faster
+   (time
+    (dotimes [_ 100000]
+      (let [schema (dm/entity db :movie/emotions)]
+       [(:db/index schema)
+        (= :db.type/ref (:db/valueType schema))
+        (= :db.cardinality/many (:db/cardinality schema))])))
+   (time
+    (dotimes [_ 100000]
+      (let [schema (dm/attribute db :movie/emotions)]
+        [(:indexed schema)
+         (= :db.type/ref (:value-type schema))
+         (= :db.cardinality/many (:cardinality schema))])))
+   )
+
+ )

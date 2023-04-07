@@ -74,67 +74,70 @@
                 :pet "fido"} (-> (pull '[* :_pets] "fred")
                                  (update :_pets ids)))
             "refs with cardinality-many"))))
+(def upsert-schema {:email (merge schema/unique-id
+                                  schema/one
+                                  schema/string)
+                    :friend (merge schema/ref
+                                   schema/one)
+                    :pets (merge schema/ref
+                                 schema/many)
+                    :owner (merge schema/ref
+                                  schema/one)
+                    :pet/collar-nr (merge schema/one
+                                          schema/unique-id
+                                          {:db.type/valueType :db.type/bigint})})
+
+(def upsert-tx [{:db/id "fred"
+                 :email "fred@eg.com"
+                 :friend {:email "matt@eg.com"}
+                 :pets #{{:pet/collar-nr 1}
+                         {:pet/collar-nr 2}}}
+                {:email "matt@eg.com"}
+                {:email "matt@eg.com"
+                 :name "Matt"}
+                {:pet/collar-nr 1
+                 :pet/name "pookie"}
+                {:pet/collar-nr 2
+                 :pet/name "fido"}
+                {:db/id [:email "peter@eg.com"]
+                 :name "Peter"}
+                {:email "peter@eg.com"
+                 :age 32}
+                {:email "rabbit@eg.com"
+                 :owner {:db/id "fred"} ;; db/id map as ref
+                 :name "Rabbit"}])
 
 (deftest upserts
-  (let [schema {:email (merge schema/unique-id
-                              schema/one
-                              schema/string)
-                :friend (merge schema/ref
-                               schema/one)
-                :pets (merge schema/ref
-                             schema/many)
-                :owner (merge schema/ref
-                              schema/one)
-                :pet/collar-nr (merge schema/one
-                                      schema/unique-id
-                                      {:db.type/valueType :db.type/bigint})}]
-    (db/with-conn (doto (mem/create-conn schema)
-                    (mem/transact! [{:db/id "fred"
-                                     :email "fred@eg.com"
-                                     :friend {:email "matt@eg.com"}
-                                     :pets #{{:pet/collar-nr 1}
-                                             {:pet/collar-nr 2}}}
-                                    {:email "matt@eg.com"}
-                                    {:email "matt@eg.com"
-                                     :name "Matt"}
-                                    {:pet/collar-nr 1
-                                     :pet/name "pookie"}
-                                    {:pet/collar-nr 2
-                                     :pet/name "fido"}
-                                    {:db/id [:email "peter@eg.com"]
-                                     :name "Peter"}
-                                    {:email "peter@eg.com"
-                                     :age 32}
-                                    {:email "rabbit@eg.com"
-                                     :owner {:db/id "fred"} ;; db/id map as ref
-                                     :name "Rabbit"}]))
-      (is (= {:email "fred@eg.com"}
-             (->> (entity [:email "rabbit@eg.com"])
-                  :owner
-                  (db/pull [:email]))))
-      (is (= {:email "matt@eg.com"}
-             (db/pull [:email] [:email "matt@eg.com"])))
-      (is (= (-> (entity "fred")
-                 :friend
-                 :db/id)
-             (-> (entity [:email "matt@eg.com"])
-                 :db/id)))
-      (is (= "Matt"
-             (-> (entity "fred")
-                 :friend
-                 :name)))
 
-      (is (= #{"pookie" "fido"}
-             (->> (entity "fred")
-                  :pets
-                  (map :pet/name)
-                  set)))
+  (db/with-conn (doto (mem/create-conn upsert-schema)
+                  (mem/transact! upsert-tx))
+    (is (= {:email "fred@eg.com"}
+           (->> (entity [:email "rabbit@eg.com"])
+                :owner
+                (db/pull [:email]))))
+    (is (= {:email "matt@eg.com"}
+           (db/pull [:email] [:email "matt@eg.com"])))
+    (is (= (-> (entity "fred")
+               :friend
+               :db/id)
+           (-> (entity [:email "matt@eg.com"])
+               :db/id)))
+    (is (= "Matt"
+           (-> (entity "fred")
+               :friend
+               :name)))
 
-      (is (= ["Peter" 32]
-             (->> (entity [:email "peter@eg.com"])
-                  ((juxt :name :age)))))
+    (is (= #{"pookie" "fido"}
+           (->> (entity "fred")
+                :pets
+                (map :pet/name)
+                set)))
 
-      )))
+    (is (= ["Peter" 32]
+           (->> (entity [:email "peter@eg.com"])
+                ((juxt :name :age)))))
+
+    ))
 
 (defn ->clj [x] #?(:cljs (js->clj x) :clj x))
 
@@ -534,6 +537,8 @@
                     (with-meta m)
                     (vary-meta dissoc :a)
                     meta))))))
+
+
 
 (deftest reverse-lookups
   (db/with-conn {:pet schema/ref

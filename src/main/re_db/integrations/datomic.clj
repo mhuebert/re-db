@@ -1,43 +1,39 @@
 (ns re-db.integrations.datomic
-  (:require [datomic.api :as d]
+  (:require [taoensso.tufte :as tufte :refer [defnp p profiled profile]]
+            [datomic.api :as d]
             [re-db.triplestore :as ts]
             [re-db.util :as u])
   (:import [datomic.peer LocalConnection Connection]
            [datomic.db Db]
            [datomic Datom]))
 
-(defn- v [^Datom d] (.-v d))
+(defn- datom-v [^Datom d] (.-v d))
+
+(defn ave-index? [attribute]
+  (or (:indexed attribute)
+      (:unique attribute)))
 
 (extend-type Db
   ts/ITripleStore
   (eav
-    ([db e a]
-     (let [datoms (d/datoms db :eavt e a)]
-       (if (ts/many? db a)
-         (mapv v datoms)
-         (some-> (first datoms) v))))
-    ([db e] (ts/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
-  (ave [db a v]
-    (if (:db/index (d/entity db a))
-      (into #{} (map :e) (d/datoms db :avet a v))
+    ([db a-schema e a] (get (d/entity db e) a))
+    ([db e]
+     (ts/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
+  (ave [db a-schema a v]
+    (if (ave-index? a-schema)
+      (map :e (d/datoms db :avet a v))
       (d/q
        '[:find [?e ...]
          :where [?e ?a ?v]
          :in $ ?a ?v]
        db a v)))
-  (ae [db a] (into #{} (map :e) (d/datoms db :aevt a)))
+  (ae [db a-schema a] (map :e (d/datoms db :aevt a)))
   (datom-a [db a] (d/entid db a))
-  (get-schema [db a] (d/attribute db a))
+  (-get-schema [db a] (d/attribute db a))
   (id->ident [db e] (d/ident db e))
-  (ref?
-    ([db a] (= :db.type/ref (:value-type (d/attribute db a))))
-    ([db a schema] (= :db.type/ref (:value-type schema))))
-  (unique?
-    ([db a] (:unique (d/attribute db a)))
-    ([db a schema] (:unique schema)))
-  (many?
-    ([db a] (= :db.cardinality/many (:cardinality (d/attribute db a))))
-    ([db a schema] (= :db.cardinality/many (:cardinality schema))))
+  (ref? [db schema] (= :db.type/ref (:value-type schema)))
+  (unique? [db schema] (:unique schema))
+  (many? [db schema] (= :db.cardinality/many (:cardinality schema)))
   (-transact
     ([db conn txs] @(d/transact conn txs))
     ([db conn txs opts] @(d/transact conn txs opts)))

@@ -1,5 +1,6 @@
 (ns re-db.integrations.datalevin
-  (:require [datalevin.core :as d]
+  (:require [taoensso.tufte :as tufte :refer [defnp p profiled profile]]
+            [datalevin.core :as d]
             datalevin.datom
             [datalevin.db :as db]
             [re-db.triplestore :as ts]
@@ -7,31 +8,28 @@
   (:import datalevin.db.DB
            datalevin.datom.Datom))
 
-(defn- v [^datalevin.datom.Datom d] (.-v d))
+(defn- datom-v [^datalevin.datom.Datom d] (.-v d))
+(defn- datom-e [^datalevin.datom.Datom d] (.-e d))
+
 
 (extend-type datalevin.db.DB
   ts/ITripleStore
   (eav
-    ([db e a]
+    ([db a-schema e a]
      (let [datoms (d/datoms db :eavt e a)]
-       (if (ts/many? db a)
-         (mapv v datoms)
-         (some-> (first datoms) v))))
+       (if (ts/many? db a-schema)
+         (map datom-v datoms)
+         (:v (first datoms)))))
     ([db e] (ts/datoms->map db (d/datoms db :eavt e))))
-  (ave [db a v] (into #{} (map (fn [^datalevin.datom.Datom d] (.-e d))) (d/datoms db :ave a v)))
-  (ae [db a] (into #{} (map (fn [^datalevin.datom.Datom d] (.-e d))) (d/datoms db :ave a)))
+  (ave [db a-schema a v] (map datom-e (d/datoms db :ave a v)))
+  (ae [db a-schema a] (map datom-e (d/datoms db :ave a)))
   (datom-a [db a] a)
-  (get-schema [db a] ((db/-schema db) a))
-  (id->ident [db e] (or (ts/eav db e :db/ident) e))
-  (ref?
-    ([this a] (ts/ref? this a (ts/get-schema this a)))
-    ([this a schema] (= :db.type/ref (:db/valueType schema))))
-  (unique?
-    ([this a] (ts/unique? this a (ts/get-schema this a)))
-    ([this a schema] (:db/unique schema)))
-  (many?
-    ([this a] (ts/many? this a (ts/get-schema this a)))
-    ([this a schema] (= :db.cardinality/many (:db/cardinality schema))))
+  (-get-schema [db a] ((db/-schema db) a))
+  (id->ident [db e] (or (ts/eav db (ts/get-schema db :db/ident) e :db/ident)
+                        e))
+  (ref? [this schema] (= :db.type/ref (:db/valueType schema)))
+  (unique? [this schema] (:db/unique schema))
+  (many? [this schema] (= :db.cardinality/many (:db/cardinality schema)))
   (report-triples [this report f]
     (doseq [^datalevin.datom.Datom datom (:tx-data report)]
       (f (.-e datom) (.-a datom) (.-v datom))))
