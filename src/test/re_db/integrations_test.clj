@@ -214,15 +214,43 @@
       )))
 
 (defn gen-movies [n]
-  (let [emo (mapv (fn [i] (str "emo-" i)) (range 100))
-        gen (mapv (fn [i] (str "gen-" i)) (range 100))
-        mov (mapv (fn [i] (str "mov-" i)) (range n))]
-    (for [m mov]
-      {:movie/title m
-       :movie/release-year (+ 1900 (rand-int 100))
-       :movie/genre (rand-nth gen)
-       :movie/emotions (mapv (fn [_] (hash-map :emotion/name (rand-nth emo)))
-                             (range (rand-int 10)))})))
+  (let [mov-ns (range n)]
+    (for [i mov-ns]
+      {:movie/title (str "mov-" i)
+       :movie/emotions (mapv (fn [ii] {:emotion/name (str "emo-" (* ii i))})
+                             (range (rem i 10)))})))
+
+(deftest transform-with-tx
+  (db/with-conn {:movie/title schema/unique-id
+                 :emotion/name schema/unique-id
+                 :movie/emotions (merge schema/ref
+                                        schema/many)}
+    (let [!compute-count (atom 0)]
+      (r/session
+       (let [!rx (r/reaction {:xf (map identity)}
+                   (swap! !compute-count inc)
+                   (->> (db/where [:movie/title])
+                        (filter (comp #{3} count :movie/emotions))
+                        (sort-by :movie/title)
+                        (map (db/pull [:movie/title {:movie/emotions [:emotion/name]}]))
+                        (into [])))]
+         (is (= @!compute-count 0))
+         (is (= [] @!rx))
+         (is (= @!compute-count 1))
+         (db/transact! (gen-movies 100))
+         (is (= @!compute-count 2))
+         (is (not= [] @!rx))
+         @!rx)))))
+
+(deftest hook-errors
+  (let [!n (r/atom 0)
+        !rx (r/reaction!
+             (if (even? @!n)
+               @(hooks/use-state :state)
+               @(hooks/use-ref :ref)))]
+    (is (= @!rx :state))
+    (is (thrown? Exception (do (swap! !n inc) @!rx))
+        "rx should error if hooks are called inconsistently")))
 
 (deftest attribute-resolvers
   (binding [read/*attribute-resolvers* {:movie/title-lowercase
@@ -457,9 +485,9 @@
    (time
     (dotimes [_ 100000]
       (let [schema (dm/entity db :movie/emotions)]
-       [(:db/index schema)
-        (= :db.type/ref (:db/valueType schema))
-        (= :db.cardinality/many (:db/cardinality schema))])))
+        [(:db/index schema)
+         (= :db.type/ref (:db/valueType schema))
+         (= :db.cardinality/many (:db/cardinality schema))])))
    (time
     (dotimes [_ 100000]
       (let [schema (dm/attribute db :movie/emotions)]

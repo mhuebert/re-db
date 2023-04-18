@@ -56,9 +56,9 @@
           [i hook new?] (-hooks/get-next-hook! owner :use-effect)]
       (when (or new? (not= (:hook/prev-deps hook) deps))
         (some-> (:hook/dispose hook) eval-fn)
-        (-hooks/update-hook! owner i merge {:initialized? true :hook/dispose nil})
+        (-hooks/update-hook! owner i dissoc :hook/dispose) ;; remove this?
         (let [dispose (util/guard (r/without-deref-capture (f)) fn?)]
-          (-hooks/update-hook! owner i merge {:hook/dispose dispose :hook/prev-deps deps})))
+          (-hooks/update-hook! owner i assoc :hook/dispose dispose :hook/prev-deps deps)))
       nil))))
 
 (defn use-on-dispose
@@ -76,9 +76,10 @@
     (let [owner *owner*
           [i hook new?] (-hooks/get-next-hook! owner :use-memo)]
       (:hook/value
-       (if (or new? (not= (:prev-deps hook) deps))
-         (-hooks/update-hook! owner i merge {:hook/value (r/without-deref-capture (eval-fn f))
-                                             :prev-deps deps})
+       (if (or new? (not= (:hook/prev-deps hook) deps))
+         (-hooks/update-hook! owner i assoc
+           :hook/value (r/without-deref-capture (eval-fn f))
+           :hook/prev-deps deps)
          hook))))))
 
 (defn use-state [initial-state]
@@ -86,19 +87,18 @@
    (react/useState initial-state)
    (let [owner *owner*
          [i hook new?] (-hooks/get-next-hook! owner :use-state)]
-
      (atom-like
       (if new?
-        (-hooks/update-hook! owner i merge
-          {:hook/value (r/without-deref-capture (eval-fn initial-state))
-           :hook/update-fn (fn [value]
-                             (let [old-value (:hook/value (-hooks/get-hook owner i))
-                                   new-value (if (fn? value)
-                                               (r/without-deref-capture (value old-value))
-                                               value)]
-                               (-hooks/update-hook! owner i assoc :hook/value new-value)
-                               (r/compute! owner)
-                               new-value))})
+        (-hooks/update-hook! owner i assoc
+          :hook/value (r/without-deref-capture (eval-fn initial-state))
+          :hook/update-fn (fn [value]
+                            (let [old-value (:hook/value (-hooks/get-hook owner i))
+                                  new-value (if (fn? value)
+                                              (r/without-deref-capture (value old-value))
+                                              value)]
+                              (-hooks/update-hook! owner i assoc :hook/value new-value)
+                              (r/compute! owner)
+                              new-value)))
         hook)))))
 
 (defn use-reducer [f init]
@@ -130,15 +130,15 @@
          [i hook new?] (-hooks/get-next-hook! owner :use-ref)]
      (atom-like
       (if new?
-        (-hooks/update-hook! owner i merge
-          {:hook/value (r/without-deref-capture (eval-fn initial-state))
-           :hook/update-fn (fn [value]
-                             (let [old-value (:hook/value (-hooks/get-hook owner i))
-                                   new-value (if (fn? value)
-                                               (r/without-deref-capture (value old-value))
-                                               value)]
-                               (-hooks/update-hook! owner i assoc :hook/value new-value)
-                               new-value))})
+        (-hooks/update-hook! owner i assoc
+          :hook/value (r/without-deref-capture (eval-fn initial-state))
+          :hook/update-fn (fn [value]
+                            (let [old-value (:hook/value (-hooks/get-hook owner i))
+                                  new-value (if (fn? value)
+                                              (r/without-deref-capture (value old-value))
+                                              value)]
+                              (-hooks/update-hook! owner i assoc :hook/value new-value)
+                              new-value)))
         hook)))))
 
 (defn use-deref
