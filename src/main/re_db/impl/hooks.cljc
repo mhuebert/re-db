@@ -18,10 +18,11 @@
 (defn get-next-hook! [owner expected-type & [init-fn]]
   (let [i (vswap! *hook-i* inc)
         hook (get-hook owner i)]
-    (when hook
-      (assert (= (:hook/type hook) expected-type)
-              (str "expected hook of type " expected-type ", but found " (:hook/type hook) ". "
-                   "A reaction must always call the same hooks in the same order on every evaluation.")))
+    (when (and hook (not (= (:hook/type hook) expected-type)))
+      (throw (ex-info (str "expected hook of type " expected-type ", but found " (:hook/type hook) ". "
+                           "A reaction must always call the same hooks in the same order on every evaluation.")
+                      {:hook hook
+                       :reaction-meta (meta owner)})))
     [i
      (or hook
          (set-hook! owner i (merge (if init-fn {:hook/value (init-fn)} {})
