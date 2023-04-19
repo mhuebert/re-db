@@ -15,7 +15,7 @@
 (defonce !listeners (atom {}))
 
 (defn- make-listener! [conn e a v]
-  (let [listener (r/atom nil
+  (let [listener (r/atom 0
                          :meta {:pattern [e a v]} ;; for debugging
                          :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))]
     (swap! !listeners assoc-in [conn e a v] listener)
@@ -50,7 +50,7 @@
 
             invalidated @result]
         #_(prn :invalidating (mapv (comp :pattern meta) invalidated))
-        (doseq [listener invalidated] (r/notify-watches listener 0 1))
+        (doseq [!listener invalidated] (swap! !listener inc))
         (assoc tx-report ::handled (count invalidated)))
       tx-report)))
 
