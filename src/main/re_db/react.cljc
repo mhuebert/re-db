@@ -42,20 +42,10 @@
                                     #(doseq [ref @!derefs] (remove-watch ref !derefs)))
                                   (use-deps @!derefs))] ;; re-subscribe when derefs change (by identity, not value)
        (useSyncExternalStoreWithSelector subscribe
-                                         #(reduce (fn [arr x] (j/push! arr (r/peek x))) #js[] @!derefs) ;; get-snapshot (reads values of derefs)
+                                         #(mapv r/peek @!derefs) ;; get-snapshot (reads values of derefs)
                                          nil ;; no server snapshot
                                          identity ;; we don't need to transform the snapshot
-
-                                         ;; was =, we should be able to do
-                                         ;; identical? here because derefs are lazily computed
-                                         (fn [a b]
-                                           (and (== (.-length a) (.-length b))
-                                                (let [end (.-length a)]
-                                                  (loop [i 0]
-                                                    (cond (== end i) true
-                                                          (identical? (aget a i)
-                                                                      (aget b i)) (recur (inc i))
-                                                          :else false))))))
+                                         =) ;; use Clojure's = for equality check
        out)))
 
 (sci-macro
