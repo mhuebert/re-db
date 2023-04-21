@@ -272,6 +272,15 @@
                           :name/first "b1"}])
           (is (= (db/get "a" :name/last) "c")))))))
 
+(deftest empty-maps
+  (db/with-conn {}
+    (db/transact! [[:db/add 1 :letter "a"]
+                   {:db/id 2}])
+    (is (nil? (db/get 2))))
+  (db/with-conn {}
+    (db/transact! [[:db/add 1 :letter "a"]
+                   [:db/add 2 :db/id 2]])
+    (is (nil? (db/get 2)))))
 
 (deftest refs
   (let [schema {:owner (merge schema/ref
@@ -292,20 +301,23 @@
                                         :pet {:db/valueType :db.type/ref}})
                   (mem/transact! [{:db/id "fred"
                                    :name "Fred"
-                                   :pet {:db/id "fido"}}
+                                   :pet {:db/id "fido" :name "Fido"}}
                                   {:db/id "mary"
                                    :name "Mary"}
                                   {:db/id "1"
                                    :name "One"
                                    :authors #{"fred" "mary"}}
+                                  {:db/id "herman"
+                                   :pet {:db/id "silly"}}
                                   #_[:db/add "1" :authors #{"fred" "mary"}]]))
     (is (= {:name "Fred"
             :_authors [{:db/id "1"}]
-            :pet {:db/id "fido"}}
+            :pet {:db/id "fido" }}
            (db/pull '[* :_authors] "fred"))
         "refs with cardinality-many")
-    (is (= {:db/id "fido"}
-           (db/get "fido"))))
+    (is (= {:db/id "fido" :name "Fido"}
+           (db/get "fido")))
+    (is (nil? (db/get "silly"))))
 
   (db/with-conn {:person/pet schema/ref
                  :pet/name schema/unique-id

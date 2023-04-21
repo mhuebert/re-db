@@ -265,25 +265,27 @@
 
 (defn- add
   [db [_ e a v]]
-  (let [a-schema (get-schema db a)
-        is-many (many? a-schema)
-        is-ref (ref? a-schema)
-        pm (get-entity db e)
-        pv (get pm a)
-        [db v] (if is-ref (resolve-e+ db v) [db v])]
-    (if is-many
-      (do
-        (assert (not (set? v)) ":db/add on :db.cardinality/many does not accept a set")
-        (if (contains? pv v)
+  (if (= :db/id a)
+    db
+    (let [a-schema (get-schema db a)
+          is-many (many? a-schema)
+          is-ref (ref? a-schema)
+          pm (get-entity db e)
+          pv (get pm a)
+          [db v] (if is-ref (resolve-e+ db v) [db v])]
+      (if is-many
+        (do
+          (assert (not (set? v)) ":db/add on :db.cardinality/many does not accept a set")
+          (if (contains? pv v)
+            db
+            (-> db
+                (fast/update-db-index! [:eav e a] conj-set v)
+                (index a-schema e a #{v} nil))))
+        (if (= pv v)
           db
           (-> db
-              (fast/update-db-index! [:eav e a] conj-set v)
-              (index a-schema e a #{v} nil))))
-      (if (= pv v)
-        db
-        (-> db
-            (fast/assoc-db-index! [:eav e a] v)
-            (index a-schema e a v pv))))))
+              (fast/assoc-db-index! [:eav e a] v)
+              (index a-schema e a v pv)))))))
 
 (j/defn commit-datom [db ^js [e a v pv]]
   (let [a-schema (get-schema db a)]
@@ -403,7 +405,7 @@
                                              (dissoc new-m a))]))))
                                [db (or prev-m m)]
                                m)]
-     (fast/update! db :eav assoc! e new-m))))
+     (fast/update! db :eav fast/assoc-seq! e new-m))))
 
 (defn- commit-tx [db tx]
   (cond (vector? tx) (let [operation (tx 0)]
