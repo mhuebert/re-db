@@ -406,24 +406,25 @@
      (fast/update! db :eav assoc! e new-m))))
 
 (defn- commit-tx [db tx]
-  (if (vector? tx)
-    (let [operation (tx 0)]
-      (case operation
-        :db/add (let [e (tx 1)
-                      _ (when-not e (throw (ex-info "db/id not present in tx" {:tx tx})))
-                      [db resolved-e] (resolve-e+ db e)]
-                  (add db (assoc tx 1 resolved-e)))
-        :db/retractEntity (retract-entity db (update tx 1 #(resolve-e db %)))
-        :db/retract (retract-attr db (update tx 1 #(resolve-e db %)))
-        :db/datoms (reduce commit-datom db (tx 1))
-        :db/datoms-reverse (->> (tx 1)
-                                (reverse)
-                                (map reverse-datom)
-                                (reduce commit-datom db))
-        (if-let [op (fast/gets db :schema :db/tx-fns operation)]
-          (reduce commit-tx db (op db tx))
-          (throw (ex-info "db operation does not exist" {:op operation})))))
-    (add-map db tx)))
+  (cond (vector? tx) (let [operation (tx 0)]
+                       (case operation
+                         :db/add (let [e (tx 1)
+                                       _ (when-not e (throw (ex-info "db/id not present in tx" {:tx tx})))
+                                       [db resolved-e] (resolve-e+ db e)]
+                                   (add db (assoc tx 1 resolved-e)))
+                         :db/retractEntity (retract-entity db (update tx 1 #(resolve-e db %)))
+                         :db/retract (retract-attr db (update tx 1 #(resolve-e db %)))
+                         :db/datoms (reduce commit-datom db (tx 1))
+                         :db/datoms-reverse (->> (tx 1)
+                                                 (reverse)
+                                                 (map reverse-datom)
+                                                 (reduce commit-datom db))
+                         (if-let [op (fast/gets db :schema :db/tx-fns operation)]
+                           (reduce commit-tx db (op db tx))
+                           (throw (ex-info "db operation does not exist" {:op operation})))))
+        (map? tx) (add-map db tx)
+        (nil? tx) db
+        :else (throw (ex-info "Invalid transaction" {:tx tx}))))
 
 
 (defn transient-k [m k] (transient (update m k transient)))
