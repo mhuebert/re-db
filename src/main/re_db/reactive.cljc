@@ -306,7 +306,7 @@
       (let [old-val state]
         (when (not= new-val old-val)
           (set! state new-val)
-          (set! ^js version (inc version))
+          (set! #?(:cljs ^js version :clj version) (inc version))
           (notify-watches this old-val new-val)
           state)))
     ISwap
