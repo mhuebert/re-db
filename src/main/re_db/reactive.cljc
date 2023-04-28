@@ -38,6 +38,7 @@
   (set-derefs! [this new-derefs]))
 
 (def ^:dynamic *captured-derefs* nil)
+(def ^:dynamic *silent* false)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Deref tracking
 
@@ -73,6 +74,10 @@
 (sci-macro
   (defmacro without-deref-capture [& body]
     `(without-deref-capture* (fn [] ~@body))))
+
+(sci-macro
+  (defmacro silently [& body]
+    `(binding [*silent* true] ~@body)))
 
 (defprotocol IPeek
   "for reading reactive values without triggering a dependency relationship.
@@ -135,7 +140,8 @@
 
 (defn notify-watches
   [ref old-val new-val]
-  (when (seq (get-watches ref))
+  (when (and (not *silent*)
+             (seq (get-watches ref)))
     (if *notifying*
       (handle-change! ref old-val new-val)
       (let [!to-notify (volatile! [])]
@@ -263,7 +269,8 @@
                   ^:volatile-mutable watches
                   ^:volatile-mutable dispose-fns
                   ^:volatile-mutable detached
-                  ^:volatile-mutable meta]
+                  ^:volatile-mutable meta
+                  ^:volatile-mutable version]
     IBecome
     (-become [this extracted]
       (let [[new-state new-meta] extracted]
@@ -297,9 +304,11 @@
     IReset
     (-reset! [this new-val]
       (let [old-val state]
-        (set! state new-val)
-        (notify-watches this old-val new-val)
-        state))
+        (when (not= new-val old-val)
+          (set! state new-val)
+          (set! ^js version (inc version))
+          (notify-watches this old-val new-val)
+          state)))
     ISwap
     (-swap! [this f] (reset! this (f state)))
     (-swap! [this f x] (reset! this (f state x)))
@@ -321,7 +330,8 @@
             init-watches
             init-dispose-fns
             init-detached
-            init-meta))
+            init-meta
+            0))
   ([init & {:keys [meta detached on-dispose xf]
             :or {meta init-meta
                  detached init-detached}}]
@@ -331,7 +341,8 @@
                     on-dispose
                     (conj on-dispose))
             detached
-            meta)))
+            meta
+            0)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactions - computed reactive values
@@ -350,7 +361,8 @@
      ^:volatile-mutable hooks
      ^:volatile-mutable step
      ^:volatile-mutable stale
-     ^:volatile-mutable meta]
+     ^:volatile-mutable meta
+     ^:volatile-mutable version]
     IBecome
     (-become [this extracted]
       (let [[compute-fn-2 state-2 detached-2 step-2 stale-2 meta-2] extracted]
@@ -425,6 +437,7 @@
                        (do (set! state new-val)
                            true))]
         (when updated?
+          (set! version (inc version))
           (notify-watches this old-val state))
         new-val))
     ISwap
@@ -488,7 +501,8 @@
                          -hooks/init-hooks
                          step
                          stale
-                         meta)
+                         meta
+                         0)
              detached compute!))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
