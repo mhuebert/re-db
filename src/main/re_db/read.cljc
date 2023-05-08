@@ -143,26 +143,26 @@
 (defn root-wrapper-default [_conn m] m)
 
 (defn get* [conn db a-schema ref-wrapper e a]
-  (if (= :db/id a)
-    e
-    (if-let [resolver (*attribute-resolvers* a)]
-      (resolver (entity conn e))
-      (let [is-reverse (u/reverse-attr? a)
-            a (cond-> a is-reverse u/forward-attr)
-            is-ref (ts/ref? db a-schema)
-            v (if is-reverse
-                (ts/ave db a-schema a e)
-                (ts/eav db a-schema e a))]
-        (if is-reverse
-          (-depend-on-triple! conn db a-schema nil a e) ;; [_ a v]
-          (-depend-on-triple! conn db a-schema e a nil)) ;; [e a _]
-        (if is-ref
-          (if (or is-reverse
-                  (ts/many? db a-schema))
-            (mapv #(ref-wrapper conn %) v)
-            (ref-wrapper conn v))
-          v))))
-  )
+  (when e
+    (if (= :db/id a)
+      e
+      (if-let [resolver (*attribute-resolvers* a)]
+        (resolver (entity conn e))
+        (let [is-reverse (u/reverse-attr? a)
+              a (cond-> a is-reverse u/forward-attr)
+              is-ref (ts/ref? db a-schema)
+              v (if is-reverse
+                  (ts/ave db a-schema a e)
+                  (ts/eav db a-schema e a))]
+          (if is-reverse
+            (-depend-on-triple! conn db a-schema nil a e) ;; [_ a v]
+            (-depend-on-triple! conn db a-schema e a nil)) ;; [e a _]
+          (if is-ref
+            (if (or is-reverse
+                    (ts/many? db a-schema))
+              (mapv #(ref-wrapper conn %) v)
+              (ref-wrapper conn v))
+            v))))))
 
 (defmacro -resolve-entity-e! [conn db e-sym e-resolved-sym]
   `(do (when-not ~e-resolved-sym
@@ -261,7 +261,7 @@
 (defn- -pull
   ([conn db ref-wrapper pullv e] (-pull conn db ref-wrapper pullv #{} e))
   ([conn db ref-wrapper pullv found e]
-   (let [e (-resolve-e conn db e)]
+   (when-let [e (-resolve-e conn db e)]
      (reduce-kv
       (fn pull [m i pullexpr]
         (if (= pullexpr '*)
