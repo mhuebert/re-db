@@ -3,7 +3,8 @@
   (:require [clojure.walk :as walk]
             [re-db.impl.hooks :as -hooks]
             [re-db.util :as util :refer [sci-macro]])
-  #?(:cljs (:require-macros [re-db.reactive])))
+  #?(:cljs (:require-macros [re-db.reactive]))
+  #?(:clj (:import [java.util.concurrent Executors TimeUnit])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Protocols
@@ -39,6 +40,26 @@
 
 (def ^:dynamic *captured-derefs* nil)
 (def ^:dynamic *silent* false)
+
+
+;; Platform-specific timer functions
+#?(:cljs
+   (defn set-timeout! [f ms]
+     (js/setTimeout f ms))
+
+   :clj
+   (let [executor (Executors/newScheduledThreadPool 1)]
+     (defn set-timeout! [f ms]
+       (.schedule executor
+                  (reify Runnable
+                    (run [this] (f)))
+                  (long ms)
+                  TimeUnit/MILLISECONDS))))
+
+(defn clear-timeout! [timer]
+  #?(:cljs (js/clearTimeout timer)
+     :clj (future-cancel timer)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Deref tracking
 
@@ -269,8 +290,7 @@
                   ^:volatile-mutable watches
                   ^:volatile-mutable dispose-fns
                   ^:volatile-mutable detached
-                  ^:volatile-mutable meta
-                  ^:volatile-mutable version]
+                  ^:volatile-mutable meta]
     IBecome
     (-become [this extracted]
       (let [[new-state new-meta] extracted]
@@ -306,7 +326,6 @@
       (let [old-val state]
         (when (not= new-val old-val)
           (set! state new-val)
-          (set! #?(:cljs ^js version :clj version) (inc version))
           (notify-watches this old-val new-val)
           state)))
     ISwap
@@ -316,12 +335,17 @@
     (-swap! [this f x y args] (reset! this (apply f state x y args)))
     IWatchable
     (-add-watch [this key f]
+      (when-let [timer (:dispose-timer meta)]
+        (clear-timeout! timer)
+        (util/set-swap! meta dissoc :dispose-timer))
       (util/set-swap! watches assoc key f)
       this)
     (-remove-watch [this key]
-      (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
-        (dispose! this))
+        (if-let [delay (:dispose-delay meta)]
+          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose! this) delay))
+          (dispose! this)))
+      (util/set-swap! watches dissoc key)
       this)))
 
 (defn atom
@@ -330,8 +354,7 @@
             init-watches
             init-dispose-fns
             init-detached
-            init-meta
-            0))
+            init-meta))
   ([init & {:keys [meta detached on-dispose xf]
             :or {meta init-meta
                  detached init-detached}}]
@@ -341,8 +364,7 @@
                     on-dispose
                     (conj on-dispose))
             detached
-            meta
-            0)))
+            meta)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactions - computed reactive values
@@ -361,8 +383,7 @@
      ^:volatile-mutable hooks
      ^:volatile-mutable step
      ^:volatile-mutable stale
-     ^:volatile-mutable meta
-     ^:volatile-mutable version]
+     ^:volatile-mutable meta]
     IBecome
     (-become [this extracted]
       (let [[compute-fn-2 state-2 detached-2 step-2 stale-2 meta-2] extracted]
@@ -437,7 +458,6 @@
                        (do (set! state new-val)
                            true))]
         (when updated?
-          (set! version (inc version))
           (notify-watches this old-val state))
         new-val))
     ISwap
@@ -447,7 +467,9 @@
     (-swap! [this f x y args] (reset! this (apply f @this x y args)))
     IWatchable
     (-add-watch [this key compute-fn]
-
+     (when-let [timer (:dispose-timer meta)]
+        (clear-timeout! timer)
+        (util/set-swap! meta dissoc :dispose-timer))
      ;; if the reaction is not yet initialized, do it here (before adding the watch,
      ;; so that the watch-fn is not called here)
       (when stale (compute! this))
@@ -455,9 +477,11 @@
       (util/set-swap! watches assoc key compute-fn)
       this)
     (-remove-watch [this key]
-      (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
-        (dispose! this))
+        (if-let [delay (:dispose-delay meta)]
+          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose! this) delay))
+          (dispose! this)))
+      (util/set-swap! watches dissoc key)
       this)
     ITrackDerefs
     (get-derefs [this] derefs)
@@ -501,8 +525,7 @@
                          -hooks/init-hooks
                          step
                          stale
-                         meta
-                         0)
+                         meta)
              detached compute!))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

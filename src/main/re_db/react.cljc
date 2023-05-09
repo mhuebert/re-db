@@ -2,6 +2,7 @@
   (:require #?(:cljs ["react" :as react])
             #?(:cljs ["use-sync-external-store/with-selector" :as with-selector])
             [applied-science.js-interop :as j]
+            [clojure.string :as str]
             [re-db.reactive :as r]
             [re-db.util :refer [sci-macro]])
   #?(:cljs (:require-macros re-db.react)))
@@ -40,7 +41,7 @@
            subscribe (useCallback (fn [changed!]
                                     (doseq [ref @!derefs] (add-watch ref !derefs (fn [_ _ _ _] (changed!))))
                                     #(doseq [ref @!derefs] (remove-watch ref !derefs)))
-                                  (use-deps @!derefs))] ;; re-subscribe when derefs change (by identity, not value)
+                                  #js[(str/join "-" (map goog/getUid @!derefs))] #_(use-deps @!derefs))] ;; re-subscribe when derefs change (by identity, not value)
        (useSyncExternalStoreWithSelector subscribe
                                          #(mapv r/peek @!derefs) ;; get-snapshot (reads values of derefs)
                                          nil ;; no server snapshot
