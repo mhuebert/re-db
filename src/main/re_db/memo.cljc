@@ -25,7 +25,13 @@
   (let [!state (get-state f)]
     (swap! !state assoc :init-fn init-fn)
     (doseq [[args old-rx] (:cache @!state)]
-      (r/become old-rx (apply init-fn args)))
+      (try (r/become old-rx (apply init-fn args))
+           ;; if we encounter an error while updating a subscription function (eg. ArityException when
+           ;; making changes to the init-fn), fall back to removing it from the cache and passing the error
+           ;; to the old-rx.
+           (catch #?(:clj Exception :cljs js/Error) e
+             (swap! !state update :cache dissoc args)
+             (reset! old-rx e))))
     f))
 
 (defn constructor-fn [!state]
