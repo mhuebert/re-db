@@ -9,7 +9,7 @@
                          (t/write writer x)
                          (String. (.toByteArray out)))))
 
-#?(:cljs (def reader (t/reader :json)))
+#?(:cljs (def reader (t/reader :json {:handlers {"u" cljs.core/uuid}})))
 (defn unpack [x] #?(:clj  (let [in (ByteArrayInputStream. (.getBytes x))]
                             (t/read (t/reader in :json)))
                     :cljs (t/read reader x)))
