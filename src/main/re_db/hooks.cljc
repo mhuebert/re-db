@@ -169,7 +169,7 @@
                         rest)
         body (cond-> body finally drop-last)]
     `(let [~@(mapcat (fn [[sym value]]
-                       [sym `(use-memo (fn [] ~value))])
+                       [sym `(first (use-state (fn [] ~value)))])
                      (partition 2 bindings))]
        ~(when (seq finally)
           `(use-effect (fn [] (fn [] ~@finally))))
