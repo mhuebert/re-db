@@ -170,18 +170,18 @@
                (transact-result handlers id result))}))
 
 (defn query-handlers
-  "(server) Handlers for messages received by teh server"
+  "(server) Handlers for messages received by the server"
   [resolve-query]
   {::watch
-   (fn [{:keys [channel]} query]
-     (if-let [!ref (resolve-query query)]
-       (watch channel query !ref)
-       (println "No ref found" query)))
+   (fn [{:keys [channel]} qvec]
+     (if-let [!ref (resolve-query qvec)]
+       (watch channel qvec !ref)
+       (println "No ref found" qvec)))
    ::unwatch
-   (fn [{:as context :keys [channel]} query]
-     (if-let [!ref (resolve-query query)]
+   (fn [{:as context :keys [channel]} qvec]
+     (if-let [!ref (resolve-query qvec)]
        (unwatch channel !ref)
-       (println "No ref found" query)))})
+       (println "No ref found" qvec)))})
 
 (defn handle-message
   "Applies handler-fn (if found) to message args, with context as 1st param."
@@ -212,6 +212,9 @@
   (send channel [::unwatch query])
   (some-> (:loading? (read-result query)) deliver))
 
+(defn start-loading! [qvec]
+  (d/transact! [[:db/add (db-id qvec) :result {:loading? (loading-promise)}]]))
+
 (memo/defn-memo $query
   "(client) Watch a value (by query, usually a vector).
    Returns map containing `:value`, `:error`, or `:loading?`}"
@@ -220,8 +223,7 @@
   ;; set initial :loading? to a `suspended` value, to be resolved
   ;; when the first result arrives.
   #?(:cljs
-     (when-not (read-result qvec)
-       (d/transact! [[:db/add (db-id qvec) :result {:loading? (loading-promise)}]])))
+     (when-not (read-result qvec) (start-loading! qvec)))
 
   (send channel [::watch qvec])
   (r/reaction
