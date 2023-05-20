@@ -124,33 +124,25 @@
 ;; for logging/inspection
 (defonce !last-event (atom nil))
 
-(defn watchable? [ref]
-  #?(:cljs (satisfies? IWatchable ref)
-     :clj  (instance? clojure.lang.IReference ref)))
-
 (defn watch
   "(server) Adds watch for a local ref, sending messages to client via ::result messages.
    A ref's value may specify an `::init` result to send upon connection."
   [channel query !ref]
-  (if (watchable? !ref)
-    (do
-      (reset! !last-event {:event :watch-ref :channel channel :query-id query})
-      (alter-meta! !ref assoc ::query-id query)             ;; mutate meta of !ref to include query-id for monitoring
-      (swap! !watches update channel (fnil conj #{}) !ref)
-      (add-watch !ref channel (fn [_ _ _ value]
-                                (send channel (wrap-result query (dissoc value ::init)))))
-      (let [v @!ref]
-        (send channel (wrap-result query (or (::init v)
-                                             (dissoc v ::init))))))
-    (send channel (wrap-result query {:value !ref}))))
+  (reset! !last-event {:event :watch-ref :channel channel :query-id query})
+  (alter-meta! !ref assoc ::query-id query)                 ;; mutate meta of !ref to include query-id for monitoring
+  (swap! !watches update channel (fnil conj #{}) !ref)
+  (add-watch !ref channel (fn [_ _ _ value]
+                            (send channel (wrap-result query (dissoc value ::init)))))
+  (let [v @!ref]
+    (send channel (wrap-result query (or (::init v)
+                                         (dissoc v ::init))))))
 
 (defn unwatch
   "(server) Removes watch for ref."
   [channel !ref]
-  (when (watchable? !ref)
-    (reset! !last-event {:event :watch-ref :channel channel :query-id (::query-id (meta !ref))})
-    (swap! !watches update channel disj !ref)
-    (remove-watch !ref channel)))
+  (reset! !last-event {:event :watch-ref :channel channel :query-id (::query-id (meta !ref))})
+  (swap! !watches update channel disj !ref)
+  (remove-watch !ref channel))
 
 (defn unwatch-all                                           ;; server
   "(server) Removes all watches for channel"
