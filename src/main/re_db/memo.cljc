@@ -34,6 +34,9 @@
              (reset! old-rx e))))
     f))
 
+(defn entry [f & args]
+  (get-in (get-state f) [:cache args]))
+
 (defn constructor-fn [!state]
   (with-meta (fn [& args]
                (or (get-in @!state [:cache args])
