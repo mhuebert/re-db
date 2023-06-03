@@ -32,7 +32,9 @@
     (-swap! [_ f a b xs] (update-fn #(apply f % a b xs)))
     IIndexed
     (-nth [this i] (case i 0 value 1 update-fn))
-    (-nth [this i nf] (case i 0 value 1 update-fn nf))))
+    (-nth [this i nf] (case i 0 value 1 update-fn nf))
+    ISeqable
+    (-seq [this] (list value update-fn))))
 
 (defn atom-like
   ([m] (AtomLike. (:hook/value m) (:hook/update-fn m)))
@@ -52,14 +54,14 @@
   ([f deps]
    (if-react
     (react/useEffect f (cljs-deps deps))
-    (let [owner *owner*
-          [i hook new?] (-hooks/get-next-hook! owner :use-effect)]
-      (when (or new? (not= (:hook/prev-deps hook) deps))
-        (some-> (:hook/dispose hook) eval-fn)
-        (-hooks/update-hook! owner i dissoc :hook/dispose) ;; remove this?
-        (let [dispose (util/guard (r/without-deref-capture (f)) fn?)]
-          (-hooks/update-hook! owner i assoc :hook/dispose dispose :hook/prev-deps deps)))
-      nil))))
+    (when-let [owner *owner*]
+      (let [[i hook new?] (-hooks/get-next-hook! owner :use-effect)]
+        (when (or new? (not= (:hook/prev-deps hook) deps))
+          (some-> (:hook/dispose hook) eval-fn)
+          (-hooks/update-hook! owner i dissoc :hook/dispose) ;; remove this?
+          (let [dispose (util/guard (r/without-deref-capture (f)) fn?)]
+            (-hooks/update-hook! owner i assoc :hook/dispose dispose :hook/prev-deps deps)))
+        nil)))))
 
 (defn use-on-dispose
   ([f] (use-on-dispose f nil))
@@ -73,33 +75,35 @@
   ([f deps]
    (if-react
     (react/useMemo f (cljs-deps deps))
-    (let [owner *owner*
-          [i hook new?] (-hooks/get-next-hook! owner :use-memo)]
-      (:hook/value
-       (if (or new? (not= (:hook/prev-deps hook) deps))
-         (-hooks/update-hook! owner i assoc
-           :hook/value (r/without-deref-capture (eval-fn f))
-           :hook/prev-deps deps)
-         hook))))))
+    (if-let [owner *owner*]
+      (let [[i hook new?] (-hooks/get-next-hook! owner :use-memo)]
+        (:hook/value
+          (if (or new? (not= (:hook/prev-deps hook) deps))
+            (-hooks/update-hook! owner i assoc
+                                 :hook/value (r/without-deref-capture (eval-fn f))
+                                 :hook/prev-deps deps)
+            hook)))
+      (f)))))
 
 (defn use-state [initial-state]
   (if-react
    (react/useState initial-state)
-   (let [owner *owner*
-         [i hook new?] (-hooks/get-next-hook! owner :use-state)]
-     (atom-like
-      (if new?
-        (-hooks/update-hook! owner i assoc
-          :hook/value (r/without-deref-capture (eval-fn initial-state))
-          :hook/update-fn (fn [value]
-                            (let [old-value (:hook/value (-hooks/get-hook owner i))
-                                  new-value (if (fn? value)
-                                              (r/without-deref-capture (value old-value))
-                                              value)]
-                              (-hooks/update-hook! owner i assoc :hook/value new-value)
-                              (r/compute! owner)
-                              new-value)))
-        hook)))))
+   (if-let [owner *owner*]
+     (let [[i hook new?] (-hooks/get-next-hook! owner :use-state)]
+       (atom-like
+         (if new?
+           (-hooks/update-hook! owner i assoc
+                                :hook/value (r/without-deref-capture (eval-fn initial-state))
+                                :hook/update-fn (fn [value]
+                                                  (let [old-value (:hook/value (-hooks/get-hook owner i))
+                                                        new-value (if (fn? value)
+                                                                    (r/without-deref-capture (value old-value))
+                                                                    value)]
+                                                    (-hooks/update-hook! owner i assoc :hook/value new-value)
+                                                    (r/compute! owner)
+                                                    new-value)))
+           hook)))
+     (atom-like (eval-fn initial-state) nil))))
 
 (defn use-reducer [f init]
   (if-react
@@ -125,21 +129,22 @@
 
 (defn use-ref [initial-state]
   (if-react
-   (react/useCallback (Ref. initial-state) (j/lit []))
-   (let [owner *owner*
-         [i hook new?] (-hooks/get-next-hook! owner :use-ref)]
-     (atom-like
-      (if new?
-        (-hooks/update-hook! owner i assoc
-          :hook/value (r/without-deref-capture (eval-fn initial-state))
-          :hook/update-fn (fn [value]
-                            (let [old-value (:hook/value (-hooks/get-hook owner i))
-                                  new-value (if (fn? value)
-                                              (r/without-deref-capture (value old-value))
-                                              value)]
-                              (-hooks/update-hook! owner i assoc :hook/value new-value)
-                              new-value)))
-        hook)))))
+   (react/useCallback (Ref. (eval-fn initial-state)) (j/lit []))
+   (if-let [owner *owner*]
+     (let [[i hook new?] (-hooks/get-next-hook! owner :use-ref)]
+       (atom-like
+         (if new?
+           (-hooks/update-hook! owner i assoc
+                                :hook/value (r/without-deref-capture (eval-fn initial-state))
+                                :hook/update-fn (fn [value]
+                                                  (let [old-value (:hook/value (-hooks/get-hook owner i))
+                                                        new-value (if (fn? value)
+                                                                    (r/without-deref-capture (value old-value))
+                                                                    value)]
+                                                    (-hooks/update-hook! owner i assoc :hook/value new-value)
+                                                    new-value)))
+           hook)))
+     (atom-like (eval-fn initial-state) nil))))
 
 (defn use-deref
   "Returns deref'd value of atom, and re-renders parent when the atom notifies watches."
