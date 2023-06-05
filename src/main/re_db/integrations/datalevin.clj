@@ -16,11 +16,13 @@
   ts/ITripleStore
   (eav
     ([db a-schema e a]
-     (let [datoms (d/datoms db :eavt e a)]
-       (if (ts/many? db a-schema)
-         (map datom-v datoms)
-         (:v (first datoms)))))
-    ([db e] (ts/datoms->map db (d/datoms db :eavt e))))
+     (when-let [e (db/entid db e)]
+       (let [datoms (d/datoms db :eavt e a)]
+         (if (ts/many? db a-schema)
+           (map datom-v datoms)
+           (:v (first datoms))))))
+    ([db e] (when-let [e (db/entid db e)]
+              (ts/datoms->map db (d/datoms db :eavt e)))))
   (ave [db a-schema a v] (map datom-e (d/datoms db :ave a v)))
   (ae [db a-schema a] (map datom-e (d/datoms db :ave a)))
   (datom-a [db a] a)
