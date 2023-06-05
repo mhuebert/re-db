@@ -265,7 +265,7 @@
    (when-let [e (-resolve-e conn db e)]
      (reduce-kv
       (fn pull [m i pullexpr]
-        (if (= pullexpr '*)
+        (if (#{'* :*} pullexpr)
           (do
             (-depend-on-triple! conn db nil e nil nil)
             (merge m (when e (-wrap-refs ref-wrapper conn db (dissoc (ts/eav db e) :db/id)))))
