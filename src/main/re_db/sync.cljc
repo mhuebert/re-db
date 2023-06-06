@@ -173,13 +173,13 @@
   "(server) Handlers for messages received by the server"
   [resolve-query]
   {::watch
-   (fn [{:keys [channel]} qvec]
-     (if-let [!ref (resolve-query qvec)]
+   (fn [{:as context :keys [channel]} qvec]
+     (if-let [!ref (resolve-query (with-meta qvec (assoc context ::watch true)))]
        (watch channel qvec !ref)
        (println "No ref found" qvec)))
    ::unwatch
    (fn [{:as context :keys [channel]} qvec]
-     (if-let [!ref (resolve-query qvec)]
+     (if-let [!ref (resolve-query (with-meta qvec (assoc context ::unwatch true)))]
        (unwatch channel !ref)
        (println "No ref found" qvec)))})
 
