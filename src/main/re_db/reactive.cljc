@@ -63,11 +63,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Deref tracking
 
-#?(:cljs (defonce reagent-notify-deref-watcher! (fn [_])))
+#?(:cljs (defonce custom-deref-handler! nil))
 
 (defn collect-deref! [producer]
-  #?(:cljs (reagent-notify-deref-watcher! producer))
-  (some-> *captured-derefs* (vswap! conj producer)))
+  (if-let [!derefs *captured-derefs*]
+    (vswap! !derefs conj producer)
+    #?(:cljs (when custom-deref-handler!
+               (custom-deref-handler! producer)))))
 
 (defn handle-new-derefs! [consumer new-derefs]
   (let [derefs (get-derefs consumer)

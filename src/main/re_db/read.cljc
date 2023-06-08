@@ -60,7 +60,8 @@
 (declare -resolve-e resolve-v)
 
 (defn- -depend-on-triple! [conn db a-schema e a v]
-  (when (and conn r/*captured-derefs*)
+  (when (and conn (or r/*captured-derefs*
+                      #?(:cljs r/custom-deref-handler!)))
     (let [e (-resolve-e conn db e)
           a (when a (ts/datom-a db a))
           v (if a

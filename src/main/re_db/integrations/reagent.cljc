@@ -25,4 +25,4 @@
    (set! r/get-reagent-context (fn [] ratom/*ratom-context*)))
 
 #?(:cljs
-   (set! r/reagent-notify-deref-watcher! ratom/notify-deref-watcher!))
+   (set! r/custom-deref-handler! ratom/notify-deref-watcher!))
