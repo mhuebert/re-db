@@ -195,9 +195,7 @@
 ;; for reagent compatibility
 #?(:cljs (defonce get-reagent-context (constantly nil)))
 
-(defn owner []
-  #?(:clj  *owner*
-     :cljs (or *owner* (get-reagent-context))))
+(defn owner [] *owner*)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -255,6 +253,10 @@
     ([name rx] `(redef ~name nil ~rx))))
 
 (defn dispose-derefs! [consumer] (handle-new-derefs! consumer nil))
+
+(defn dispose-empty! [consumer]
+  (when-not (seq (get-watches consumer))
+    (dispose! consumer)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Reactive Atom - basic reactive value
@@ -346,11 +348,11 @@
       (util/set-swap! watches assoc key f)
       this)
     (-remove-watch [this key]
+      (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
         (if-let [delay (:dispose-delay meta)]
-          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose! this) delay))
+          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose-empty! this) delay))
           (dispose! this)))
-      (util/set-swap! watches dissoc key)
       this)))
 
 (defn atom
@@ -482,11 +484,11 @@
       (util/set-swap! watches assoc key compute-fn)
       this)
     (-remove-watch [this key]
+      (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
         (if-let [delay (:dispose-delay meta)]
-          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose! this) delay))
+          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose-empty! this) delay))
           (dispose! this)))
-      (util/set-swap! watches dissoc key)
       this)
     ITrackDerefs
     (get-derefs [this] derefs)
@@ -585,15 +587,12 @@
     (let [[options body] (parse-reaction-args &form body {:detached true})]
       `(make-reaction ~options (fn [] ~@body)))))
 
-(defn session* [f]
-  (let [rx (make-reaction {:detached true} f)]
-    (try @rx (finally (dispose! rx)))))
-
 (sci-macro
   (defmacro session
     "Evaluate body in a reaction which is immediately disposed"
     [& body]
-    `(session* (fn [] ~@body))))
+    `(let [rx (make-reaction (fn [] ~@body))]
+       (try @rx (finally (dispose! rx))))))
 
 (defn with-session* [session f]
   (re-db.reactive/with-owner session
