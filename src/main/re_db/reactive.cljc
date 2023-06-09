@@ -64,12 +64,15 @@
 ;; Deref tracking
 
 #?(:cljs (defonce custom-deref-handler! nil))
+#?(:cljs (defn handle-custom-deref! [producer]
+           (when (and custom-deref-handler!
+                      (not (false? *captured-derefs*)))
+             (custom-deref-handler! producer))))
 
 (defn collect-deref! [producer]
   (if-let [!derefs *captured-derefs*]
     (vswap! !derefs conj producer)
-    #?(:cljs (when custom-deref-handler!
-               (custom-deref-handler! producer)))))
+    #?(:cljs (handle-custom-deref! producer))))
 
 (defn handle-new-derefs! [consumer new-derefs]
   (let [derefs (get-derefs consumer)
@@ -92,7 +95,7 @@
     `(with-deref-capture!* ~owner (fn [] ~@body))))
 
 (defn without-deref-capture* [f]
-  (binding [*captured-derefs* nil] (f)))
+  (binding [*captured-derefs* false] (f)))
 
 (sci-macro
   (defmacro without-deref-capture [& body]
