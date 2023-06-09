@@ -567,9 +567,11 @@
 
   (let [a (r/atom 0)
         a's (xf/into [] a)]
-    (reset! a 0)
-    (reset! a 0)
-    (is (= [0 0 0] @a's)))
+    @a's
+    (reset! a 1)
+    (reset! a 1)
+    (reset! a 2)
+    (is (= [0 1 2] @a's)))
 
   (let [a (r/reaction {:xf (dedupe)} 0)
         a's (xf/into [] a)]

@@ -591,8 +591,8 @@
   (defmacro session
     "Evaluate body in a reaction which is immediately disposed"
     [& body]
-    `(let [rx (make-reaction (fn [] ~@body))]
-       (try @rx (finally (dispose! rx))))))
+    `(let [rx# (make-reaction (fn [] ~@body))]
+       (try @rx# (finally (dispose! rx#))))))
 
 (defn with-session* [session f]
   (re-db.reactive/with-owner session
