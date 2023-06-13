@@ -36,8 +36,8 @@
 
 (defn use-derefs* [f]
   #?(:cljs
-     (let [!derefs (useCallback (volatile! r/init-derefs) (cljs.core/array))
-           out (binding [r/*captured-derefs* (doto !derefs (vreset! r/init-derefs))] (f))
+     (let [!derefs (useCallback (volatile! []) (cljs.core/array))
+           out (binding [r/*captured-derefs* (doto !derefs (vreset! []))] (f))
            subscribe (useCallback (fn [changed!]
                                     (doseq [ref @!derefs] (add-watch ref !derefs (fn [_ _ _ _] (changed!))))
                                     #(doseq [ref @!derefs] (remove-watch ref !derefs)))

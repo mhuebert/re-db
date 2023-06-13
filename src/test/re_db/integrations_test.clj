@@ -220,6 +220,17 @@
        :movie/emotions (mapv (fn [ii] {:emotion/name (str "emo-" (* ii i))})
                              (range (rem i 10)))})))
 
+(deftest pull
+  (r/session
+    (db/with-conn {:person/name schema/unique-id}
+                  (db/transact! [{:person/name "Foo"}])
+                  (is (= (db/pull '[*] [:person/name "Foo"])
+                         {:person/name "Foo"}))
+                  (let [rx (r/reaction! (db/pull '[*] [:person/name "Foo"]))]
+                    (is (= @rx {:person/name "Foo"}))
+                    (db/transact! [[:db/add [:person/name "Foo"] :age 42]])
+                    (is (= @rx {:person/name "Foo" :age 42}))))))
+
 (deftest transform-with-tx
   (db/with-conn {:movie/title schema/unique-id
                  :emotion/name schema/unique-id
