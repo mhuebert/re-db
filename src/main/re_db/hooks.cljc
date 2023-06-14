@@ -158,11 +158,11 @@
          #(remove-watch ref id))
        (j/lit [ref]))
       #(deref ref)))
-   (let [[_ set-value!] (use-state (r/peek ref))]
+   (let [[_ set-value!] (use-state (constantly (r/peek ref)))]
      (use-effect
       (fn []
         (add-watch ref set-value! (fn [_ _ _ new-value]
-                                    (set-value! new-value)))
+                                    (set-value! (constantly new-value))))
         #(remove-watch ref set-value!)))
      (r/peek ref))))
 
