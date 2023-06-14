@@ -225,10 +225,10 @@
   #?(:cljs
      (when-not (read-result qvec) (start-loading! qvec)))
 
-  (send channel [::watch qvec])
   (r/reaction
     (hooks/use-effect
       (fn []
+        (send channel [::watch qvec])
         (swap! !watching update channel assoc qvec r/*owner*)
         #(client:unwatch channel qvec)))
     (read-result qvec)))
