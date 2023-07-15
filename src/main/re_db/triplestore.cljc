@@ -24,6 +24,7 @@
   (ref? [db a-schema])
   (unique? [db a-schema])
   (many? [db a-schema])
+  (component? [db a-schema])
   (id->ident [db e] "Returns :db/ident if it exists for e")
 
   (report-triples [db report f] "Calls (f e a v) for each triple in a tx-report")

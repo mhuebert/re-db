@@ -228,8 +228,17 @@
         e (or (-resolve-e conn db e) e)]
     (->Entity conn e false nil)))
 
-;; difference from others: no isComponent
-(defn touch [entity] @entity)
+(defn touch [the-entity]
+  (let [m @the-entity
+        conn (conn the-entity)
+        db (ts/db conn)]
+    (reduce-kv (fn [m a v]
+                 (let [a-schema (ts/get-schema db a)]
+                   (if (ts/component? db a-schema)
+                     (assoc m a (if (ts/many? db a-schema)
+                                  (mapv #(touch (entity conn %)) v)
+                                  (touch (entity conn v))))
+                     m))) m m)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Pull API

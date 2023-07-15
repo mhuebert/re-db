@@ -33,6 +33,7 @@
   (ref? [db schema] (mem/ref? schema))
   (unique? [db schema] (mem/unique? schema))
   (many? [db schema] (mem/many? schema))
+  (component? [db schema] (mem/component? schema))
   (-transact
     ([db conn txs] (mem/transact! conn txs))
     ([db conn txs opts] (mem/transact! conn txs opts)))

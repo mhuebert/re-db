@@ -10,11 +10,12 @@
 (def index-all-ae? false)
 (def auto-index? true)
 
-(defrecord Schema [ave many unique ref ae index-fn schema-map])
+(defrecord Schema [ave many unique ref component ae index-fn schema-map])
 
 ;; accessors with boolean type hint via u/bool
 (defn unique? [^Schema s] (u/bool (.-unique s)))
 (defn many? [^Schema s] (u/bool (.-many s)))
+(defn component? [^Schema s] (u/bool (.-component s)))
 (defn ref? [^Schema s] (u/bool (.-ref s)))
 (defn ave? [^Schema s] (u/bool (.-ave s)))
 (defn ae? [^Schema s] (u/bool (.-ae s)))
@@ -188,7 +189,7 @@
                                   (per-values db e a nil pv1 false true)) db pv)
                                db))))))))))))
 
-(defn compile-a-schema* ^Schema [{:as schema-map :db/keys [index unique cardinality valueType index-ae]}]
+(defn compile-a-schema* ^Schema [{:as schema-map :db/keys [index unique cardinality valueType index-ae isComponent]}]
   (let [unique? (boolean unique)
         index (or index-all-ave? index)
         ae (boolean (or index-all-ae? index-ae))
@@ -196,6 +197,7 @@
                   {:ave (boolean (or index unique?))
                    :many (= cardinality :db.cardinality/many)
                    :unique unique?
+                   :component isComponent
                    :ref (= valueType :db.type/ref)
                    :ae ae
                    :schema-map schema-map})]
@@ -230,36 +232,42 @@
           (empty? (fast/gets db :eav e))
           (fast/update! :eav dissoc! e)))
 
+(declare ^:private retract-entity)
+
 (defn- retract-attr
-  [db [_ e a v]]
-  (let [a-schema (get-schema db a)
-        is-many (many? a-schema)
-        is-ref (ref? a-schema)
-        v (cond->> v is-ref (resolve-e db))]
-    (if-some [pv (fast/gets db :eav e a)]
-      (if is-many
-        (do
-          (assert (not (set? v)) ":db/retract on :db.cardinality/many does not accept a set")
-          (if (contains? pv v)
-            (-> db
-                (fast/update-db-index! [:eav e a] disj v)
-                (index a-schema e a nil #{v}))
-            db))
-        (-> db
-            (fast/dissoc-db-index! [:eav e a])
-            (index a-schema e a nil pv)
-            (clear-empty-ent e)))
-      db)))
+  ([db tx] (retract-attr db (get-schema db (nth tx 2)) tx))
+  ([db a-schema [_ e a v]]
+   (let [is-many (many? a-schema)
+         is-ref (ref? a-schema)
+         is-component (component? a-schema)
+         v (cond->> v is-ref (resolve-e db))]
+     (if-some [pv (fast/gets db :eav e a)]
+       (if is-many
+         (do
+           (assert (not (set? v)) ":db/retract on :db.cardinality/many does not accept a set")
+           (if (contains? pv v)
+             (-> db
+                 (fast/update-db-index! [:eav e a] disj v)
+                 (index a-schema e a nil #{v})
+                 (cond-> is-component (retract-entity [nil v])))
+             db))
+         (-> db
+             (fast/dissoc-db-index! [:eav e a])
+             (index a-schema e a nil pv)
+             (clear-empty-ent e)
+             (cond-> is-component (retract-entity [nil v]))))
+       db))))
 
 ;; retracts each attribute in the entity
 (defn- retract-entity [db [_ e]]
   (reduce-kv (fn [db a v]
-               (if (many? (get-schema db a))
-                 (reduce (fn [db x]
-                              (retract-attr db [nil e a x]))
-                            db
-                            v)
-                 (retract-attr db [nil e a v])))
+               (let [a-schema (get-schema db a)]
+                 (if (many? a-schema)
+                   (reduce (fn [db x]
+                             (retract-attr db a-schema [nil e a x]))
+                           db
+                           v)
+                   (retract-attr db a-schema [nil e a v]))))
              db
              (get-entity db e)))
 
@@ -310,7 +318,7 @@
    Special return values:
    ::upsert   => a unique attribute was found, but no matching entry in the db
    ::missing-unique-attribute => no unique attributes found in `m`"
-  [db m]
+  [db m require-unique-attribute?]
   (let [uniques (-> db :schema :db/uniques)
         e (reduce (fn [ret a]
                     (fast/if-found [v (m a)]
@@ -321,7 +329,9 @@
                   ::missing-unique-attribute
                   uniques)]
     (case e ::upsert (gen-e)
-            ::missing-unique-attribute (throw (ex-info "Missing unique attribute" {:entity-map m}))
+            ::missing-unique-attribute (if require-unique-attribute?
+                                         (throw (ex-info "Missing unique attribute" {:entity-map m}))
+                                         (gen-e))
             e)))
 
 (defn- add-attr-index [db e a v pv ^Schema a-schema]
@@ -343,10 +353,10 @@
         {(v 0) (v 1)})
     v))
 
-(defn- resolve-map-e [db m]
+(defn- resolve-map-e [db m require-unique-attribute?]
   (if-let [e (:db/id m)]
     (conj (resolve-e+ db e) (dissoc m :db/id))
-    [db (e-from-unique-attr db m) m]))
+    [db (e-from-unique-attr db m require-unique-attribute?) m]))
 
 (defn handle-nested-refs [db v ^Schema a-schema]
   ;; 'refs' can update the db in a handful of ways:
@@ -355,7 +365,7 @@
   ;; - lookup ref upserts
   (let [resolve-ref (fn [db v]
                       (if (map? v)
-                        (let [[db e sub-entity] (resolve-map-e db v)]
+                        (let [[db e sub-entity] (resolve-map-e db v (not (component? a-schema)))]
                           [(add-map db e sub-entity)
                            e])
                         (resolve-e+ db v)))]
@@ -370,7 +380,7 @@
 
 (defn- add-map
   ([db m]
-   (let [[db e m] (resolve-map-e db m)]
+   (let [[db e m] (resolve-map-e db m true)]
      (add-map db e m)))
   ([db e m]
    (let [prev-m (get-entity db e)
@@ -382,7 +392,7 @@
                                    (if reverse?
                                      [(reduce (fn [db v]
                                                 (if (map? v)
-                                                  (let [[db ve m] (resolve-map-e db v)]
+                                                  (let [[db ve m] (resolve-map-e db v true)]
                                                     (-> db
                                                         (add [nil ve canonical-a e])
                                                         (add-map ve m)))

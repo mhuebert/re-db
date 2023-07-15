@@ -73,7 +73,7 @@
   [schema])
 
 (defn conn [] *conn*)
-(defn touch [entity] @entity)
+(defn touch [entity] (read/touch entity))
 
 (comment
  ;; maybe add this?

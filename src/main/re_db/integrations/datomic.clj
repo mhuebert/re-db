@@ -31,6 +31,7 @@
   (datom-a [db a] (d/entid db a))
   (-get-schema [db a] (d/attribute db a))
   (id->ident [db e] (d/ident db e))
+  (component? [this schema] (:db/isComponent schema))
   (ref? [db schema] (= :db.type/ref (:value-type schema)))
   (unique? [db schema] (:unique schema))
   (many? [db schema] (= :db.cardinality/many (:cardinality schema)))

@@ -29,6 +29,7 @@
   (-get-schema [db a] ((db/-schema db) a))
   (id->ident [db e] (or (ts/eav db (ts/get-schema db :db/ident) e :db/ident)
                         e))
+  (component? [this schema] (:db/isComponent schema))
   (ref? [this schema] (= :db.type/ref (:db/valueType schema)))
   (unique? [this schema] (:db/unique schema))
   (many? [this schema] (= :db.cardinality/many (:db/cardinality schema)))
