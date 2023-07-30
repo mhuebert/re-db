@@ -37,11 +37,13 @@
 
 ;; Schema properties are mirrored in javascript properties for fast lookups
 
+(defn av_ [db a v] (fast/gets db :ave a v))
+
 (defn resolve-lookup-ref [db [a v]]
   (when v
     (if (vector? v)
       (resolve-lookup-ref db [a (resolve-lookup-ref db v)])
-      (first (fast/gets db :ave a v)))))
+      (first (av_ db a v)))))
 
 
 (defonce last-e (volatile! 0.1))
@@ -55,9 +57,10 @@
   Lookup refs are only supported for indexed attributes."
   [db e]
   (assert (not (tempid? e)) (str "invalid use of tempid: " e))
-  (if (vector? e)
-    (resolve-lookup-ref db e)
-    e))
+  (cond (vector? e) (resolve-lookup-ref db e)
+        ;; we do not replace idents with entity-ids
+        #_#_(keyword? e) (first (av_ db :db/ident e))
+        :else e))
 
 (declare add)
 
@@ -83,7 +86,8 @@
   [db e]
   (cond (vector? e) (resolve-lookup-ref+ db e)
         (tempid? e) (tempid+ db e)
-        #_#_(keyword? e) (resolve-lookup-ref+ db [:db/ident e])
+        ;; we do not replace idents with entity-ids
+        #_#_(keyword? e) (first (av_ db :db/ident e))
         :else [db e]))
 
 ;; index helpers
@@ -193,14 +197,16 @@
   (let [unique? (boolean unique)
         index (or index-all-ave? index)
         ae (boolean (or index-all-ae? index-ae))
-        a-schema (map->Schema
-                  {:ave (boolean (or index unique?))
-                   :many (= cardinality :db.cardinality/many)
-                   :unique unique?
-                   :component isComponent
-                   :ref (= valueType :db.type/ref)
-                   :ae ae
-                   :schema-map schema-map})]
+        a-schema (merge (map->Schema
+                         {:ave (boolean (or index unique?))
+                          :many (= cardinality :db.cardinality/many)
+                          :unique unique?
+                          :component isComponent
+                          :ref (= valueType :db.type/ref)
+                          :ae ae})
+                        (if (instance? Schema schema-map)
+                          (.__extmap ^Schema schema-map)
+                          schema-map))]
     (assoc a-schema :index-fn (make-indexer a-schema))))
 
 ;; Lookup functions
@@ -319,7 +325,7 @@
    ::upsert   => a unique attribute was found, but no matching entry in the db
    ::missing-unique-attribute => no unique attributes found in `m`"
   [db m require-unique-attribute?]
-  (let [uniques (-> db :schema :db/uniques)
+  (let [uniques (-> db :schema :db.internal/uniques)
         e (reduce (fn [ret a]
                     (fast/if-found [v (m a)]
                       (if-some [e (resolve-lookup-ref db [a v])]
@@ -475,6 +481,27 @@
                     db-before)
         :datoms datoms))))
 
+(defn compile-a-schema [db-schemas a a-schema-map]
+  (if (= "db.internal" (namespace a))
+    (assoc db-schemas a a-schema-map)
+    (let [^Schema a-schema (compile-a-schema* a-schema-map)]
+      (-> (assoc db-schemas a a-schema)
+          (update :db.internal/uniques (if (unique? a-schema) (fnil conj #{}) disj) a)))))
+
+(defn compile-db-schema [schema]
+  (->> (assoc schema :db/ident {:db/unique :db.unique/identity
+                                :db/index-ae true})
+       (reduce-kv compile-a-schema {})))
+
+(defn recompile-schemas [db]
+  (update db :schema
+          (fn [old-schema]
+            (reduce (fn [old-schema {:as schema-map
+                                     :keys [db/ident]}]
+                      (compile-a-schema old-schema ident schema-map))
+                    old-schema
+                    (mapv (:eav db) (-> db :ae :db/ident))))))
+
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
   ;; transaction functions and arbitrary effects
@@ -486,7 +513,9 @@
                        (assoc :tx tx)
                        (assoc-in [:db-after :tx] tx))]
      (when (seq (:datoms tx-report))
-       (reset! !conn (:db-after tx-report))
+       (reset! !conn (cond-> (:db-after tx-report)
+                             (::schema-touched? options)
+                             recompile-schemas))
 
        (when *branch-tx-log*
          (swap! *branch-tx-log* conj tx-report))
@@ -503,17 +532,6 @@
   ([conn txs opts]
    (commit! conn (transaction @conn txs opts) opts)))
 
-(defn compile-a-schema [db-schemas a a-schema-map]
-  (if (or (= :db/ident a) (not= "db" (namespace a)))
-    (let [^Schema a-schema (compile-a-schema* a-schema-map)]
-      (-> (assoc db-schemas a a-schema)
-          (update :db/uniques (if (unique? a-schema) (fnil conj #{}) disj) a)))
-    (assoc db-schemas a a-schema-map)))
-
-(defn compile-db-schema [schema]
-  (->> (assoc schema :db/ident {:db/unique :db.unique/identity})
-       (reduce-kv compile-a-schema {})))
-
 (defn add-missing-index [db a indexk]
   (let [{:as db
          :keys [schema]} (update db :schema
@@ -522,10 +540,8 @@
                                                    :ae schema/ae
                                                    :ave schema/ave)]
                                      (-> db-schema
-                                         (compile-a-schema a
-                                                           (merge (:schema-map (get db-schema a))
-                                                                  changes))
-                                         (update :db/runtime-changes conj {a changes})))))
+                                         (compile-a-schema a (merge (get db-schema a) changes))
+                                         (update :db.internal/runtime-changes conj {a changes})))))
         a-schema ^Schema (get schema a)
         is-many (many? a-schema)
         {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]
@@ -544,8 +560,13 @@
   "Merge additional schema options into a db. Does not update indexes for existing data.
    Any attribute present in `schema` will replace existing schema for that attribute."
   [conn schema]
-  (swap! conn update :schema (fn [old-schema]
-                               (reduce-kv compile-a-schema old-schema schema))))
+  (transact! conn
+             (if (map? schema)
+               (mapv (fn [[k schema-map]]
+                       (assoc schema-map :db/id [:db/ident k]))
+                     schema)
+               schema)
+             {::schema-touched? true}))
 
 (defn create-conn
   "Create a new db, with optional schema, which should be a mapping of attribute keys to

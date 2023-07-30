@@ -6,8 +6,12 @@
 (extend-type #?(:cljs default :clj java.lang.Object)
   ts/ITripleStore
   (eav
-    ([db e] (some-> (fast/gets db :eav e) (assoc :db/id e)))
-    ([db a-schema e a] (fast/gets db :eav e a)))
+    ([db e] (when-let [e (mem/resolve-e db e)]
+              (some-> (fast/gets db :eav e)
+                      (assoc :db/id e))))
+    ([db a-schema e a]
+     (when-let [e (mem/resolve-e db e)]
+       (fast/gets db :eav e a))))
   (ave [db a-schema a v]
     (if (mem/ave? a-schema)
       (fast/gets db :ave a v)
@@ -29,7 +33,10 @@
                                    out)) [] (:eav db))))
   (datom-a [db a] a)
   (-get-schema [db a] (mem/get-schema db a))
-  (id->ident [db e] e)
+  (id->ident [db e] (or #_(:db/ident (mem/get-entity db e))
+                     ;; not enabled here because in-memory doesn't
+                     ;; replace idents with entity ids in datoms
+                     e))
   (ref? [db schema] (mem/ref? schema))
   (unique? [db schema] (mem/unique? schema))
   (many? [db schema] (mem/many? schema))
