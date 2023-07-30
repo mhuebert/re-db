@@ -229,14 +229,11 @@
                 :to (count (-extract to))}))
   (-become from (-extract to)))
 
-(defn var-present?:impl [form env name]
-  (if (:ns env)
-    `(~'exists? ~name)
-    `(~'bound? (def ~name))))
-
 (sci-macro
   (defmacro var-present? [name]
-    (var-present?:impl &form &env name)))
+    (if (:ns &env)
+      `(~'exists? ~name)
+      `(~'bound? (def ~name)))))
 
 (sci-macro
   (defmacro redef
