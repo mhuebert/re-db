@@ -9,7 +9,6 @@
 
 (def index-all-ave? false)
 (def index-all-ae? false)
-(def auto-index? true)
 
 (defrecord Schema [attribute ave many unique ref component ae index-fn fx-fns])
 
@@ -226,7 +225,7 @@
   (let [datom (#?(:cljs array :clj vector) e a v pv)]
     (when-let [fns (fx-fns a-schema)]
       (when-let [accs *fx*]
-        (doseq [f fns]
+        (doseq [f (vals fns)]
           (f db e a v pv a-schema accs))))
     (when *datoms*
       (fast/mut-push! *datoms* datom))
@@ -502,7 +501,7 @@
                            (assoc schema attribute
                                          (-> (or (get schema attribute)
                                                  (assoc default-schema :attribute attribute))
-                                             (update :fx-fns (fnil conj []) fx-fn))))
+                                             (assoc-in [:fx-fns ident] fx-fn))))
                          schema))))
                schema)))
 
