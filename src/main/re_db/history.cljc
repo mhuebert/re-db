@@ -14,18 +14,18 @@
                          :or {length ##Inf
                               mode :snapshot}}]
   (let [key [::history (swap! db/!tx-clock inc)]
-        !history (atom {:log (list {:tx 0 :datoms [] :db-after @conn})
+        !history (atom {:log (list {:datoms [] :db-after @conn :tx (:tx @conn)})
                         :conn conn
                         :mode mode
                         :key key})]
     (db/listen! conn key
                 (fn [_ tx-report]
-                                 ;; always store other metadata from the tx (hence dissoc, not select-keys)
-                                 (let [tx-report (dissoc tx-report
-                                                         :db-before
-                                                         (case mode :diff :db-after
-                                                                    :snapshot :datoms))]
-                                   (swap! !history update :log (comp #(take length %) conj) tx-report))))
+                  ;; always store other metadata from the tx (hence dissoc, not select-keys)
+                  (let [tx-report (-> tx-report
+                                      (dissoc :db-before (case mode :diff :db-after
+                                                                    :snapshot :datoms))
+                                      (assoc :tx (:tx (:db-after tx-report))))]
+                    (swap! !history update :log (comp #(take length %) conj) tx-report))))
     !history))
 
 (defn unlisten [!history]
@@ -47,11 +47,11 @@
                          (mapcat :datoms))
                      (:log history))]
     (case (compare destination-tx (current-tx history))
-      1 ;; forward
+      1                                                     ;; forward
       [[:db/datoms datoms]]
-      -1 ;; backward
+      -1                                                    ;; backward
       [[:db/datoms-reverse datoms]]
-      0 ;; ;; no-op
+      0                                                     ;; ;; no-op
       nil)))
 
 (defn db-as-of

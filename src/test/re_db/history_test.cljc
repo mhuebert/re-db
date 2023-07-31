@@ -9,10 +9,10 @@
   (d/with-conn {:children schema/many}
     (let [!history (history/from-conn (d/conn) :mode :snapshot)
           txs (cons (history/last-tx @!history)
-                    (map :tx [(d/transact! [[:db/add 1 :children 1]])
-                              (d/transact! [[:db/add 1 :children 2]
-                                            [:db/add 1 :children 4]])
-                              (d/transact! [[:db/retract 1 :children 1]])]))]
+                    (map (comp :tx :db-after) [(d/transact! [[:db/add 1 :children 1]])
+                                               (d/transact! [[:db/add 1 :children 2]
+                                                             [:db/add 1 :children 4]])
+                                               (d/transact! [[:db/retract 1 :children 1]])]))]
       (doall
        (for [[tx expected] (->> (repeat (seq (zipmap txs [nil #{1} #{1 2 4} #{2 4}])))
                                 (take 5)
@@ -31,10 +31,10 @@
   (d/with-conn {:children schema/many}
     (let [!history (history/from-conn (d/conn) :mode :diff)
           txs (cons (history/last-tx @!history)
-                    (map :tx [(d/transact! [[:db/add 1 :children 1]])
-                              (d/transact! [[:db/add 1 :children 2]
-                                            [:db/add 1 :children 4]])
-                              (d/transact! [[:db/retract 1 :children 1]])]))]
+                    (map (comp :tx :db-after) [(d/transact! [[:db/add 1 :children 1]])
+                                               (d/transact! [[:db/add 1 :children 2]
+                                                             [:db/add 1 :children 4]])
+                                               (d/transact! [[:db/retract 1 :children 1]])]))]
       (doall
        (for [[tx expected] (->> (repeat (seq (zipmap txs [nil #{1} #{1 2 4} #{2 4}])))
                                 (take 5)

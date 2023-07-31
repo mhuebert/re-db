@@ -43,7 +43,6 @@
 (def into-set (fnil into #{}))
 
 (defn ave [db a v] (fast/gets db :ave a v))
-(defn ae [db a] (fast/gets db :ae a))
 
 (defn resolve-lookup-ref [db [a v]]
   (when v
@@ -225,18 +224,14 @@
 
 (defn index [db a-schema e a v pv]
   (let [datom (#?(:cljs array :clj vector) e a v pv)]
-    (when-let [accs *fx*]
-      (when-let [fns (fx-fns a-schema)]
-        (doseq [[ident handler] fns]
-          (fast/mut-set! accs ident
-                         (handler db e a v pv a-schema (fast/mut-get accs ident))))))
+    (when-let [fns (fx-fns a-schema)]
+      (when-let [accs *fx*]
+        (doseq [f fns]
+          (f db e a v pv a-schema accs))))
     (when *datoms*
       (fast/mut-push! *datoms* datom))
     (update-indexes db datom a-schema)))
 
-(-> (fast/mut-obj)
-    (fast/mut-set! :a/b 1)
-    (fast/mut-get :a/b))
 ;; transactions
 
 (defn- clear-empty-ent [db e]
@@ -473,7 +468,6 @@
     (binding [*datoms* (when (:notify-listeners? options true) (fast/mut-arr))
               *fx* (init-fx fxs)
               *last-e* (volatile! (:last-e db-before))]
-      (assert (:last-e db-before) "Last-e missing")
       (let [db-after (-> (reduce commit-tx (transient-map (-> db-before
                                                               (dissoc :tx :last-e)
                                                               (assoc :tempids {}))) txs)
@@ -483,7 +477,8 @@
                      [])
             fx *fx*]
         (assoc options
-          :fxs (mapv #(assoc % :db.fx/acc (fast/mut-get fx (:db/ident %))) fxs)
+          :fxs (mapv #(assoc % :db.fx/acc (fast/mut-get fx (:db/ident %)))
+                     fxs)
           :db-before db-before
           :db-after (if (seq datoms)
                       (assoc db-after :last-e @*last-e*)
@@ -497,15 +492,18 @@
                                           db.fx/handler
                                           db/ident]}]
                  ;; for each attribute it applies to,
-                 (->> attributes
-                      (reduce
-                       (fn [schema attribute]
-                         ;; add it to that attribute's :fx-fns
-                         (assoc schema attribute
-                                       (-> (or (get schema attribute)
-                                               (assoc default-schema :attribute attribute))
-                                           (assoc-in [:fx-fns ident] handler))))
-                       schema)))
+                 (let [fx-fn (fn [db e a v pv a-schema accs]
+                               (fast/mut-set! accs ident
+                                              (handler db e a v pv a-schema (fast/mut-get accs ident))))]
+                   (->> attributes
+                        (reduce
+                         (fn [schema attribute]
+                           ;; add it to that attribute's :fx-fns
+                           (assoc schema attribute
+                                         (-> (or (get schema attribute)
+                                                 (assoc default-schema :attribute attribute))
+                                             (update :fx-fns (fnil conj []) fx-fn))))
+                         schema))))
                schema)))
 
 (defn compile-a-schema [db-schemas schema-attr schema-val]
@@ -522,21 +520,12 @@
 
 (defn compile-schemas
   [schema ident-entities]
-  (let [schema (reduce (fn [old-schema {:as schema-val
-                                        :keys [db/ident]}]
-                         (compile-a-schema old-schema ident schema-val))
+  (let [schema (reduce (fn [schema {:as entry
+                                    :keys [db/ident]}]
+                         (compile-a-schema schema ident entry))
                        schema
                        ident-entities)]
     (compile-fx-schemas schema (vals (::fxs schema)))))
-
-(defn apply-fxs! [db-after fxs]
-  (reduce (fn [db {:keys [db/ident db.fx/handler db.fx/acc]}]
-            (let [result (handler db acc)]
-              (assert (= (:tx db) (:tx db-after))
-                      (str "fx handler must return the db: " ident))
-              result))
-          db-after
-          fxs))
 
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
@@ -544,16 +533,17 @@
   "Commits a tx-report to !conn"
   ([!conn tx-report] (commit! !conn tx-report {}))
   ([!conn tx-report options]
-   (let [tx (swap! !tx-clock inc)
-         {:as tx-report
-          db :db-after
-          :keys [fxs]} (-> tx-report
-                           (assoc :tx tx)
-                           (assoc-in [:db-after :tx] tx))
-         db (apply-fxs! db fxs)]
+   (let [tx-report (-> tx-report
+                       (assoc-in [:db-after :tx] (swap! !tx-clock inc))
+                       (update :db-after
+                               (fn [db]
+                                 (->> (:fxs tx-report)
+                                      (reduce (fn [db {:as foo :keys [db.fx/handler db.fx/acc]}]
+                                                (handler db acc))
+                                              db)))))]
 
      (when (seq (:datoms tx-report))
-       (reset! !conn db)
+       (reset! !conn (:db-after tx-report))
 
        (when *branch-tx-log*
          (swap! *branch-tx-log* conj tx-report))
@@ -712,9 +702,19 @@
  ;; - save a set of keys to localStorage
  ;; - save a set of keys to persistentStorage
 
- ;; steps
 
- ;; idea
- ;; a single root schema entity which contains :schema/attributes, :schema/fx-handlers, :schema/uniques
+ ;; what is the upshot
+ ;;
+ ;; - fx happens on commit, not transact
+ ;; - fx avoids looping over tx-log to figure out what changed
+ ;; - for schema, it would be useful for fx to happen in transact (to make functional changes to db)
+ ;;   then it's not fx, more like interceptor? something else? a db/fn but triggered by attribute rather than operation
+ ;;
+ ;; how to use this for:
+ ;;
+ ;; - local storage of particular keys
+ ;;   - this requires loading from local storage on startup, and saving to local storage on commit
+ ;;   - how is the init handled
+ ;; - remote storage of particular keys
 
  )
