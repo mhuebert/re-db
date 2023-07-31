@@ -171,7 +171,7 @@
 (defn mut-arr []
   #?(:cljs #js[]
      :clj (volatile! [])))
-(defn mut-deref [x]
+(defn mut-unwrap [x]
   #?(:cljs x :clj @x))
 (defn mut-arr->vec [x]
   #?(:cljs (vec x)

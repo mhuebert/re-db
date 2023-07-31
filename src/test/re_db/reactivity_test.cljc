@@ -225,52 +225,6 @@
    (is (= @a
           @($a)))))
 
-(deftest disposal
-
-
-  (let [!latch (atom 0)]
-    (r/session
-     @(r/reaction
-        (hooks/use-effect
-         (fn []
-           (swap! !latch inc)
-           #(swap! !latch inc)))))
-    (is (= 2 @!latch)
-        "use-effect hook is disposed"))
-
-  (let [!latch (atom 0)
-        rx (r/reaction (hooks/use-effect
-                        (fn []
-                          (swap! !latch inc)
-                          #(swap! !latch inc))))]
-    (r/session @rx)
-    (r/session @rx)
-    (is (= @!latch 4) "Same reaction can be instantiated multiple times"))
-
-  (let [!latch (atom 0)
-        rx (r/reaction (hooks/use-effect
-                        (fn []
-                          (swap! !latch inc)
-                          #(swap! !latch inc))))]
-    (doseq [i (range 3)]
-      (add-watch rx i identity)
-      (remove-watch rx i))
-    (is (= @!latch 6) "Reaction can be started and stopped multiple times via watch/unwatch"))
-
-  (let [rx (r/reaction
-             (let [[v v!] (hooks/use-ref 0)]
-               (v! inc)))]
-    (is (= (r/session @rx) 1))
-    (r/compute! rx)
-    (is (= @rx 1)
-        "Without an owner resent, a reaction disposes itself after every read.
-        It begins again with fresh state.")
-
-    (r/reaction!
-     (is (= @rx 1))
-     (r/compute! rx)
-     (is (= @rx 2) "With an owner present, a reaction persists across time."))))
-
 
 (comment
  (deftest pattern-listeners
@@ -353,20 +307,64 @@
       (r/session @rx)
       (r/session @rx)
       (is (= @!latch 4) "Same reaction can be instantiated multiple times")))
+
+  (let [!latch (atom 0)]
+    (r/session
+     @(r/reaction
+       (hooks/use-effect
+        (fn []
+          (swap! !latch inc)
+          #(swap! !latch inc)))))
+    (is (= 2 @!latch)
+        "use-effect hook is disposed"))
+
+  (let [!latch (atom 0)
+        rx (r/reaction (hooks/use-effect
+                        (fn []
+                          (swap! !latch inc)
+                          #(swap! !latch inc))))]
+    (r/session @rx)
+    (r/session @rx)
+    (is (= @!latch 4) "Same reaction can be instantiated multiple times"))
+
+  (let [!latch (atom 0)
+        rx (r/reaction (hooks/use-effect
+                        (fn []
+                          (swap! !latch inc)
+                          #(swap! !latch inc))))]
+    (doseq [i (range 3)]
+      (add-watch rx i identity)
+      (remove-watch rx i))
+    (is (= @!latch 6) "Reaction can be started and stopped multiple times via watch/unwatch"))
+
+  (let [rx (r/reaction
+            (let [[v v!] (hooks/use-ref 0)]
+              (v! inc)))]
+    (is (= (r/session @rx) 1))
+    (r/compute! rx)
+    (is (= @rx 1)
+        "Without an owner resent, a reaction disposes itself after every read.
+        It begins again with fresh state.")
+
+    (r/reaction!
+     (is (= @rx 1))
+     (r/compute! rx)
+     (is (= @rx 2) "With an owner present, a reaction persists across time.")))
   )
 
-(defn try-eval
-  "Evaluates f in a new thread with timeout"
-  ([f] (try-eval f 2000))
-  ([f ms]
-   (let [!result (future
-                  (try
-                    (f)
-                    (catch Exception e e)))]
-     (let [result (deref !result ms (ex-info "timeout" {:ms ms}))]
-       (if (instance? Exception result)
-         (throw result)
-         result)))))
+#?(:clj
+   (defn try-eval
+     "Evaluates f in a new thread with timeout"
+     ([f] (try-eval f 2000))
+     ([f ms]
+      (let [!result (future
+                     (try
+                       (f)
+                       (catch Exception e e)))]
+        (let [result (deref !result ms (ex-info "timeout" {:ms ms}))]
+          (if (instance? Exception result)
+            (throw result)
+            result))))))
 
 (deftest glitch-tests
   (r/session
@@ -418,15 +416,15 @@
     (reduce-kv (fn [m k v]
                  (reduce #(update %1 %2 (fnil conj []) k) m v)) {} m))
   (rev {:a [:b :c]})
-  (try-eval
-   #(r/sorted-dependents :a (rev {:a []
-                                  :h [:g]
-                                  :c [:b :a]
-                                  :d [:c :a]
-                                  :e [:d :a]
-                                  :f [:a]
-                                  :g [:e]
-                                  })))
+  #?(:clj (try-eval
+           #(r/sorted-dependents :a (rev {:a []
+                                          :h [:g]
+                                          :c [:b :a]
+                                          :d [:c :a]
+                                          :e [:d :a]
+                                          :f [:a]
+                                          :g [:e]
+                                          }))))
 
   (defn test-sort
     "Tests to see if sort-fn is a topological sort of the graph

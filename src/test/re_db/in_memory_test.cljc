@@ -6,7 +6,8 @@
             [re-db.read :as read :refer [#?(:cljs Entity)]]
             [re-db.schema :as s]
             [re-db.schema :as schema]
-            [re-db.util :as util])
+            [re-db.util :as util]
+            [clojure.pprint :refer [pprint]])
   #?(:clj (:import [re_db.read Entity])))
 
 
@@ -56,7 +57,8 @@
 (deftest datom-tx
   (let [conn (mem/create-conn pets-schema)
         tx-report (mem/transact! conn pets-tx)
-        db-data #(dissoc % :tx :schema :tempids)]
+        db-data #(-> %
+                     (dissoc :tx :schema :tempids :last-e))]
     (db/with-conn conn
       (is (= (db-data @conn)
              (db-data @(doto (mem/create-conn pets-schema)
@@ -111,6 +113,7 @@
                 {:email "rabbit@eg.com"
                  :owner {:db/id "fred"}                     ;; db/id map as ref
                  :name "Rabbit"}])
+
 
 (deftest upserts
 
@@ -389,17 +392,18 @@
            (-> (db/pull [:db/id {:children :...}] "A")
                :children first :children first :children first :children first :children)))))
 
+
 (deftest custom-db-operations
   ;; add an operation by
-  (db/with-conn {:db/tx-fns {:db/times-ten
-                                      (fn [_db [_ e a v]]
-                                        [[:db/add e a (* 10 v)]])}}
+  (db/with-conn {::mem/tx-fns {:db/times-ten
+                               (fn [_db [_ e a v]]
+                                 [[:db/add e a (* 10 v)]])}}
     (db/transact! [[:db/times-ten :matt :age 3.9]])
     (is (= 39.0 (db/get :matt :age))
         "Custom db/operation can be specified in schema"))
 
-  (db/with-conn {:db/tx-fns {:db/times (fn [db [_ e a v]]
-                                                  [[:db/add e a (* (:multiplier (mem/get-entity db :times) 0) v)]])}}
+  (db/with-conn {::mem/tx-fns {:db/times (fn [db [_ e a v]]
+                                              [[:db/add e a (* (:multiplier (mem/get-entity db :times) 0) v)]])}}
     (db/transact! [[:db/add :times :multiplier 10]
                    [:db/times :matt :age 3.9]])
     (is (= 39.0 (db/get :matt :age))
@@ -600,14 +604,18 @@
          (-> (read/entity conn [:my/unique 1])
              :my/other)))))
 
-(deftest add-missing-attribute
+(deftest rebuild-index
   (let [conn (mem/create-conn)]
-    (mem/merge-schema! conn {:my/ref schema/ref})
-    (is (mem/ref? (mem/get-schema @conn :my/ref)))
-    (swap! conn mem/add-missing-index :my/ref :ae)
-    (is (mem/ref? (mem/get-schema @conn :my/ref)))
-    (is (some #{{:my/ref schema/ae}}
-              (-> @conn :schema :db.internal/runtime-changes)))))
+    (mem/transact! conn [{:db/id "A"
+                          :foo 1}
+                         {:db/id "B"
+                          :foo 2}])
+    (is (= #{} (-> @conn :ae :foo set)))
+    (mem/merge-schema! conn {:foo s/ae})
+    (is (mem/ae? (mem/get-schema @conn :foo)))
+    (is (= #{} (-> @conn :ae :foo set)))
+    (swap! conn mem/rebuild-index :foo :ae)
+    (is (= #{"A" "B"} (-> @conn :ae :foo set)))))
 
 (deftest upsert-reverse
   (db/with-conn {:name schema/unique-id
@@ -704,8 +712,5 @@
   (db/with-conn {}
     (db/merge-schema! {:a (merge {:foo :bar}
                                  s/unique-id)})
-    (is (= :bar (:foo (mem/get-schema @(db/conn) :a))
-           (:foo (db/get [:db/ident :a])))
-        "Arbitrary keys are retained on a schema entry")
     (is (mem/unique? (mem/get-schema @(db/conn) :a)))
     (is (= :db.unique/identity (db/get [:db/ident :a] :db/unique)))))

@@ -10,7 +10,8 @@
             [clojure.walk :as walk]
             [re-db.test-helpers :as th :refer [bench]]
             [re-db.fast :as fast]
-            [re-db.schema :as schema]))
+            [re-db.schema :as schema]
+            [re-db.integrations.in-memory]))
 
 (def schema {:user/pets {:db/valueType :db.type/ref
                          :db/cardinality :db.cardinality/many}
@@ -209,7 +210,7 @@
   (let [ds-snap @(-> (d/create-conn schema)
                      #_(doto (d/transact! samples)))
         mem-snap @(-> (mem/create-conn schema)
-                     #_(mem/transact! samples))
+                      #_(mem/transact! samples))
         mem-snap! #(atom mem-snap)
         get-eav #(-> (mem/create-conn schema)
                      (doto (mem/transact! %))
@@ -223,7 +224,7 @@
 
     (let [samples (make-samples 200 10)
           mem-snap (deref (doto (atom mem-snap)
-                           (mem/transact! samples)))
+                            (mem/transact! samples)))
           ds-snap (deref (doto (atom ds-snap)
                            (d/transact! samples)))
           id (-> (get-eav samples) ffirst)
@@ -238,16 +239,16 @@
 
     ;; no difference
     #_(let [samples (take 1000 (map (fn [i] {:db/id i
-                                           :person/name (str (random-uuid))
-                                           :pet/name (str (random-uuid))}) (range)))]
-      (bench "pre/post indexing"
-             "pre-indexing" #(doto (mem/create-conn {:user/name schema/ave
-                                                    :pet/name schema/ave})
-                               (mem/transact! samples))
-             "post-indexing" #(doto (mem/create-conn)
-                                (mem/transact! samples)
-                                (swap! mem/add-missing-index :user/name :ave)
-                                (swap! mem/add-missing-index :pet/name :ave))))
+                                             :person/name (str (random-uuid))
+                                             :pet/name (str (random-uuid))}) (range)))]
+        (bench "pre/post indexing"
+               "pre-indexing" #(doto (mem/create-conn {:user/name schema/ave
+                                                       :pet/name schema/ave})
+                                 (mem/transact! samples))
+               "post-indexing" #(doto (mem/create-conn)
+                                  (mem/transact! samples)
+                                  (swap! mem/rebuild-index :user/name :ave)
+                                  (swap! mem/rebuild-index :pet/name :ave))))
 
     (let [samples (make-samples 100 5)
           eav (get-eav samples)
@@ -287,15 +288,15 @@
            mem-conn (-> (atom mem-snap) (mem/transact! samples))
            ds-conn (doto (atom ds-snap) (d/transact! samples))]
        (read/with-conn mem-conn
-         (bench "lookups"
-                "datascript entity lookup"
-                #(mapv (fn [id] (:user/id (d/entity @ds-conn id))) ids)
-                "re-db tracked entity lookup"
-                #(mapv (fn [id] (:user/id (read/entity mem-conn id))) ids)
-                "re-db tracked get lookup"
-                #(mapv (fn [id] (read/get mem-conn @mem-conn id :user/id)) ids)
-                #_#_"re-db peek"
-                #(mapv (fn [id] (read/peek mem-conn @mem-conn id :user/id)) ids)))))))
+                       (bench "lookups"
+                              "datascript entity lookup"
+                              #(mapv (fn [id] (:user/id (d/entity @ds-conn id))) ids)
+                              "re-db tracked entity lookup"
+                              #(mapv (fn [id] (:user/id (read/entity mem-conn id))) ids)
+                              "re-db tracked get lookup"
+                              #(mapv (fn [id] (read/get mem-conn @mem-conn id :user/id)) ids)
+                              #_#_"re-db peek"
+                                      #(mapv (fn [id] (read/peek mem-conn @mem-conn id :user/id)) ids)))))))
 
 ;; some vs truthy
 (comment
@@ -393,7 +394,7 @@
                                                                                     (rand-nth "abcdefghijklmnopqrs1234567890!$%&*")))))
        ks (keys m)
        get-in #(get-in m [% :db/valueType])                 ;s (samples 1000)
-       fast-get-in #(fast/gets m % :db/valueType)       ;s (samples 1000)
+       fast-get-in #(fast/gets m % :db/valueType)           ;s (samples 1000)
        string-kw-obj (->obj-with-string-kws m)
        get-string-kws (fn [^clj a]
                         (fast/get-in-objs string-kw-obj [a :db/valueType]))
@@ -663,7 +664,7 @@
 
   (defn rd-q1 []
     (enc/qb 1
-            (read/where rd-50k @rd-50k [[:name "Ivan"]])))
+            (read/where rd-50k [[:name "Ivan"]])))
 
 
   (prn :q1 [:ds (datascript-q1)
@@ -689,8 +690,8 @@
 
   (defn rd-q2 []
     (enc/qb 1e1
-            (->> (read/where rd-50k @rd-50k [[:name "Ivan"]
-                                             :age])
+            (->> (read/where rd-50k [[:name "Ivan"]
+                                     :age])
                  #_(mapv (juxt :db/id :age)))))
 
   (prn :q2 [:ds (datascript-q2)
@@ -717,9 +718,9 @@
 
   (defn rd-q3 []
     (enc/qb 1e1
-            (read/where rd-50k @rd-50k [[:name "Ivan"]
-                                        :age
-                                        [:sex :male]])))
+            (read/where rd-50k [[:name "Ivan"]
+                                :age
+                                [:sex :male]])))
 
   (prn :q3 [:ds (datascript-q3)
             :doxa (dx-q3)
@@ -747,18 +748,18 @@
 
   (defn rd-q4 []
     (enc/qb 1e1
-            (read/where rd-50k @rd-50k [[:name "Ivan"]
-                                        :age
-                                        :last-name
-                                        [:sex :male]])))
+            (read/where rd-50k [[:name "Ivan"]
+                                :age
+                                :last-name
+                                [:sex :male]])))
 
   (defn rd-q4-2 []
     ;; just return entities
     (enc/qb 1e1
-            (read/where rd-50k @rd-50k [[:name "Ivan"]
-                                        :age
-                                        :last-name
-                                        [:sex :male]])))
+            (read/where rd-50k [[:name "Ivan"]
+                                :age
+                                :last-name
+                                [:sex :male]])))
 
   (prn :q4 [:ds (datascript-q4)
             :doxa (dx-q4)
@@ -783,11 +784,11 @@
 
   (defn rd-qpred1 []
     (enc/qb 1e1
-            (read/where rd-50k @rd-50k [(comp #(> % 50000) :salary)])))
+            (read/where rd-50k [(comp #(> % 50000) :salary)])))
 
   (defn rd-qpred1-juxt []
     (enc/qb 1e1
-            (mapv (juxt :db/id :salary) (read/where rd-50k @rd-50k [(comp #(> % 50000) :salary)]))))
+            (mapv (juxt :db/id :salary) (read/where rd-50k [(comp #(> % 50000) :salary)]))))
 
   (prn :qpred1
        [:ds (datascript-qpred1)
