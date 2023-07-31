@@ -193,7 +193,7 @@
                                   (per-values db e a nil pv1 false true)) db pv)
                                db))))))))))))
 
-(defn compile-a-schema* ^Schema [attr {:db/keys [index unique cardinality valueType index-ae isComponent fx-fns]}]
+(defn compile-a-schema* ^Schema [attr {:db/keys [index unique cardinality valueType index-ae isComponent]}]
   (let [unique? (boolean unique)
         a-schema (map->Schema
                   {:attribute attr
@@ -204,8 +204,7 @@
                    :unique unique?
                    :component isComponent
                    :ref (= valueType :db.type/ref)
-                   :ae (boolean (or index-all-ae? index-ae))
-                   :fx-fns fx-fns})]
+                   :ae (boolean (or index-all-ae? index-ae))})]
     (assoc a-schema :index-fn (make-indexer a-schema))))
 
 ;; Lookup functions
@@ -225,8 +224,9 @@
 
 (defn index [db schema e a v pv]
   (let [datom (#?(:cljs array :clj vector) e a v pv)]
-    (doseq [f (fx-fns schema)]
-      (f *fx* e a v pv))
+    (when-let [fns (fx-fns schema)]
+      (doseq [f (vals fns)]
+        (f *fx* e a v pv)))
     (when *datoms*
       (fast/mut-push! *datoms* datom))
     (update-indexes db datom schema)))
@@ -506,7 +506,7 @@
           (fn [schema]
             (->> (get-fxs db)
                  ;; for each db.fx handler,
-                 (reduce (fn [schema {:keys [db.fx/attributes db.fx/handler]}]
+                 (reduce (fn [schema {:keys [db.fx/attributes db.fx/handler db/ident]}]
                            ;; for each attribute it applies to,
                            (->> attributes
                                 (reduce
@@ -515,20 +515,22 @@
                                    (assoc schema attribute
                                                  (-> (or (get schema attribute)
                                                          (assoc default-schema :attribute attribute))
-                                                     (update :fx-fns (fnil conj []) handler))))
+                                                     (assoc-in :fx-fns [ident handler]))))
                                  schema)))
                          schema)))))
 
-(defn compile-schemas [db]
-  (-> db
-      (update :schema
-              (fn [old-schema]
-                (reduce (fn [old-schema {:as schema-val
-                                         :keys [ident]}]
-                          (compile-a-schema old-schema ident schema-val))
-                        old-schema
-                        (mapv (:eav db) (-> db :ae :db/ident)))))
-      (compile-fx-schemas)))
+(defn compile-schemas
+  ([db] (compile-schemas (-> db :ae :db/ident)))
+  ([db ident-ids]
+   (-> db
+       (update :schema
+               (fn [old-schema]
+                 (reduce (fn [old-schema {:as schema-val
+                                          :keys [ident]}]
+                           (compile-a-schema old-schema ident schema-val))
+                         old-schema
+                         (mapv (:eav db) ident-ids))))
+       (compile-fx-schemas))))
 
 (defn apply-fxs! [db-after fxs fx]
   (reduce (fn [db {:keys [db/ident db.fx/handler]}]
@@ -612,11 +614,14 @@
                   :db.fx/attrs schema/many
                   :fx/compile-schemas {:db.fx/handler (fn
                                                         ;; 0-arity returns initial value
-                                                        ([] false)
+                                                        ([] #{})
                                                         ;; reduce over datoms
-                                                        ([db e a v pv a-schema acc] true) ;; true if any listed attr is touched
+                                                        ([db e a v pv a-schema acc] (conj acc e)) ;; true if any listed attr is touched
                                                         ;; commit
-                                                        ([db acc] (cond-> db acc compile-schemas)))
+                                                        ([db acc]
+                                                         (cond-> db
+                                                                 (seq acc)
+                                                                 (compile-schemas acc))))
                                        :db.fx/attributes [:db/isComponent
                                                           :db/valueType
                                                           :db/cardinality
@@ -701,34 +706,6 @@
  ;; end transaction: loop handlers and run on values
  ;; and that's that!
  ;; can be used for local storage, invalidating & recompiling schema, etc. with negligible runtime overhead for non-involved keys.
-
- (merge-schema! _ {:fx/compile-schemas {:db.fx/handler (fn
-                                                         ;; 0-arity returns initial value
-                                                         ([] false)
-                                                         ;; reduce over datoms
-                                                         ([db e a v pv a-schema acc]
-                                                          ;; returns true if any listed attribute is touched
-                                                          true)
-                                                         ;; commit
-                                                         ([db acc]
-                                                          (when acc (compile-schemas db))
-                                                          ;; probably can't change the db here, right?
-                                                          ;; anything that can create datoms should be a db fn?
-                                                          ))
-                                        :db.fx/attributes [:db/isComponent
-                                                           :db/valueType
-                                                           :db/cardinality
-                                                           :db/unique
-                                                           :db/isComponent
-                                                           :db/fulltext
-                                                           :db/index
-                                                           :db/index-ae
-                                                           :db/tupleAttrs
-                                                           :db/tupleType
-                                                           :db/tupleTypes
-                                                           :db/ident]}})
-
-
 
  ;; use cases
  ;; - save a set of keys to localStorage
