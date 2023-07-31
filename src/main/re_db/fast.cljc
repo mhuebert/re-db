@@ -159,3 +159,23 @@
     m2)
   (merge m1 m2))
 
+(defn mut-set! [o k v]
+  #?(:cljs (doto o (unchecked-set (.-fqn ^Keyword k) v))
+     :clj  (doto o (vswap! assoc k v))))
+(defn mut-obj []
+  #?(:cljs #js{}
+     :clj  (volatile! {})))
+(defn mut-get [o k]
+  #?(:cljs (unchecked-get o (.-fqn ^Keyword k))
+     :clj (get @o k)))
+(defn mut-arr []
+  #?(:cljs #js[]
+     :clj (volatile! [])))
+(defn mut-deref [x]
+  #?(:cljs x :clj @x))
+(defn mut-arr->vec [x]
+  #?(:cljs (vec x)
+     :clj @x))
+(defn mut-push! [arr v]
+  #?(:cljs (doto ^js arr (.push v))
+     :clj  (doto arr (vswap! conj v))))

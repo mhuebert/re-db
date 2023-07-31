@@ -2,6 +2,7 @@
   (:refer-clojure :exclude [clone])
   (:require [applied-science.js-interop :as j]
             [clojure.set :as set]
+            [clojure.string :as str]
             [re-db.fast :as fast]
             [re-db.util :as u :refer [set-replace set-diff]]
             [re-db.schema :as schema]))
@@ -10,7 +11,7 @@
 (def index-all-ae? false)
 (def auto-index? true)
 
-(defrecord Schema [ave many unique ref component ae index-fn schema-map])
+(defrecord Schema [attribute ave many unique ref component ae index-fn fx-fns])
 
 ;; accessors with boolean type hint via u/bool
 (defn unique? [^Schema s] (u/bool (.-unique s)))
@@ -19,6 +20,8 @@
 (defn ref? [^Schema s] (u/bool (.-ref s)))
 (defn ave? [^Schema s] (u/bool (.-ave s)))
 (defn ae? [^Schema s] (u/bool (.-ae s)))
+(defn fx-fns [^Schema s] (.-fx-fns s))
+(defn attribute [^Schema s] (.-attribute s))
 
 (comment
  (#?(:cljs js/console.info
@@ -27,24 +30,24 @@
                              index-all-ave? (conj :ave)
                              index-all-ae? (conj :ae)))))
 
-;; used to log datoms while building up a tx-report
+;; log datoms during commit
 (def ^:dynamic *datoms* nil)
+;; update fx accumulators during commit
+(def ^:dynamic *fx* nil)
 ;; used to concatenate transactions while working on a branch
 (def ^:dynamic *branch-tx-log* nil)
 
 (def conj-set (fnil conj #{}))
 (def into-set (fnil into #{}))
 
-;; Schema properties are mirrored in javascript properties for fast lookups
-
-(defn av_ [db a v] (fast/gets db :ave a v))
+(defn ave [db a v] (fast/gets db :ave a v))
+(defn ae [db a] (fast/gets db :ae a))
 
 (defn resolve-lookup-ref [db [a v]]
   (when v
     (if (vector? v)
       (resolve-lookup-ref db [a (resolve-lookup-ref db v)])
-      (first (av_ db a v)))))
-
+      (first (ave db a v)))))
 
 (defonce last-e (volatile! 0.1))
 (defn gen-e [] (vswap! last-e inc))
@@ -59,7 +62,7 @@
   (assert (not (tempid? e)) (str "invalid use of tempid: " e))
   (cond (vector? e) (resolve-lookup-ref db e)
         ;; we do not replace idents with entity-ids
-        #_#_(keyword? e) (first (av_ db :db/ident e))
+        #_#_(keyword? e) (first (ave db :db/ident e))
         :else e))
 
 (declare add)
@@ -87,7 +90,7 @@
   (cond (vector? e) (resolve-lookup-ref+ db e)
         (tempid? e) (tempid+ db e)
         ;; we do not replace idents with entity-ids
-        #_#_(keyword? e) (first (av_ db :db/ident e))
+        #_#_(keyword? e) (first (ave db :db/ident e))
         :else [db e]))
 
 ;; index helpers
@@ -145,12 +148,9 @@
 (defn ae-indexer [^Schema a-schema]
   {:index :ae
    :per :datom
-   :f (if (::default? a-schema)
+   :f (let [is-many (many? a-schema)]
         (fn [db e a v pv v? pv?]
-          (ae-indexer* db e a v pv v? pv? (many? (get-schema db a))))
-        (let [is-many (many? a-schema)]
-          (fn [db e a v pv v? pv?]
-            (ae-indexer* db e a v pv v? pv? is-many))))})
+          (ae-indexer* db e a v pv v? pv? is-many)))})
 
 (def make-indexer
   (memoize
@@ -193,25 +193,24 @@
                                   (per-values db e a nil pv1 false true)) db pv)
                                db))))))))))))
 
-(defn compile-a-schema* ^Schema [{:as schema-map :db/keys [index unique cardinality valueType index-ae isComponent]}]
+(defn compile-a-schema* ^Schema [attr {:db/keys [index unique cardinality valueType index-ae isComponent fx-fns]}]
   (let [unique? (boolean unique)
-        index (or index-all-ave? index)
-        ae (boolean (or index-all-ae? index-ae))
-        a-schema (merge (map->Schema
-                         {:ave (boolean (or index unique?))
-                          :many (= cardinality :db.cardinality/many)
-                          :unique unique?
-                          :component isComponent
-                          :ref (= valueType :db.type/ref)
-                          :ae ae})
-                        (if (instance? Schema schema-map)
-                          (.__extmap ^Schema schema-map)
-                          schema-map))]
+        a-schema (map->Schema
+                  {:attribute attr
+                   :ave (boolean (or index
+                                     index-all-ave?
+                                     unique?))
+                   :many (= cardinality :db.cardinality/many)
+                   :unique unique?
+                   :component isComponent
+                   :ref (= valueType :db.type/ref)
+                   :ae (boolean (or index-all-ae? index-ae))
+                   :fx-fns fx-fns})]
     (assoc a-schema :index-fn (make-indexer a-schema))))
 
 ;; Lookup functions
 
-(def default-schema (compile-a-schema* {::default? true}))
+(def default-schema (compile-a-schema* :_ {}))
 
 (defn get-schema ^Schema [db a] (or (fast/gets db :schema a) default-schema))
 (defn get-entity [db e] (fast/gets db :eav e))
@@ -226,9 +225,10 @@
 
 (defn index [db schema e a v pv]
   (let [datom (#?(:cljs array :clj vector) e a v pv)]
+    (doseq [f (fx-fns schema)]
+      (f *fx* e a v pv))
     (when *datoms*
-      #?(:cljs (j/push! *datoms* datom)
-         :clj  (vswap! *datoms* conj datom)))
+      (fast/mut-push! *datoms* datom))
     (update-indexes db datom schema)))
 
 ;; transactions
@@ -351,14 +351,6 @@
 
 (declare add-map)
 
-(defn handle-lookup-ref [db v]
-  ;; if a lookup ref doesn't resolve,
-  ;; treat it as an upsert (map)
-  (if (vector? v)
-    (or (resolve-lookup-ref db v)
-        {(v 0) (v 1)})
-    v))
-
 (defn- resolve-map-e [db m require-unique-attribute?]
   (if-let [e (:db/id m)]
     (conj (resolve-e+ db e) (dissoc m :db/id))
@@ -462,45 +454,91 @@
 
 (defonce !tx-clock (atom 0))
 
+(defn init-fx [fxs]
+  (->> fxs
+       (reduce (fn [out {:keys [db.fx/handler db/ident]}]
+                 (fast/mut-set! out ident (handler)))
+               (fast/mut-obj))))
+
 (defn transaction
   [db-before txs options]
   {:pre [db-before (or (nil? txs) (sequential? txs))]}
-  (binding [*datoms* (when (:notify-listeners? options true) #?(:cljs #js[] :clj (volatile! [])))]
-    (let [db-after (-> (reduce commit-tx (transient-map (-> db-before
-                                                            (dissoc :tx)
-                                                            (assoc :tempids {}))) txs)
-                       (persistent-map!))
-          datoms (if *datoms*
-                   #?(:cljs (vec *datoms*)
-                      :clj  @*datoms*)
-                   [])]
-      (assoc options
-        :db-before db-before
-        :db-after (if (seq datoms)
-                    db-after
-                    db-before)
-        :datoms datoms))))
+  (let [fxs (ae db-before :db.fx/handler)]
+    (binding [*datoms* (when (:notify-listeners? options true) (fast/mut-arr))
+              *fx* (init-fx fxs)]
+      (let [db-after (-> (reduce commit-tx (transient-map (-> db-before
+                                                              (dissoc :tx)
+                                                              (assoc :tempids {}))) txs)
+                         (persistent-map!))
+            datoms (if *datoms*
+                     (fast/mut-arr->vec *datoms*)
+                     [])
+            fx (fast/mut-deref *fx*)]
+        (assoc options
+          :fx fx
+          :fxs fxs
+          :db-before db-before
+          :db-after (if (seq datoms)
+                      db-after
+                      db-before)
+          :datoms datoms)))))
 
-(defn compile-a-schema [db-schemas a a-schema-map]
-  (if (= "db.internal" (namespace a))
-    (assoc db-schemas a a-schema-map)
-    (let [^Schema a-schema (compile-a-schema* a-schema-map)]
-      (-> (assoc db-schemas a a-schema)
-          (update :db.internal/uniques (if (unique? a-schema) (fnil conj #{}) disj) a)))))
+(defn compile-a-schema [db-schemas schema-attr schema-val]
+  (if (str/starts-with? (namespace schema-attr) "db.")
+    (assoc db-schemas schema-attr schema-val)
+    (let [^Schema a-schema (compile-a-schema* schema-attr schema-val)]
+      (-> (assoc db-schemas schema-attr a-schema)
+          (update :db.internal/uniques (if (unique? a-schema) (fnil conj #{}) disj) schema-attr)))))
 
-(defn compile-db-schema [schema]
-  (->> (assoc schema :db/ident {:db/unique :db.unique/identity
-                                :db/index-ae true})
+(defn init-schema [schema]
+  (->> (assoc schema :db/ident (merge schema/unique-id
+                                      schema/ae)
+                     :db.fx/handler schema/ae
+                     :db.fx/attrs schema/many)
        (reduce-kv compile-a-schema {})))
 
-(defn recompile-schemas [db]
+(declare transact!)
+
+(defn get-fxs [db] (ae db :db.fx/handler))
+
+(defn compile-fx-schemas [db]
   (update db :schema
-          (fn [old-schema]
-            (reduce (fn [old-schema {:as schema-map
-                                     :keys [db/ident]}]
-                      (compile-a-schema old-schema ident schema-map))
-                    old-schema
-                    (mapv (:eav db) (-> db :ae :db/ident))))))
+          (fn [schema]
+            (->> (get-fxs db)
+                 ;; for each db.fx handler,
+                 (reduce (fn [schema {:keys [db.fx/attributes db.fx/handler]}]
+                           ;; for each attribute it applies to,
+                           (->> attributes
+                                (reduce
+                                 (fn [schema attribute]
+                                   ;; add it to that attribute's :fx-fns
+                                   (assoc schema attribute
+                                                 (-> (or (get schema attribute)
+                                                         (assoc default-schema :attribute attribute))
+                                                     (update :fx-fns (fnil conj []) handler))))
+                                 schema)))
+                         schema)))))
+
+(defn compile-schemas [db]
+  (-> db
+      (update :schema
+              (fn [old-schema]
+                (reduce (fn [old-schema {:as schema-val
+                                         :keys [ident]}]
+                          (compile-a-schema old-schema ident schema-val))
+                        old-schema
+                        (mapv (:eav db) (-> db :ae :db/ident)))))
+      (compile-fx-schemas)))
+
+(defn apply-fxs! [db-after fxs fx]
+  (reduce (fn [db {:keys [db/ident db.fx/handler]}]
+            (let [acc (fast/mut-get fx ident)
+                  result (handler db acc)]
+              (assert (= (:tx db) (:tx db-after))
+                      (str "fx handler must return the db: " ident))
+              result))
+          db-after
+          fxs))
 
 (defn commit!
   ;; separating out the "commit" step because we may extend `transaction` to support
@@ -509,13 +547,15 @@
   ([!conn tx-report] (commit! !conn tx-report {}))
   ([!conn tx-report options]
    (let [tx (swap! !tx-clock inc)
-         tx-report (-> tx-report
-                       (assoc :tx tx)
-                       (assoc-in [:db-after :tx] tx))]
+         {:as tx-report
+          db :db-after
+          :keys [fxs fx]} (-> tx-report
+                              (assoc :tx tx)
+                              (assoc-in [:db-after :tx] tx))
+         db (apply-fxs! db fxs fx)]
+
      (when (seq (:datoms tx-report))
-       (reset! !conn (cond-> (:db-after tx-report)
-                             (::schema-touched? options)
-                             recompile-schemas))
+       (reset! !conn db)
 
        (when *branch-tx-log*
          (swap! *branch-tx-log* conj tx-report))
@@ -524,6 +564,7 @@
                   (not *prevent-notify*))
          (doseq [f (-> tx-report :db-after :listeners vals)]
            (f !conn tx-report)))
+
        tx-report))))
 
 (defn transact!
@@ -533,16 +574,14 @@
    (commit! conn (transaction @conn txs opts) opts)))
 
 (defn add-missing-index [db a indexk]
-  (let [{:as db
-         :keys [schema]} (update db :schema
-                                 (fn [db-schema]
-                                   (let [changes (case indexk
-                                                   :ae schema/ae
-                                                   :ave schema/ave)]
-                                     (-> db-schema
-                                         (compile-a-schema a (merge (get db-schema a) changes))
-                                         (update :db.internal/runtime-changes conj {a changes})))))
-        a-schema ^Schema (get schema a)
+  (let [e (resolve-e db [:db/ident a])
+        changes (case indexk
+                  :ae schema/ae
+                  :ave schema/ave)
+        db (add-map db (assoc changes :db/id e))
+        db (update db :schema compile-a-schema a (fast/gets db :eav e))
+        db (update-in db [:schema :db.internal/runtime-changes] conj {a changes})
+        a-schema ^Schema (fast/gets db :schema a)
         is-many (many? a-schema)
         {:keys [f per]} ((case indexk :ae ae-indexer :ave ave-indexer) a-schema)]
     (-> (reduce-kv (if (and is-many (= per :value))
@@ -565,8 +604,40 @@
                (mapv (fn [[k schema-map]]
                        (assoc schema-map :db/id [:db/ident k]))
                      schema)
-               schema)
-             {::schema-touched? true}))
+               schema)))
+
+(def init-schema {:db/ident (merge schema/unique-id
+                                   schema/ae)
+                  :db.fx/handler schema/ae
+                  :db.fx/attrs schema/many
+                  :fx/compile-schemas {:db.fx/handler (fn
+                                                        ;; 0-arity returns initial value
+                                                        ([] false)
+                                                        ;; reduce over datoms
+                                                        ([db e a v pv a-schema acc] true) ;; true if any listed attr is touched
+                                                        ;; commit
+                                                        ([db acc] (cond-> db acc compile-schemas)))
+                                       :db.fx/attributes [:db/isComponent
+                                                          :db/valueType
+                                                          :db/cardinality
+                                                          :db/unique
+                                                          :db/isComponent
+                                                          :db/fulltext
+                                                          :db/index
+                                                          :db/index-ae
+                                                          :db/tupleAttrs
+                                                          :db/tupleType
+                                                          :db/tupleTypes
+                                                          :db/ident]}})
+
+(def init-db @(doto (atom {:ae {}
+                           :eav {}
+                           :ave {}
+                           :schema {}})
+                (transact! (->> init-schema
+                                (mapv (fn [[ident v]]
+                                        (assoc v :db/id [:db/ident ident])))))
+                (swap! compile-schemas)))
 
 (defn create-conn
   "Create a new db, with optional schema, which should be a mapping of attribute keys to
@@ -576,10 +647,9 @@
     :db/cardinality [:db.cardinality/many]"
   ([] (create-conn {}))
   ([schema]
-   (atom {:ae {}
-          :eav {}
-          :ave {}
-          :schema (compile-db-schema schema)})))
+   (cond-> (atom init-db)
+           (seq schema)
+           (merge-schema! schema))))
 
 (defn clone
   "Creates a copy of conn"
@@ -610,3 +680,63 @@
                       :db-after @*conn*
                       :datoms (into [] (mapcat :datoms) txs#)}
                      {:value val#}))))))
+
+(comment
+
+ ;; 1. transact a handler
+ (transact! [{:db/ident ::do-foo
+              :db.fx/handler (fn
+                               ([])
+                               ([db e a v pv a-schema acc])
+                               ([db acc]))
+              :db.fx/attributes #{:foo :bar}}])
+
+ ;; 2. during schema compile,
+ ;; loop over db.fx handlers and add handler fn to each schema attr to which it applies
+ ;;
+ ;; 3. to start a transaction, loop handlers & set initial values by calling 0-arity of handler
+ ;;
+ ;; 4. during transaction, when adding a datom we all any fx-fns on the a-schema.
+ ;;
+ ;; end transaction: loop handlers and run on values
+ ;; and that's that!
+ ;; can be used for local storage, invalidating & recompiling schema, etc. with negligible runtime overhead for non-involved keys.
+
+ (merge-schema! _ {:fx/compile-schemas {:db.fx/handler (fn
+                                                         ;; 0-arity returns initial value
+                                                         ([] false)
+                                                         ;; reduce over datoms
+                                                         ([db e a v pv a-schema acc]
+                                                          ;; returns true if any listed attribute is touched
+                                                          true)
+                                                         ;; commit
+                                                         ([db acc]
+                                                          (when acc (compile-schemas db))
+                                                          ;; probably can't change the db here, right?
+                                                          ;; anything that can create datoms should be a db fn?
+                                                          ))
+                                        :db.fx/attributes [:db/isComponent
+                                                           :db/valueType
+                                                           :db/cardinality
+                                                           :db/unique
+                                                           :db/isComponent
+                                                           :db/fulltext
+                                                           :db/index
+                                                           :db/index-ae
+                                                           :db/tupleAttrs
+                                                           :db/tupleType
+                                                           :db/tupleTypes
+                                                           :db/ident]}})
+
+
+
+ ;; use cases
+ ;; - save a set of keys to localStorage
+ ;; - save a set of keys to persistentStorage
+
+ ;; steps
+
+ ;; idea
+ ;; a single root schema entity which contains :schema/attributes, :schema/fx-handlers, :schema/uniques
+
+ )
