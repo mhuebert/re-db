@@ -4,7 +4,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [re-db.fast :as fast]
-            [re-db.util :as u :refer [set-replace set-diff]]
+            [re-db.util :as u :refer [set-diff]]
             [re-db.schema :as schema]))
 
 (def index-all-ave? false)
@@ -456,8 +456,8 @@
 
 (defn init-fx [fxs]
   (->> fxs
-       (reduce (fn [out {:keys [db.fx/handler db/ident]}]
-                 (fast/mut-set! out ident (handler)))
+       (reduce (fn [out {:keys [db.fx/reducer db/ident]}]
+                 (fast/mut-set! out ident (reducer)))
                (fast/mut-obj))))
 
 (defn transaction
@@ -485,19 +485,17 @@
           :datoms datoms)))))
 
 (defn compile-fx-schemas [schema fxs]
+  ;; for each db.fx handler, adds an :fx-fn to the schemas listed in :db.fx/attributes
   (->> fxs
-       ;; for each db.fx handler,
        (reduce (fn [schema {:as fx :keys [db.fx/attributes
-                                          db.fx/handler
+                                          db.fx/reducer
                                           db/ident]}]
-                 ;; for each attribute it applies to,
                  (let [fx-fn (fn [db e a v pv a-schema accs]
                                (fast/mut-set! accs ident
-                                              (handler db e a v pv a-schema (fast/mut-get accs ident))))]
+                                              (reducer db e a v pv a-schema (fast/mut-get accs ident))))]
                    (->> attributes
                         (reduce
                          (fn [schema attribute]
-                           ;; add it to that attribute's :fx-fns
                            (assoc schema attribute
                                          (-> (or (get schema attribute)
                                                  (assoc default-schema :attribute attribute))
@@ -510,8 +508,10 @@
     (assoc db-schemas schema-attr schema-val)
     (let [^Schema a-schema (compile-a-schema* schema-attr schema-val)]
       (-> (assoc db-schemas schema-attr a-schema)
+          ;; index of unique attrs
           (update ::uniques (if (unique? a-schema) (fnil conj #{}) disj) schema-attr)
-          (update ::fxs (if (:db.fx/handler schema-val)
+          ;; index of :db.fx reducers
+          (update ::fxs (if (:db.fx/reducer schema-val)
                           #(assoc % schema-attr schema-val)
                           #(dissoc % schema-attr)))))))
 
@@ -537,8 +537,8 @@
                        (update :db-after
                                (fn [db]
                                  (->> (:fxs tx-report)
-                                      (reduce (fn [db {:as foo :keys [db.fx/handler db.fx/acc]}]
-                                                (handler db acc))
+                                      (reduce (fn [db {:keys [db.fx/reducer db.fx/acc]}]
+                                                (reducer db acc))
                                               db)))))]
 
      (when (seq (:datoms tx-report))
@@ -586,44 +586,37 @@
                      schema)
                schema)))
 
-(comment
- ;; how to make a :db.fx/handler
- {:db.fx/handler (fn
-                   ([] 0)                                   ;; 0-arity returns initial value
-                   ([db e a v pv a-schema acc] (inc acc))   ;; reduce over datoms
-                   ([db acc] db))                           ;; commit
-  :db.fx/attributes []})                                    ;; attributes to apply to
-
 (def schema-compile-fx
   {:db/ident :db.fx/compile-schemas
-   :db.fx/handler
+   :db.fx/reducer
    (fn
      ([] #{})
-     ([db e a v pv a-schema acc] (conj acc e))              ;; true if any listed attr is touched
-     ([db acc]
-      (if (seq acc)
-        (update db :schema compile-schemas (map (:eav db) acc))
-        db)))
+     ([db e a v pv a-schema acc] (conj acc e))
+     ([db acc] (if (seq acc)
+                 (update db :schema compile-schemas (map (:eav db) acc))
+                 db)))
    :db.fx/attributes [:db/isComponent :db/valueType :db/cardinality :db/unique
                       :db/isComponent :db/fulltext :db/index :db/index-ae
                       :db/tupleAttrs :db/tupleType :db/tupleTypes :db/ident
-                      :db.fx/handler :db.fx/attributes]})
+                      :db.fx/reducer :db.fx/attributes]})
 
-(def init-schema [(merge {:db/ident :db/ident}
-                         schema/unique-id
-                         schema/ae)
-                  (merge {:db/ident :db.fx/handler}
-                         schema/ae)
-                  (merge {:db/ident :db.fx/attrs}
-                         schema/many)
-                  schema-compile-fx])
+(def initial-schema [(merge {:db/ident :db/ident}
+                            schema/unique-id
+                            schema/ae)
+                     (merge {:db/ident :db.fx/reducer}
+                            schema/ae)
+                     (merge {:db/ident :db.fx/attrs}
+                            schema/many)
+                     schema-compile-fx])
 
 (def empty-db @(doto (atom {:ae {}
                             :eav {}
                             :ave {}
                             :last-e 0.1
-                            :schema (compile-schemas {} init-schema)})
-                 (transact! init-schema)))
+                            :schema (compile-schemas {} initial-schema)})
+                 ;; this is a bootstrapping step - compile the schema before
+                 ;; transacting it to the db.
+                 (transact! initial-schema)))
 
 (defn create-conn
   "Create a new db, with optional schema, which should be a mapping of attribute keys to
@@ -636,15 +629,6 @@
    (cond-> (atom empty-db)
            (seq schema)
            (doto (merge-schema! schema)))))
-
-(comment
- (-> @(create-conn {:db.user/tx-fns {:foo (constantly true)}})
-     :schema
-     :db.user/tx-fns
-     )
-
-
- (clojure.pprint/pprint (compile-schemas {} init-schema)))
 
 (defn clone
   "Creates a copy of conn"
@@ -676,44 +660,17 @@
                       :datoms (into [] (mapcat :datoms) txs#)}
                      {:value val#}))))))
 
+
 (comment
 
- ;; 1. transact a handler
- (transact! [{:db/ident ::do-foo
-              :db.fx/handler (fn
-                               ([])
-                               ([db e a v pv a-schema acc])
-                               ([db acc]))
-              :db.fx/attributes #{:foo :bar}}])
+ ;; db.fx is an experimental feature for defining per-attribute reducers that build up a value
+ ;; during a transaction. we use this internally to detect datoms that should trigger
+ ;; a recompilation of schemas.
 
- ;; 2. during schema compile,
- ;; loop over db.fx handlers and add handler fn to each schema attr to which it applies
- ;;
- ;; 3. to start a transaction, loop handlers & set initial values by calling 0-arity of handler
- ;;
- ;; 4. during transaction, when adding a datom we all any fx-fns on the a-schema.
- ;;
- ;; end transaction: loop handlers and run on values
- ;; and that's that!
- ;; can be used for local storage, invalidating & recompiling schema, etc. with negligible runtime overhead for non-involved keys.
-
- ;; use cases
- ;; - save a set of keys to localStorage
- ;; - save a set of keys to persistentStorage
-
-
- ;; what is the upshot
- ;;
- ;; - fx happens on commit, not transact
- ;; - fx avoids looping over tx-log to figure out what changed
- ;; - for schema, it would be useful for fx to happen in transact (to make functional changes to db)
- ;;   then it's not fx, more like interceptor? something else? a db/fn but triggered by attribute rather than operation
- ;;
- ;; how to use this for:
- ;;
- ;; - local storage of particular keys
- ;;   - this requires loading from local storage on startup, and saving to local storage on commit
- ;;   - how is the init handled
- ;; - remote storage of particular keys
+ {:db.fx/reducer (fn
+                   ([] 0)                                   ;; 0-arity returns initial value
+                   ([db e a v pv a-schema acc] (inc acc))   ;; reduce over datoms
+                   ([db acc] db))                           ;; commit
+  :db.fx/attributes []}                                     ;; attributes to apply to
 
  )
