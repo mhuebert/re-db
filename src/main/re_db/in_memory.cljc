@@ -165,7 +165,7 @@
        (when (or (seq per-value) (seq per-datom))
          (let [per-values (fast/comp6 per-value)
                per-datoms (fast/comp6 per-datom)]
-           (fn [db [e a v pv]]
+           (fn [db e a v pv a-schema]
              (let [v? (boolean (if is-many? (seq v) (some? v)))
                    pv? (boolean (if is-many? (seq pv) (some? pv)))]
                (as-> db db
@@ -228,21 +228,19 @@
 (defn get-schema ^Schema [db a] (or (fast/gets db :schema a) default-schema))
 (defn get-entity [db e] (fast/gets db :eav e))
 
-(defn- update-indexes [db datom ^Schema schema]
-  (if (= :db/id #?(:cljs (aget datom 1)
-                   :clj  (datom 1)))
+(defn- update-indexes [db e a v pv ^Schema a-schema]
+  (if (= :db/id e)
     db
-    (if-some [index (:index-fn schema)]
-      (index db datom)
+    (if-some [index (:index-fn a-schema)]
+      (index db e a v pv a-schema)
       db)))
 
 (defn index [db a-schema e a v pv]
-  (let [datom (#?(:cljs array :clj vector) e a v pv)]
-    (when-let [fns (fx-fns a-schema)]
-      (when-let [accs *fx*]
-        (doseq [f (vals fns)]
-          (f db e a v pv a-schema accs))))
-    (update-indexes db datom a-schema)))
+  (when-let [fns (fx-fns a-schema)]
+    (when-let [accs *fx*]
+      (doseq [f (vals fns)]
+        (f db e a v pv a-schema accs))))
+  (update-indexes db e a v pv a-schema))
 
 ;; transactions
 
