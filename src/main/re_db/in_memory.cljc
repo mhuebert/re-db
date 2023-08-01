@@ -50,7 +50,7 @@
 (defn gen-e [] (vswap! *last-e* inc))
 
 ;; generate internal db uuids
-(defn tempid? [x] (neg-int? x))
+(defn tempid? [x] (and (number? x) (neg? x)))
 
 (defn resolve-e
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
@@ -192,6 +192,7 @@
 
 (def datom-fx
   {:db/ident :db.fx/datoms
+   ::internal true
    :db.fx/handle-datom (fn
                          ([] (fast/mut-arr))
                          ([db e a v pv a-schema acc]
@@ -427,25 +428,29 @@
      (fast/update! db :eav fast/assoc-seq! e new-m))))
 
 (defn- commit-tx [db tx]
-  (cond (vector? tx) (let [operation (tx 0)]
-                       (case operation
-                         :db/add (let [e (tx 1)
-                                       _ (when-not e (throw (ex-info "db/id not present in tx" {:tx tx})))
-                                       [db resolved-e] (resolve-e+ db e)]
-                                   (add db (assoc tx 1 resolved-e)))
-                         :db/retractEntity (retract-entity db (update tx 1 #(resolve-e db %)))
-                         :db/retract (retract-attr db (update tx 1 #(resolve-e db %)))
-                         :db/datoms (reduce commit-datom db (tx 1))
-                         :db/datoms-reverse (->> (tx 1)
-                                                 (reverse)
-                                                 (map reverse-datom)
-                                                 (reduce commit-datom db))
-                         (if-let [op (fast/gets db :schema ::tx-fns operation)]
-                           (reduce commit-tx db (op db tx))
-                           (throw (ex-info "db operation does not exist" {:op operation})))))
-        (map? tx) (add-map db tx)
-        (nil? tx) db
-        :else (throw (ex-info "Invalid transaction" {:tx tx}))))
+  (try
+    (cond (vector? tx) (let [operation (tx 0)]
+                         (case operation
+                           :db/add (let [e (tx 1)
+                                         _ (when-not e (throw (ex-info "db/id not present in tx" {:tx tx})))
+                                         [db resolved-e] (resolve-e+ db e)]
+                                     (add db (assoc tx 1 resolved-e)))
+                           :db/retractEntity (retract-entity db (update tx 1 #(resolve-e db %)))
+                           :db/retract (retract-attr db (update tx 1 #(resolve-e db %)))
+                           :db/datoms (reduce commit-datom db (tx 1))
+                           :db/datoms-reverse (->> (tx 1)
+                                                   (reverse)
+                                                   (map reverse-datom)
+                                                   (reduce commit-datom db))
+                           (if-let [op (fast/gets db :schema ::tx-fns operation)]
+                             (reduce commit-tx db (op db tx))
+                             (throw (ex-info "db operation does not exist" {:op operation})))))
+          (map? tx) (add-map db tx)
+          (nil? tx) db
+          :else (throw (ex-info "Invalid transaction" {:tx tx})))
+    (catch #?(:cljs js/Error :clj Exception) e
+      (throw (ex-info
+              "failed to commit tx" {:tx tx} e)))))
 
 
 (defn transient-k [m k] (transient (update m k transient)))
@@ -591,6 +596,7 @@
 
 (def schema-compile-fx
   {:db/ident :db.fx/compile-schemas
+   ::internal true
    :db.fx/handle-datom
    (fn
      ([] #{})
@@ -606,12 +612,15 @@
                       :db/tupleAttrs :db/tupleType :db/tupleTypes :db/ident
                       :db.fx/handle-datom :db.fx/attributes]})
 
-(def initial-schema [(merge {:db/ident :db/ident}
+(def initial-schema [(merge {:db/ident :db/ident
+                             ::internal true}
                             schema/unique-id
                             schema/ae)
-                     (merge {:db/ident :db.fx/handle-datom}
+                     (merge {:db/ident :db.fx/handle-datom
+                             ::internal true}
                             schema/ae)
-                     (merge {:db/ident :db.fx/attrs}
+                     (merge {:db/ident :db.fx/attrs
+                             ::internal true}
                             schema/many)
                      schema-compile-fx
                      datom-fx])

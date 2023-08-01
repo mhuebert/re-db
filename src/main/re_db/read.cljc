@@ -16,7 +16,7 @@
 
 (defn- make-listener! [conn e a v]
   (let [listener (r/atom 0
-                         :meta {:pattern [e a v] ;; for debugging
+                         :meta {:pattern [e a v]            ;; for debugging
                                 :dispose-delay 1000}
                          :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))]
     (swap! !listeners assoc-in [conn e a v] listener)
@@ -40,14 +40,14 @@
                  ;; triggers patterns for datom, with "early termination"
                  ;; for paths that don't lead to any invalidators.
                  (when-some [e (listeners e)]
-                   (collect! (fast/gets-some e nil nil)) ;; e__
-                   (collect! (fast/gets-some e a nil))) ;; ea_
+                   (collect! (fast/gets-some e nil nil))    ;; e__
+                   (collect! (fast/gets-some e a nil)))     ;; ea_
                  (when-some [_ (listeners nil)]
                    (when-some [__ (_ nil)]
-                     (collect! (__ v))) ;; __v (used for refs)
+                     (collect! (__ v)))                     ;; __v (used for refs)
                    (when-some [_a (_ a)]
-                     (collect! (_a v)) ;; _av
-                     (collect! (_a nil)))))) ;; _a_
+                     (collect! (_a v))                      ;; _av
+                     (collect! (_a nil))))))                ;; _a_
 
             invalidated @result]
         #_(prn :invalidating (mapv (comp :pattern meta) invalidated))
@@ -67,7 +67,7 @@
           v (if a
               (resolve-v conn db a-schema a v)
               v)]
-      (r/collect-deref! ;; directly create dependency
+      (r/collect-deref!                                     ;; directly create dependency
        (or (fast/gets-some @!listeners conn e a v)
            (make-listener! conn e a v)))
       nil)))
@@ -84,7 +84,7 @@
    (when-not (ts/unique? db a-schema)
      (throw (ex-info "Lookup ref attribute must be unique" {:lookup-ref [a v]})))
    (when (some? v)
-     (if (vector? v) ;; nested lookup ref
+     (if (vector? v)                                        ;; nested lookup ref
        (-resolve-lookup-ref conn db a-schema a (-resolve-lookup-ref conn db
                                                                     (ts/get-schema db (v 0))
                                                                     (v 0)
@@ -139,9 +139,11 @@
       (or (id->ident (ts/db conn) e)
           (wrap-ref conn e)))))
 
-(def ref-wrapper-noop (make-ref-wrapper (fn [_conn e] e)))
-(def ref-wrapper-default (make-ref-wrapper (fn [_conn e] {:db/id (:db/id e e)})))
-(def ref-wrapper-entity (delay (make-ref-wrapper entity)))
+(def ref-wrapper-default (make-ref-wrapper (fn [_conn e]
+                                             ;; TODO
+                                             ;; remove (:db/id e e) here, check what happens in datomic
+                                             {:db/id (:db/id e e)})))
+(def !ref-wrapper-entity (delay (make-ref-wrapper entity)))
 (defn root-wrapper-default [_conn m] m)
 
 (defn get* [conn db a-schema ref-wrapper e a]
@@ -157,9 +159,9 @@
                   (ts/ave db a-schema a e)
                   (ts/eav db a-schema e a))]
           (if is-reverse
-            (-depend-on-triple! conn db a-schema nil a e) ;; [_ a v]
-            (-depend-on-triple! conn db a-schema e a nil)) ;; [e a _]
-          (if is-ref
+            (-depend-on-triple! conn db a-schema nil a e)   ;; [_ a v]
+            (-depend-on-triple! conn db a-schema e a nil))  ;; [e a _]
+          (if (and is-ref ref-wrapper)
             (if (or is-reverse
                     (ts/many? db a-schema))
               (mapv #(ref-wrapper conn %) v)
@@ -205,13 +207,13 @@
     (-lookup [o a]
       (let [db (ts/db conn)]
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-        (get* conn db (ts/get-schema db a) @ref-wrapper-entity e a)))
+        (get* conn db (ts/get-schema db a) @!ref-wrapper-entity e a)))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
         (let [db (ts/db conn)]
           (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-          (get* conn db (ts/get-schema db a) ref-wrapper-noop e a))
+          (get* conn db (ts/get-schema db a) nil e a))
         (if-some [v (clojure.core/get o a)] v nf)))
     IDeref
     (-deref [this]
@@ -245,19 +247,23 @@
 ;;
 
 (defn- wrap-v [v conn is-many f]
-  (if is-many
-    (mapv (fn [v] (f conn v)) v)
-    (f conn v)))
+  (if f
+    (if is-many
+      (mapv (fn [v] (f conn v)) v)
+      (f conn v))
+    v))
 
-(defn- -wrap-refs [ref-wrapper conn db m]
+(defn- -wrap-map-refs [ref-wrapper conn db m]
   (reduce-kv (fn [m a v]
                (let [a-schema (ts/get-schema db a)]
-                 (if (ts/ref? db a-schema)
-                   (assoc m a
-                            (if (ts/many? db a-schema)
-                              (into (empty v) (map #(ref-wrapper conn %)) v)
-                              (ref-wrapper conn v)))
-                   m))) m m))
+                 (cond-> m
+                         (ts/ref? db a-schema)
+                         (assoc a
+                                (if (ts/many? db a-schema)
+                                  (into (empty v) (map #(ref-wrapper conn %)) v)
+                                  (ref-wrapper conn v))))))
+             m
+             m))
 
 (defn compose-pull-xf [{:keys [default xform sort-by sort-by/dir skip limit]}]
   (apply comp (cond-> ()
@@ -278,7 +284,9 @@
         (if (#{'* :*} pullexpr)
           (do
             (-depend-on-triple! conn db nil e nil nil)
-            (merge m (when e (-wrap-refs ref-wrapper conn db (dissoc (ts/eav db e) :db/id)))))
+            (if (and e ref-wrapper)
+              (-wrap-map-refs ref-wrapper conn db (dissoc (ts/eav db e) :db/id))
+              m))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
                                (first pullexpr))
@@ -294,9 +302,12 @@
                 is-reverse (u/reverse-attr? a)
                 forward-a (cond-> a is-reverse u/forward-attr)
                 a-schema (ts/get-schema db forward-a)
-                v (val-fn (get* conn db a-schema ref-wrapper-noop e a))
                 is-ref (ts/ref? db a-schema)
                 is-many (or (ts/many? db a-schema) is-reverse)
+                v (get* conn db a-schema nil e a)
+                v (if is-many
+                    (mapv val-fn v)
+                    (val-fn v))
                 v (cond (not is-ref) v
 
                         ;; ref without pull-expr
@@ -346,9 +357,9 @@
    (pull conn nil pull-expr e))
   ([conn {:keys [wrap-root wrap-ref]} pull-expr e]
    (let [e (:db/id e e)
-         ref-wrapper (if wrap-ref
-                       (make-ref-wrapper wrap-ref)
-                       ref-wrapper-default)
+         ref-wrapper (cond (false? wrap-ref) nil
+                           wrap-ref (make-ref-wrapper wrap-ref)
+                           :else ref-wrapper-default)       ;; TODO remove ref-wrapper-default
          root-wrapper (or wrap-root root-wrapper-default)
          db (ts/db conn)]
      (->> (-pull conn db ref-wrapper pull-expr e)
