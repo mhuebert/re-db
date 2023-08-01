@@ -202,7 +202,6 @@
          (db/transact! [[:db/add "mary" :person/children "peter"]])
          (is (= 2 @log)))))))
 
-
 (deftest read-from-reaction
   (db/transact! [{:db/id 1 :name \a}
                  {:db/id 2 :name \b}])

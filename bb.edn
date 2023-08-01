@@ -1,6 +1,8 @@
 {:tasks {:requires ([babashka.fs :as fs])
          dev (do (shell "yarn install")
                  (shell "yarn shadow-cljs -A:dev:datomic:test:clerk:datalevin clj-run re-db.dev/start"))
+         server (do (shell "yarn install")
+                    (shell "yarn shadow-cljs -A:dev:datomic:test:clerk:datalevin server"))
          stop (shell "yarn shadow-cljs stop")
          test (do (run 'start)
                   (shell "yarn shadow-cljs watch test"))

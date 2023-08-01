@@ -29,8 +29,6 @@
                              index-all-ave? (conj :ave)
                              index-all-ae? (conj :ae)))))
 
-;; log datoms during commit
-(def ^:dynamic *datoms* nil)
 ;; entity ids
 (def ^:dynamic *last-e* nil)
 ;; update fx accumulators during commit
@@ -192,6 +190,22 @@
                                   (per-values db e a nil pv1 false true)) db pv)
                                db))))))))))))
 
+(def datom-fx
+  {:db/ident :db.fx/datoms
+   :db.fx/handle-datom (fn
+                         ([] (fast/mut-arr))
+                         ([db e a v pv a-schema acc]
+                          (fast/mut-push! acc (#?(:cljs array :clj vector) e a v pv)))
+                         ([tx-report acc]
+                          (assoc tx-report :datoms #?(:cljs (vec acc) :clj @acc))))})
+
+(defn wrap-fx-fn [{:keys [db/ident db.fx/handle-datom]}]
+  (fn [db e a v pv a-schema accs]
+    (fast/mut-set! accs ident
+      (handle-datom db e a v pv a-schema (fast/mut-get accs ident)))))
+
+(def datom-fx-fn {:db.fx/datoms (wrap-fx-fn datom-fx)})
+
 (defn compile-a-schema* ^Schema [attr {:db/keys [index unique cardinality valueType index-ae isComponent]}]
   (let [unique? (boolean unique)
         a-schema (map->Schema
@@ -203,7 +217,8 @@
                    :unique unique?
                    :component isComponent
                    :ref (= valueType :db.type/ref)
-                   :ae (boolean (or index-all-ae? index-ae))})]
+                   :ae (boolean (or index-all-ae? index-ae))
+                   :fx-fns datom-fx-fn})]
     (assoc a-schema :index-fn (make-indexer a-schema))))
 
 ;; Lookup functions
@@ -227,8 +242,6 @@
       (when-let [accs *fx*]
         (doseq [f (vals fns)]
           (f db e a v pv a-schema accs))))
-    (when *datoms*
-      (fast/mut-push! *datoms* datom))
     (update-indexes db datom a-schema)))
 
 ;; transactions
@@ -456,43 +469,38 @@
 
 (defn init-fx [fxs]
   (->> fxs
-       (reduce (fn [out {:keys [db.fx/reducer db/ident]}]
-                 (fast/mut-set! out ident (reducer)))
+       (reduce (fn [out {:keys [db.fx/handle-datom db/ident]}]
+                 (fast/mut-set! out ident (handle-datom)))
                (fast/mut-obj))))
 
 (defn transaction
   [db-before txs options]
   {:pre [db-before (or (nil? txs) (sequential? txs))]}
   (let [fxs (vals (-> db-before :schema ::fxs))]
-    (binding [*datoms* (when (:notify-listeners? options true) (fast/mut-arr))
-              *fx* (init-fx fxs)
+    (binding [*fx* (init-fx fxs)
               *last-e* (volatile! (:last-e db-before))]
       (let [db-after (-> (reduce commit-tx (transient-map (-> db-before
                                                               (dissoc :tx :last-e)
                                                               (assoc :tempids {}))) txs)
                          (persistent-map!))
-            datoms (if *datoms*
-                     (fast/mut-arr->vec *datoms*)
-                     [])
-            fx *fx*]
-        (assoc options
-          :fxs (mapv #(assoc % :db.fx/acc (fast/mut-get fx (:db/ident %)))
-                     fxs)
-          :db-before db-before
-          :db-after (if (seq datoms)
-                      (assoc db-after :last-e @*last-e*)
-                      db-before)
-          :datoms datoms)))))
+            fx *fx*
+            tx-report (reduce (fn [tx-report {:keys [db.fx/handle-datom db/ident]}]
+                                (handle-datom tx-report (fast/mut-get fx ident)))
+                              {:db-before db-before
+                               :db-after db-after
+                               :fxs fxs}
+                              fxs)]
+        (cond-> tx-report
+                (seq (:datoms tx-report))
+                (assoc-in [:db-after :last-e] @*last-e*))))))
 
 (defn compile-fx-schemas [schema fxs]
   ;; for each db.fx handler, adds an :fx-fn to the schemas listed in :db.fx/attributes
   (->> fxs
        (reduce (fn [schema {:as fx :keys [db.fx/attributes
-                                          db.fx/reducer
+                                          db.fx/handle-datom
                                           db/ident]}]
-                 (let [fx-fn (fn [db e a v pv a-schema accs]
-                               (fast/mut-set! accs ident
-                                              (reducer db e a v pv a-schema (fast/mut-get accs ident))))]
+                 (let [fx-fn (wrap-fx-fn fx)]
                    (->> attributes
                         (reduce
                          (fn [schema attribute]
@@ -511,7 +519,7 @@
           ;; index of unique attrs
           (update ::uniques (if (unique? a-schema) (fnil conj #{}) disj) schema-attr)
           ;; index of :db.fx reducers
-          (update ::fxs (if (:db.fx/reducer schema-val)
+          (update ::fxs (if (:db.fx/handle-datom schema-val)
                           #(assoc % schema-attr schema-val)
                           #(dissoc % schema-attr)))))))
 
@@ -532,14 +540,7 @@
   "Commits a tx-report to !conn"
   ([!conn tx-report] (commit! !conn tx-report {}))
   ([!conn tx-report options]
-   (let [tx-report (-> tx-report
-                       (assoc-in [:db-after :tx] (swap! !tx-clock inc))
-                       (update :db-after
-                               (fn [db]
-                                 (->> (:fxs tx-report)
-                                      (reduce (fn [db {:keys [db.fx/reducer db.fx/acc]}]
-                                                (reducer db acc))
-                                              db)))))]
+   (let [tx-report (assoc-in tx-report [:db-after :tx] (swap! !tx-clock inc))]
 
      (when (seq (:datoms tx-report))
        (reset! !conn (:db-after tx-report))
@@ -551,6 +552,10 @@
                   (not *prevent-notify*))
          (doseq [f (-> tx-report :db-after :listeners vals)]
            (f !conn tx-report)))
+
+       (doseq [{:keys [db.fx/handle-tx-report]} (:fxs tx-report)
+               :when handle-tx-report]
+         (handle-tx-report tx-report))
 
        tx-report))))
 
@@ -588,26 +593,30 @@
 
 (def schema-compile-fx
   {:db/ident :db.fx/compile-schemas
-   :db.fx/reducer
+   :db.fx/handle-datom
    (fn
      ([] #{})
      ([db e a v pv a-schema acc] (conj acc e))
-     ([db acc] (if (seq acc)
-                 (update db :schema compile-schemas (map (:eav db) acc))
-                 db)))
+     ([tx acc]
+      (if (seq acc)
+        (let [db (:db-after tx)]
+          (assoc tx :db-after
+                    (update db :schema compile-schemas (map (:eav db) acc))))
+        tx)))
    :db.fx/attributes [:db/isComponent :db/valueType :db/cardinality :db/unique
                       :db/isComponent :db/fulltext :db/index :db/index-ae
                       :db/tupleAttrs :db/tupleType :db/tupleTypes :db/ident
-                      :db.fx/reducer :db.fx/attributes]})
+                      :db.fx/handle-datom :db.fx/attributes]})
 
 (def initial-schema [(merge {:db/ident :db/ident}
                             schema/unique-id
                             schema/ae)
-                     (merge {:db/ident :db.fx/reducer}
+                     (merge {:db/ident :db.fx/handle-datom}
                             schema/ae)
                      (merge {:db/ident :db.fx/attrs}
                             schema/many)
-                     schema-compile-fx])
+                     schema-compile-fx
+                     datom-fx])
 
 (def empty-db @(doto (atom {:ae {}
                             :eav {}
@@ -667,10 +676,10 @@
  ;; during a transaction. we use this internally to detect datoms that should trigger
  ;; a recompilation of schemas.
 
- {:db.fx/reducer (fn
-                   ([] 0)                                   ;; 0-arity returns initial value
-                   ([db e a v pv a-schema acc] (inc acc))   ;; reduce over datoms
-                   ([db acc] db))                           ;; commit
+ {:db.fx/handle-datom (fn
+                        ([] 0)                              ;; 0-arity returns initial value
+                        ([db e a v pv a-schema acc] (inc acc)) ;; reduce over datoms
+                        ([db acc] db))                      ;; commit
   :db.fx/attributes []}                                     ;; attributes to apply to
 
  )
