@@ -8,7 +8,7 @@
             [re-db.read :as read])
   #?(:cljs (:require-macros re-db.api)))
 
-(defonce ^:dynamic *conn* (mem/create-conn))
+(def ^:dynamic *conn* (mem/create-conn))
 
 (defmacro with-conn
   "Evaluates body with *conn* bound to `conn`, which may be a connection or a schema"

@@ -416,8 +416,9 @@
                                            [db new-v] (if is-ref
                                                         (handle-nested-refs db v a-schema)
                                                         [db v])
+                                           pv (cond-> (get prev-m a) is-many set)
                                            ;; update indexes
-                                           db (add-attr-index db e a new-v (get prev-m a) a-schema)
+                                           db (add-attr-index db e a new-v pv a-schema)
                                            value-present (if is-many
                                                            (seq new-v)
                                                            (some? new-v))]
@@ -515,8 +516,7 @@
                schema)))
 
 (defn compile-a-schema [db-schemas schema-attr schema-val]
-  (if (some-> (namespace schema-attr) (str/starts-with? "re-db.in-memory"))
-    (assoc db-schemas schema-attr schema-val)
+  (if (and schema-attr (not (some-> (namespace schema-attr) (str/starts-with? "re-db.in-memory"))))
     (let [^Schema a-schema (compile-a-schema* schema-attr schema-val)]
       (-> (assoc db-schemas schema-attr a-schema)
           ;; index of unique attrs
@@ -524,7 +524,8 @@
           ;; index of :db.fx reducers
           (update ::fxs (if (:db.fx/handle-datom schema-val)
                           #(assoc % schema-attr schema-val)
-                          #(dissoc % schema-attr)))))))
+                          #(dissoc % schema-attr)))))
+    (assoc db-schemas schema-attr schema-val)))
 
 (declare transact!)
 
