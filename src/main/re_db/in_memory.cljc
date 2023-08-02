@@ -193,12 +193,13 @@
 (def datom-fx
   {:db/ident :db.fx/datoms
    ::internal true
-   :db.fx/handle-datom (fn
-                         ([] (fast/mut-arr))
-                         ([db e a v pv a-schema acc]
-                          (fast/mut-push! acc (#?(:cljs array :clj vector) e a v pv)))
-                         ([tx-report acc]
-                          (assoc tx-report :datoms #?(:cljs (vec acc) :clj @acc))))})
+   :db.fx/init (fn [] (fast/mut-arr))
+   :db.fx/handle-datom (fn [db e a v pv a-schema acc]
+                         (fast/mut-push! acc (#?(:cljs array :clj vector) e a v pv)))
+   :db.fx/handle-transaction (fn [tx-report acc]
+                               (assoc tx-report :datoms #?(:cljs (vec acc) :clj @acc)))
+   ;:db.fx/commit! (fn [tx-report])
+   })
 
 (defn wrap-fx-fn [{:keys [db/ident db.fx/handle-datom]}]
   (fn [db e a v pv a-schema accs]
@@ -238,7 +239,7 @@
 
 (defn index [db a-schema e a v pv]
   (when-let [fns (fx-fns a-schema)]
-    (when-let [accs *fx*]
+    (let [accs *fx*]
       (doseq [f (vals fns)]
         (f db e a v pv a-schema accs))))
   (update-indexes db e a v pv a-schema))
@@ -472,8 +473,8 @@
 
 (defn init-fx [fxs]
   (->> fxs
-       (reduce (fn [out {:keys [db.fx/handle-datom db/ident]}]
-                 (fast/mut-set! out ident (handle-datom)))
+       (reduce (fn [out {:keys [db.fx/init db/ident]}]
+                 (fast/mut-set! out ident (init)))
                (fast/mut-obj))))
 
 (defn transaction
@@ -487,8 +488,8 @@
                                                               (assoc :tempids {}))) txs)
                          (persistent-map!))
             fx *fx*
-            tx-report (reduce (fn [tx-report {:keys [db.fx/handle-datom db/ident]}]
-                                (handle-datom tx-report (fast/mut-get fx ident)))
+            tx-report (reduce (fn [tx-report {:keys [db.fx/handle-transaction db/ident]}]
+                                (handle-transaction tx-report (fast/mut-get fx ident)))
                               {:db-before db-before
                                :db-after db-after
                                :fxs fxs}
@@ -501,7 +502,6 @@
   ;; for each db.fx handler, adds an :fx-fn to the schemas listed in :db.fx/attributes
   (->> fxs
        (reduce (fn [schema {:as fx :keys [db.fx/attributes
-                                          db.fx/handle-datom
                                           db/ident]}]
                  (let [fx-fn (wrap-fx-fn fx)]
                    (->> attributes
@@ -597,20 +597,17 @@
 (def schema-compile-fx
   {:db/ident :db.fx/compile-schemas
    ::internal true
-   :db.fx/handle-datom
-   (fn
-     ([] #{})
-     ([db e a v pv a-schema acc] (conj acc e))
-     ([tx acc]
-      (if (seq acc)
-        (let [db (:db-after tx)]
-          (assoc tx :db-after
-                    (update db :schema compile-schemas (map (:eav db) acc))))
-        tx)))
+   :db.fx/init (fn [] #{})
+   :db.fx/handle-datom (fn [db e a v pv a-schema acc] (conj acc e))
+   :db.fx/handle-transaction (fn [tx-report acc]
+                               (if (seq acc)
+                                 (let [db (:db-after tx-report)]
+                                   (assoc tx-report :db-after
+                                                    (update db :schema compile-schemas (map (:eav db) acc))))
+                                 tx-report))
    :db.fx/attributes [:db/isComponent :db/valueType :db/cardinality :db/unique
                       :db/isComponent :db/fulltext :db/index :db/index-ae
-                      :db/tupleAttrs :db/tupleType :db/tupleTypes :db/ident
-                      :db.fx/handle-datom :db.fx/attributes]})
+                      :db/tupleAttrs :db/tupleType :db/tupleTypes :db/ident]})
 
 (def initial-schema [(merge {:db/ident :db/ident
                              ::internal true}
