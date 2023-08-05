@@ -677,8 +677,9 @@
     (create-conn conn-or-schema)
     conn-or-schema))
 
-(defn export-all
-  ([db id-fn] (export-all db id-fn (:eav db)))
+(defn export-db
+  "Returns a {:schema .. :tx ..} map to reproduce the current db"
+  ([db id-fn] (export-db db id-fn (:eav db)))
   ([db id-fn entity-map]
    (let [schema (:schema db)]
      (->> entity-map
@@ -700,7 +701,8 @@
                               m)
                         :db/id (id-fn id)))))
            (transient []))
-          persistent!))))
+          persistent!
+          (group-by (comp {true :schema false :tx} some? :db/ident))))))
 
 (comment
  ;; should this exist? mem-only...

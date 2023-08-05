@@ -126,7 +126,7 @@
                     :friend {:name "poppy"}
                     :friends [[:name "fred"]
                               [:name "matt"]]}])
-    (let [exports (mem/export-all @(db/conn) -)]
+    (let [exports (mem/export-db @(db/conn) -)]
       (is (= 7 (count exports))
           "One entity for each of the 4 entities and 3 schema entries")
       (is (neg? (->> exports
