@@ -355,7 +355,8 @@
   ([conn pull-expr e]
    (pull conn nil pull-expr e))
   ([conn {:keys [wrap-root wrap-ref]} pull-expr e]
-   (let [ref-wrapper (cond (false? wrap-ref) nil
+   (let [e (cond-> e (instance? Entity e) :db/id)
+         ref-wrapper (cond (false? wrap-ref) nil
                            wrap-ref (make-ref-wrapper wrap-ref)
                            :else ref-wrapper-default)       ;; TODO remove ref-wrapper-default
          root-wrapper (or wrap-root root-wrapper-default)
