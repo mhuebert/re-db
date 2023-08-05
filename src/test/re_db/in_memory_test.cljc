@@ -112,17 +112,39 @@
                  :owner {:db/id "fred"}                     ;; db/id map as ref
                  :name "Rabbit"}])
 
-(db/with-conn (doto (mem/create-conn upsert-schema)
-                (mem/transact! upsert-tx))
-  (is (= {:email "fred@eg.com"}
-         (->> (entity [:email "rabbit@eg.com"])
-              :owner
-              (db/pull [:email]))))
-  (->> (entity [:email "rabbit@eg.com"])
-       :owner
-       #_(db/pull [:email]))
+(defn flatten-all [coll]
+  (filter (complement coll?)
+          (rest (tree-seq coll? seq coll))))
 
-  )
+(deftest export-all
+  (db/with-conn {:name schema/unique-id
+                 :friend schema/ref
+                 :friends (merge schema/ref schema/many)}
+    (db/transact! [{:name "fred"
+                    :friend {:name "matt"}}
+                   {:name "sue"
+                    :friend {:name "poppy"}
+                    :friends [[:name "fred"]
+                              [:name "matt"]]}])
+    (let [exports (mem/export-all @(db/conn) -)]
+      (is (= 7 (count exports))
+          "One entity for each of the 4 entities and 3 schema entries")
+      (is (neg? (->> exports
+                     (filter (comp #{"fred"} :name))
+                     first
+                     :db/id))
+          ":db/id is a negative number")
+      (is (every? neg? (filter number? exports))
+          "Every number in the export is negative")
+      (is (= {:name "sue"
+              :friend {:name "poppy"}
+              :friends [{:name "fred"}
+                        {:name "matt"}]}
+             (db/pull '[:name
+                        {:friend [:name]}
+                        {:friends [:name]}] [:name "sue"]))
+          "Refs are pulled as expected"))))
+
 (deftest upserts
 
   (db/with-conn (doto (mem/create-conn upsert-schema)
