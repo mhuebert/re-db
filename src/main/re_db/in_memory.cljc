@@ -677,28 +677,30 @@
     (create-conn conn-or-schema)
     conn-or-schema))
 
-(defn export-all [db id-fn]
-  (let [schema (:schema db)]
-    (->> (:eav db)
-         (reduce-kv
-          (fn [out id m]
-            (cond-> out
-                    (not (::internal m))
-                    (conj!
-                     (assoc (reduce-kv
-                             (fn [m a v]
-                               (let [a-schema (schema a)]
-                                 (cond-> m
-                                         (some-> a-schema ref?)
-                                         (assoc a
-                                                (if (many? a-schema)
-                                                  (into (empty v) (map id-fn) v)
-                                                  (id-fn v))))))
-                             m
-                             m)
-                       :db/id (id-fn id)))))
-          (transient []))
-         persistent!)))
+(defn export-all
+  ([db id-fn] (export-all db id-fn (:eav db)))
+  ([db id-fn entity-map]
+   (let [schema (:schema db)]
+     (->> entity-map
+          (reduce-kv
+           (fn [out id m]
+             (cond-> out
+                     (not (::internal m))
+                     (conj!
+                      (assoc (reduce-kv
+                              (fn [m a v]
+                                (let [a-schema (schema a)]
+                                  (cond-> m
+                                          (some-> a-schema ref?)
+                                          (assoc a
+                                                 (if (many? a-schema)
+                                                   (into (empty v) (map id-fn) v)
+                                                   (id-fn v))))))
+                              m
+                              m)
+                        :db/id (id-fn id)))))
+           (transient []))
+          persistent!))))
 
 (comment
  ;; should this exist? mem-only...
