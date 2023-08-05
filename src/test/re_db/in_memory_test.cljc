@@ -127,9 +127,10 @@
                     :friends [[:name "fred"]
                               [:name "matt"]]}])
     (let [exports (mem/export-db @(db/conn) -)]
-      (is (= 7 (count exports))
+      (is (= 7 (count (apply concat (vals exports))))
           "One entity for each of the 4 entities and 3 schema entries")
       (is (neg? (->> exports
+                     :tx
                      (filter (comp #{"fred"} :name))
                      first
                      :db/id))
@@ -330,7 +331,7 @@
                                      :name "Ball"
                                      :owner "fred"}]))
       (is (= {:name "Fred"
-              :_owner ["ball"]}
+              :_owner #{"ball"}}
              (db/pull '[* :_owner] "fred"))
           "reverse refs")))
 
@@ -349,7 +350,7 @@
                                    :pet {:db/id "silly"}}
                                   #_[:db/add "1" :authors #{"fred" "mary"}]]))
     (is (= {:name "Fred"
-            :_authors ["1"]
+            :_authors #{"1"}
             :pet "fido"}
            (db/pull '[* :_authors] "fred"))
         "refs with cardinality-many")
@@ -402,7 +403,7 @@
             :child {:db/id "B1"
                     :child {:db/id "B2"}}}))
 
-    (is (= ["B1"]
+    (is (= #{"B1"}
            (-> (db/pull [:_child] "B2")
                :_child)))
 
@@ -418,7 +419,7 @@
            (-> (db/pull [{:children 2}] "A")
                :children first :children first :children first)))
 
-    (is (= [{:db/id "A.4" :children []}]
+    (is (= [{:db/id "A.4"}]
            (-> (db/pull [:db/id {:children :...}] "A")
                :children first :children first :children first :children first :children)))))
 

@@ -241,11 +241,11 @@
 ;; Pull API
 ;;
 
-(defn- wrap-v [v conn is-many f]
+(defn- wrap-v [v is-many f]
   (if f
     (if is-many
-      (mapv (fn [v] (f conn v)) v)
-      (f conn v))
+      (mapv f v)
+      (f v))
     v))
 
 (defn- -wrap-map-refs [ref-wrapper conn db m]
@@ -260,15 +260,19 @@
              m
              m))
 
+(defn comp-some [& fns]
+  (some->> (keep identity fns) seq (apply comp)))
+
 (defn compose-pull-xf [{:keys [default xform sort-by sort-by/dir skip limit]}]
-  (apply comp (cond-> ()
-                      default (conj #(if (some? %) % default))
-                      xform (conj xform)
-                      sort-by (conj (case dir
-                                      :desc #(clojure.core/sort-by sort-by (fn [a b] (compare b a)) %)
-                                      #(clojure.core/sort-by sort-by %)))
-                      skip (conj #(drop skip %))
-                      limit (conj #(take limit %)))))
+  (when-let [fns (seq (cond-> ()
+                              default (conj #(if (some? %) % default))
+                              xform (conj xform)
+                              sort-by (conj (case dir
+                                              :desc #(clojure.core/sort-by sort-by (fn [a b] (compare b a)) %)
+                                              #(clojure.core/sort-by sort-by %)))
+                              skip (conj #(drop skip %))
+                              limit (conj #(take limit %))))]
+    (apply comp fns)))
 
 (defn- -pull
   ([conn db ref-wrapper pullv e] (-pull conn db ref-wrapper pullv #{} e))
@@ -295,22 +299,21 @@
                                           (if (:db/id opts)
                                             [a :db/id #(vector a %) opts]
                                             [a alias (compose-pull-xf opts) opts]))
-                                        [a a identity])
+                                        [a a nil nil])
                 is-reverse (u/reverse-attr? a)
                 forward-a (cond-> a is-reverse u/forward-attr)
                 a-schema (ts/get-schema db forward-a)
                 is-ref (ts/ref? db a-schema)
                 is-many (or (ts/many? db a-schema) is-reverse)
+                val-fn (when-let [fns (seq (cond-> ()
+                                                   val-fn (conj val-fn)
+                                                   (and is-ref ref-wrapper) (conj (partial ref-wrapper conn))))]
+                         (apply comp fns))
                 v (get* conn db a-schema nil e a)
-                v (if is-many
-                    (mapv val-fn v)
-                    (val-fn v))
                 v (cond (not is-ref) v
 
                         ;; ref without pull-expr
-                        (nil? map-expr) (cond-> v
-                                                is-ref
-                                                (wrap-v conn is-many ref-wrapper))
+                        (nil? map-expr) v
 
                         ;; recurse
                         (or (number? map-expr) (#{'... :...} map-expr))
@@ -328,15 +331,17 @@
                                          (if is-many
                                            (into [] (keep do-pull) v)
                                            (do-pull v)))
-                                       (wrap-v v conn is-many ref-wrapper)))]
-                          refs #_(cond-> refs (not is-many) first))
+                                       v))]
+                          refs  #_(cond-> refs (not is-many) first))
 
                         ;; cardinality/many
                         is-many (mapv #(-pull conn db ref-wrapper map-expr %) v)
 
                         ;; cardinality/one
                         :else (-pull conn db ref-wrapper map-expr v))]
-            (cond-> m (some? v) (assoc alias v)))))
+            (cond-> m
+                    (some? v)
+                    (assoc alias (wrap-v v is-many val-fn))))))
       nil
       pullv))))
 
