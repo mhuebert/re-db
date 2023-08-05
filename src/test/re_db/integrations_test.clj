@@ -168,10 +168,6 @@
     (ts/transact conn [{:owner [:person/name "Fred"]
                         :person/name "Ball"}]))
 
-  (dl/update-schema dl-conn {:owner (merge schema/ref
-                                           schema/unique-id
-                                           schema/one)})
-
   (let [[dm-conn
          dl-conn
          mem-conn] (map :conn databases)]
@@ -222,14 +218,14 @@
 
 (deftest pull
   (r/session
-    (db/with-conn {:person/name schema/unique-id}
-                  (db/transact! [{:person/name "Foo"}])
-                  (is (= (db/pull '[*] [:person/name "Foo"])
-                         {:person/name "Foo"}))
-                  (let [rx (r/reaction! (db/pull '[*] [:person/name "Foo"]))]
-                    (is (= @rx {:person/name "Foo"}))
-                    (db/transact! [[:db/add [:person/name "Foo"] :age 42]])
-                    (is (= @rx {:person/name "Foo" :age 42}))))))
+   (db/with-conn {:person/name schema/unique-id}
+     (db/transact! [{:person/name "Foo"}])
+     (is (= (db/pull '[*] [:person/name "Foo"])
+            {:person/name "Foo"}))
+     (let [rx (r/reaction! (db/pull '[*] [:person/name "Foo"]))]
+       (is (= @rx {:person/name "Foo"}))
+       (db/transact! [[:db/add [:person/name "Foo"] :age 42]])
+       (is (= @rx {:person/name "Foo" :age 42}))))))
 
 (deftest transform-with-tx
   (db/with-conn {:movie/title schema/unique-id
@@ -314,7 +310,7 @@
 
  ;; filtering api
  (db/with-conn (dm-db)
-   (db/where ;; the first clause selects a group of entities
+   (db/where                                                ;; the first clause selects a group of entities
     [:movie/title "Repo Man"]
     ;; subsequent clauses filter the initial set of entities
     [:movie/top-emotion [:emotion/name "sad"]]))
@@ -399,27 +395,34 @@
                              {:id "A"
                               :favorite-attribute :person/name}])
               [(-> (db/entity [:id "A"]) :favorite-attribute)
-               (db/pull '[:favorite-attribute] [:id "A"])
-               (db/pull '[*] [:id "A"])])))))
+               (->> [:id "A"] (db/pull '[:favorite-attribute]))
+               (->> [:id "A"] (db/pull '[*]))])))))
 
-(deftest idents-in-where
+(deftest idents
   (db/with-conn dm-conn
-    (db/merge-schema! {:service/commission (merge schema/ref schema/one)
-                       :system/id (merge schema/unique-id schema/one schema/string)
-                       :commission/name (merge schema/string schema/one)
-                       :service/phase (merge schema/ref schema/one)
-                       :phase/entry {}})
-    (db/transact! [{:db/id "1"
-                    :system/id "S"
-                    :service/phase :phase/entry
-                    :service/commission "2"}
-                   {:db/id "2"
-                    :system/id "C"
-                    :commission/name "A commission"}])
-    (is (some? (first (db/where [[:service/phase :phase/entry]
-                                 [:service/commission [:system/id "C"]]]))))
-    (is (some? (first (db/where [[:service/commission [:system/id "C"]]
-                                 [:service/phase :phase/entry]]))))))
+
+    (is
+     (apply =
+            (for [{:keys [conn id]} databases
+                  :when (not= id :datalevin)]
+              (db/with-conn conn
+                (db/merge-schema! {:service/commission (merge schema/ref schema/one)
+                                   :system/id (merge schema/unique-id schema/one schema/string)
+                                   :commission/name (merge schema/string schema/one)
+                                   :service/phase (merge schema/ref schema/one)
+                                   :phase/entry {}})
+                (db/transact! [{:db/id "1"
+                                :system/id "S"
+                                :service/phase :phase/entry
+                                :service/commission "2"}
+                               {:db/id "2"
+                                :system/id "C"
+                                :commission/name "A commission"}])
+                [(some? (first (db/where [[:service/phase :phase/entry]
+                                          [:service/commission [:system/id "C"]]])))
+                 (some? (first (db/where [[:service/commission [:system/id "C"]]
+                                          [:service/phase :phase/entry]])))
+                 (db/pull '[:service/phase] [:system/id "S"])]))))))
 
 ;; issues
 ;; - support for keywords-as-refs in re-db (? what does this even mean)

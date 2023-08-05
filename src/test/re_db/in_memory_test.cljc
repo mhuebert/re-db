@@ -330,7 +330,7 @@
                                      :name "Ball"
                                      :owner "fred"}]))
       (is (= {:name "Fred"
-              :_owner [{:db/id "ball"}]}
+              :_owner ["ball"]}
              (db/pull '[* :_owner] "fred"))
           "reverse refs")))
 
@@ -349,8 +349,8 @@
                                    :pet {:db/id "silly"}}
                                   #_[:db/add "1" :authors #{"fred" "mary"}]]))
     (is (= {:name "Fred"
-            :_authors [{:db/id "1"}]
-            :pet {:db/id "fido"}}
+            :_authors ["1"]
+            :pet "fido"}
            (db/pull '[* :_authors] "fred"))
         "refs with cardinality-many")
     (is (= {:db/id "fido" :name "Fido"}
@@ -402,19 +402,19 @@
             :child {:db/id "B1"
                     :child {:db/id "B2"}}}))
 
-    (is (= [{:db/id "B1"}]
+    (is (= ["B1"]
            (-> (db/pull [:_child] "B2")
                :_child)))
 
-    (is (= {:db/id "A.0"}
+    (is (= "A.0"
            (-> (db/pull [:children] "A")
                :children first)))
 
-    (is (= {:db/id "A.1"}
+    (is (= "A.1"
            (-> (db/pull [{:children 1}] "A")
                :children first :children first)))
 
-    (is (= {:db/id "A.2"}
+    (is (= "A.2"
            (-> (db/pull [{:children 2}] "A")
                :children first :children first :children first)))
 

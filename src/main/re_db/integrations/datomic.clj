@@ -7,7 +7,12 @@
            [datomic.db Db]
            [datomic Datom]))
 
-(defn- datom-v [^Datom d] (.-v d))
+(defn resolve-ident [db e] (or (d/ident db e) e))
+
+(defn- datom-v [^datalevin.db.DB db a-schema ^datalevin.datom.Datom d]
+  (cond->> (:v d)
+           (= :db.type/ref (:value-type a-schema))
+           (resolve-ident db)))
 
 (defn ave-index? [attribute]
   (or (:indexed attribute)
@@ -19,10 +24,10 @@
     ([db a-schema e a]
      (let [datoms (d/datoms db :eavt e a)]
        (if (ts/many? db a-schema)
-         (mapv datom-v datoms)
-         (some-> (first datoms) datom-v))))
+         (mapv (partial datom-v db a-schema) datoms)
+         (some->> (first datoms) (datom-v db a-schema)))))
     ([db e]
-     (ts/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
+     (ts/datoms->map db (d/datoms db :eavt e))))
   (ave [db a-schema a v]
     (if (ave-index? a-schema)
       (map :e (d/datoms db :avet a v))
@@ -34,7 +39,7 @@
   (ae [db a-schema a] (map :e (d/datoms db :aevt a)))
   (datom-a [db a] (d/entid db a))
   (-get-schema [db a] (d/attribute db a))
-  (id->ident [db e] (d/ident db e))
+  (id->ident [db e] (resolve-ident db e))
   (component? [this schema] (:db/isComponent schema))
   (ref? [db schema] (= :db.type/ref (:value-type schema)))
   (unique? [db schema] (:unique schema))

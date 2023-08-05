@@ -139,10 +139,6 @@
       (or (id->ident (ts/db conn) e)
           (wrap-ref conn e)))))
 
-(def ref-wrapper-default (make-ref-wrapper (fn [_conn e]
-                                             ;; TODO
-                                             ;; remove (:db/id e e) here, check what happens in datomic
-                                             {:db/id e})))
 (def !ref-wrapper-entity (delay (make-ref-wrapper entity)))
 (defn root-wrapper-default [_conn m] m)
 
@@ -283,8 +279,10 @@
         (if (#{'* :*} pullexpr)
           (do
             (-depend-on-triple! conn db nil e nil nil)
-            (if (and e ref-wrapper)
-              (-wrap-map-refs ref-wrapper conn db (dissoc (ts/eav db e) :db/id))
+            (if e
+              (cond->> (dissoc (ts/eav db e) :db/id)
+                       ref-wrapper
+                       (-wrap-map-refs ref-wrapper conn db))
               m))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
@@ -356,9 +354,7 @@
    (pull conn nil pull-expr e))
   ([conn {:keys [wrap-root wrap-ref]} pull-expr e]
    (let [e (cond-> e (instance? Entity e) :db/id)
-         ref-wrapper (cond (false? wrap-ref) nil
-                           wrap-ref (make-ref-wrapper wrap-ref)
-                           :else ref-wrapper-default)       ;; TODO remove ref-wrapper-default
+         ref-wrapper (some-> wrap-ref make-ref-wrapper)
          root-wrapper (or wrap-root root-wrapper-default)
          db (ts/db conn)]
      (->> (-pull conn db ref-wrapper pull-expr e)

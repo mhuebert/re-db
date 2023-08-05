@@ -49,12 +49,13 @@
 
 (defn merge-schema [conn schema] (-merge-schema (db conn) conn schema))
 
-(defn datoms->map
-  ([db datoms] (datoms->map (fn [db a] a) db datoms))
-  ([id-ident db datoms]
-   (let [many? (memoize (fn [a] (many? db (get-schema db a))))]
-     (reduce (fn [out [_ a v]]
-               (let [attr (id-ident db a)]
-                 (if (many? a)
-                   (update out attr (fnil conj #{}) v)
-                   (assoc out attr v)))) {} datoms))))
+(defn datoms->map [db datoms]
+  (reduce (fn [out [_ a v]]
+            (let [attr (id->ident db a)
+                  a-schema (get-schema db a)
+                  v (cond->> v (ref? db a-schema) (id->ident db))]
+              (if (many? db a-schema)
+                (update out attr (fnil conj #{}) v)
+                (assoc out attr v))))
+          {}
+          datoms))
