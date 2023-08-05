@@ -20,7 +20,7 @@
        (let [datoms (d/datoms db :eavt e a)]
          (if (ts/many? db a-schema)
            (map datom-v datoms)
-           (:v (first datoms))))))
+           (some-> (first datoms) datom-v)))))
     ([db e] (when-let [e (db/entid db e)]
               (ts/datoms->map db (d/datoms db :eavt e)))))
   (ave [db a-schema a v] (map datom-e (d/datoms db :ave a v)))

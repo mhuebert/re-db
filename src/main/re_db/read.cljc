@@ -96,7 +96,7 @@
 (defn- -resolve-e [conn db e]
   (if (vector? e)
     (-resolve-lookup-ref conn db e)
-    (:db/id e e)))
+    e))
 
 (defn- resolve-v [conn db a-schema a v]
   (cond->> v
@@ -142,7 +142,7 @@
 (def ref-wrapper-default (make-ref-wrapper (fn [_conn e]
                                              ;; TODO
                                              ;; remove (:db/id e e) here, check what happens in datomic
-                                             {:db/id (:db/id e e)})))
+                                             {:db/id e})))
 (def !ref-wrapper-entity (delay (make-ref-wrapper entity)))
 (defn root-wrapper-default [_conn m] m)
 
@@ -226,7 +226,6 @@
 
 (defn entity [conn e]
   (let [db (ts/db conn)
-        e (:db/id e e)
         e (or (-resolve-e conn db e) e)]
     (->Entity conn e false nil)))
 
@@ -356,8 +355,7 @@
   ([conn pull-expr e]
    (pull conn nil pull-expr e))
   ([conn {:keys [wrap-root wrap-ref]} pull-expr e]
-   (let [e (:db/id e e)
-         ref-wrapper (cond (false? wrap-ref) nil
+   (let [ref-wrapper (cond (false? wrap-ref) nil
                            wrap-ref (make-ref-wrapper wrap-ref)
                            :else ref-wrapper-default)       ;; TODO remove ref-wrapper-default
          root-wrapper (or wrap-root root-wrapper-default)

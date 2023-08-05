@@ -16,7 +16,11 @@
 (extend-type Db
   ts/ITripleStore
   (eav
-    ([db a-schema e a] (get (d/entity db e) a))
+    ([db a-schema e a]
+     (let [datoms (d/datoms db :eavt e a)]
+       (if (ts/many? db a-schema)
+         (mapv datom-v datoms)
+         (some-> (first datoms) datom-v))))
     ([db e]
      (ts/datoms->map (fn [db a] (d/ident db a)) db (d/datoms db :eavt e))))
   (ave [db a-schema a v]
