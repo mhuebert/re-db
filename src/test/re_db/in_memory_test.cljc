@@ -6,10 +6,8 @@
             [re-db.read :as read :refer [#?(:cljs Entity)]]
             [re-db.schema :as s]
             [re-db.schema :as schema]
-            [re-db.util :as util]
-            [clojure.pprint :refer [pprint]])
+            [re-db.util :as util])
   #?(:clj (:import [re_db.read Entity])))
-
 
 (defn throws [f]
   (try (do (f) false)
@@ -114,7 +112,17 @@
                  :owner {:db/id "fred"}                     ;; db/id map as ref
                  :name "Rabbit"}])
 
+(db/with-conn (doto (mem/create-conn upsert-schema)
+                (mem/transact! upsert-tx))
+  (is (= {:email "fred@eg.com"}
+         (->> (entity [:email "rabbit@eg.com"])
+              :owner
+              (db/pull [:email]))))
+  (->> (entity [:email "rabbit@eg.com"])
+       :owner
+       #_(db/pull [:email]))
 
+  )
 (deftest upserts
 
   (db/with-conn (doto (mem/create-conn upsert-schema)
@@ -612,9 +620,11 @@
                           :foo 2}])
     (is (= #{} (-> @conn :ae :foo set)))
     (mem/merge-schema! conn {:foo s/ae})
-    (is (mem/ae? (mem/get-schema @conn :foo)))
-    (is (= #{} (-> @conn :ae :foo set)))
-    (swap! conn mem/rebuild-index :foo :ae)
+    (is (mem/ae? (mem/get-schema @conn :foo))
+        "After merging schema, :foo has an ae-index")
+    (is (= #{"A" "B"} (-> @conn :ae :foo set))
+        "After merging schema, index is built")
+    (swap! conn mem/build-index :foo :ae)
     (is (= #{"A" "B"} (-> @conn :ae :foo set)))))
 
 (deftest upsert-reverse
