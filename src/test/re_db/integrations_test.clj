@@ -1,11 +1,11 @@
 (ns re-db.integrations-test
-  (:require [taoensso.tufte :as tufte :refer (defnp p profiled profile)]
+  (:require [clojure.pprint :refer [pprint]]
             [clojure.string :as str]
             [clojure.test :refer [are deftest is]]
             [clojure.walk :as walk]
             [datalevin.core :as dl]
-            [datomic.api :as dm]
             [datascript.core :as ds]
+            [datomic.api :as dm]
             [re-db.api :as db]
             [re-db.hooks :as hooks]
             [re-db.in-memory :as mem]
@@ -13,10 +13,11 @@
             [re-db.integrations.datomic]
             [re-db.integrations.in-memory]
             [re-db.memo :as memo]
-            [re-db.triplestore :as ts]
             [re-db.reactive :as r]
             [re-db.read :as read]
-            [re-db.schema :as schema]))
+            [re-db.schema :as schema]
+            [re-db.triplestore :as ts]
+            [taoensso.tufte :as tufte :refer [p profile]]))
 
 
 (swap! read/!listeners empty)
@@ -511,3 +512,20 @@
    )
 
  )
+
+(deftest pull
+  (doall
+   (for [{:keys [conn]} databases]
+     (db/with-conn conn
+       (ts/merge-schema conn {:friend (merge schema/ref schema/one)
+                              :friends (merge schema/ref schema/many)
+                              :name (merge schema/unique-id schema/string schema/one)})
+       (let [tx {:name "fred"
+                 :friend {:name "bert"}
+                 :friends [{:name "sally"}
+                           {:name "rosa"}]}]
+         (db/transact! [tx])
+         (is (= tx (db/pull '[*
+                              {:friends [*]}
+                              {:friend [*]}]
+                            [:name "fred"]))))))))

@@ -156,7 +156,7 @@
             (let [is-many (ts/many? db a-schema)]
               (when (some-val is-many v)
                 (if (or is-reverse is-many)
-                  (mapv #(apply-ref-fn ref-fn conn %) v)
+                  (mapv (partial apply-ref-fn ref-fn conn) v)
                   (apply-ref-fn ref-fn conn v))))
             v))))))
 
@@ -252,7 +252,7 @@
                            (ts/ref? db a-schema)
                            (assoc a
                                   (if (ts/many? db a-schema)
-                                    (into (empty v) (map #(apply-ref-fn ref-fn conn %)) v)
+                                    (into (empty v) (map (partial apply-ref-fn ref-fn conn)) v)
                                     (apply-ref-fn ref-fn conn v))))))
                m
                m)
@@ -281,10 +281,8 @@
         (if (#{'* :*} pullexpr)
           (do
             (-depend-on-triple! conn db nil e nil nil)
-            (if e
-              (->> (dissoc (ts/eav db e) :db/id)
-                   (-wrap-map-refs ref-fn conn db))
-              m))
+            (->> (dissoc (ts/eav db e) :db/id)
+                 (-wrap-map-refs ref-fn conn db)))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
                                (first pullexpr))
@@ -302,33 +300,26 @@
                 a-schema (ts/get-schema db forward-a)
                 is-ref (ts/ref? db a-schema)
                 is-many (or (ts/many? db a-schema) is-reverse)
-                val-fn (when-let [fns (seq (cond-> ()
-                                                   val-fn (conj val-fn)
-                                                   (and is-ref ref-fn) (conj #(apply-ref-fn ref-fn conn %))))]
-                         (apply comp fns))
-                v (when-some [v (cond-> (get* conn db a-schema nil e a)
-                                        is-many not-empty)]
+                v (let [v (get* conn db a-schema nil e a)]
                     (cond (not is-ref) v
-                          ;; ref without pull-expr
-                          (nil? map-expr) v
+                          (nil? map-expr) (wrap-v v is-many ref-fn)        ;; ref without pull-expr
                           ;; recurse
                           (or (number? map-expr) (#{'... :...} map-expr))
-                          (let [recursions (if (= 0 map-expr) false map-expr)
-                                refs (when v
-                                       (if recursions
-                                         (let [found (conj found e)
-                                               pullv (if (number? recursions)
-                                                       ;; decrement recurse parameter
-                                                       (update-in pullv [i forward-a] dec)
-                                                       pullv)
-                                               do-pull #(if (and (= :... recursions) (found %))
-                                                          %
-                                                          (-pull conn db ref-fn pullv found %))]
-                                           (if is-many
-                                             (into [] (keep do-pull) v)
-                                             (do-pull v)))
-                                         v))]
-                            refs  #_(cond-> refs (not is-many) first))
+                          (let [recursions (if (= 0 map-expr) false map-expr)]
+                            (when v
+                              (if recursions
+                                (let [found (conj found e)
+                                      pullv (if (number? recursions)
+                                              ;; decrement recurse parameter
+                                              (update-in pullv [i forward-a] dec)
+                                              pullv)
+                                      do-pull #(if (and (= :... recursions) (found %))
+                                                 %
+                                                 (-pull conn db ref-fn pullv found %))]
+                                  (if is-many
+                                    (into [] (keep do-pull) v)
+                                    (do-pull v)))
+                                v)))
 
                           ;; cardinality/many
                           is-many (mapv #(-pull conn db ref-fn map-expr %) v)
@@ -336,7 +327,7 @@
                           ;; cardinality/one
                           :else (-pull conn db ref-fn map-expr v)))]
             (cond-> m
-                    (some? v)
+                    (some-val is-many v)
                     (assoc alias (wrap-v v is-many val-fn))))))
       nil
       pullv))))
@@ -354,7 +345,7 @@
   ([conn pull-expr e]
    (pull conn nil pull-expr e))
   ([conn {:keys [wrap-root wrap-ref]} pull-expr e]
-   (let [e (cond-> e (instance? Entity e) :db/id)
+   (let [e (:db/id e e) #_(cond-> e (instance? Entity e) :db/id)
          db (ts/db conn)]
      (cond->> (-pull conn db wrap-ref pull-expr e)
               wrap-root
