@@ -9,7 +9,7 @@
 
 (defn resolve-ident [db e] (or (d/ident db e) e))
 
-(defn- datom-v [^datalevin.db.DB db a-schema ^datalevin.datom.Datom d]
+(defn- datom-v [^Db db a-schema ^Datom d]
   (cond->> (:v d)
            (= :db.type/ref (:value-type a-schema))
            (resolve-ident db)))
