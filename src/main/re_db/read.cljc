@@ -353,12 +353,12 @@
   ([conn pull-expr] (fn [e] (pull conn pull-expr e)))
   ([conn pull-expr e]
    (pull conn nil pull-expr e))
-  ([conn {:keys [root-fn ref-fn]} pull-expr e]
+  ([conn {:keys [wrap-root wrap-ref]} pull-expr e]
    (let [e (cond-> e (instance? Entity e) :db/id)
          db (ts/db conn)]
-     (cond->> (-pull conn db ref-fn pull-expr e)
-              root-fn
-              (root-fn conn)))))
+     (cond->> (-pull conn db wrap-ref pull-expr e)
+              wrap-root
+              (wrap-root conn)))))
 
 (defn partial-pull
   "Defines a 3-arity pull function with default options"
