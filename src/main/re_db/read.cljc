@@ -127,22 +127,17 @@
 
 (declare entity)
 
-(defn- id->ident
-  "Resolve ident for entity-id (numeric :db/id becomes keyword)"
-  [db v]
-  (cond (keyword? v) v
-        (number? v) (u/guard (ts/id->ident db v) keyword?)))
+(defn apply-ref-fn [f conn e]
+  (if #?(:clj (keyword? e) :cljs false)
+    e
+    (f conn e)))
 
-(defn make-ref-wrapper [wrap-ref]
-  (fn [conn e]
-    (when e
-      (or (id->ident (ts/db conn) e)
-          (wrap-ref conn e)))))
+(defn some-val [is-many v]
+  (if is-many
+    (not (empty? v))
+    (some? v)))
 
-(def !ref-wrapper-entity (delay (make-ref-wrapper entity)))
-(defn root-wrapper-default [_conn m] m)
-
-(defn get* [conn db a-schema ref-wrapper e a]
+(defn get* [conn db a-schema ref-fn e a]
   (when e
     (if (= :db/id a)
       e
@@ -157,11 +152,12 @@
           (if is-reverse
             (-depend-on-triple! conn db a-schema nil a e)   ;; [_ a v]
             (-depend-on-triple! conn db a-schema e a nil))  ;; [e a _]
-          (if (and is-ref ref-wrapper)
-            (if (or is-reverse
-                    (ts/many? db a-schema))
-              (mapv #(ref-wrapper conn %) v)
-              (ref-wrapper conn v))
+          (if (and is-ref ref-fn)
+            (let [is-many (ts/many? db a-schema)]
+              (when (some-val is-many v)
+                (if (or is-reverse is-many)
+                  (mapv #(apply-ref-fn ref-fn conn %) v)
+                  (apply-ref-fn ref-fn conn v))))
             v))))))
 
 (defmacro -resolve-entity-e! [conn db e-sym e-resolved-sym]
@@ -203,7 +199,7 @@
     (-lookup [o a]
       (let [db (ts/db conn)]
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-        (get* conn db (ts/get-schema db a) @!ref-wrapper-entity e a)))
+        (get* conn db (ts/get-schema db a) entity e a)))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
@@ -248,17 +244,19 @@
       (f v))
     v))
 
-(defn- -wrap-map-refs [ref-wrapper conn db m]
-  (reduce-kv (fn [m a v]
-               (let [a-schema (ts/get-schema db a)]
-                 (cond-> m
-                         (ts/ref? db a-schema)
-                         (assoc a
-                                (if (ts/many? db a-schema)
-                                  (into (empty v) (map #(ref-wrapper conn %)) v)
-                                  (ref-wrapper conn v))))))
-             m
-             m))
+(defn- -wrap-map-refs [ref-fn conn db m]
+  (if ref-fn
+    (reduce-kv (fn [m a v]
+                 (let [a-schema (ts/get-schema db a)]
+                   (cond-> m
+                           (ts/ref? db a-schema)
+                           (assoc a
+                                  (if (ts/many? db a-schema)
+                                    (into (empty v) (map #(apply-ref-fn ref-fn conn %)) v)
+                                    (apply-ref-fn ref-fn conn v))))))
+               m
+               m)
+    m))
 
 (defn comp-some [& fns]
   (some->> (keep identity fns) seq (apply comp)))
@@ -275,8 +273,8 @@
     (apply comp fns)))
 
 (defn- -pull
-  ([conn db ref-wrapper pullv e] (-pull conn db ref-wrapper pullv #{} e))
-  ([conn db ref-wrapper pullv found e]
+  ([conn db wrap-ref pullv e] (-pull conn db wrap-ref pullv #{} e))
+  ([conn db ref-fn pullv found e]
    (when-let [e (-resolve-e conn db e)]
      (reduce-kv
       (fn pull [m i pullexpr]
@@ -284,9 +282,8 @@
           (do
             (-depend-on-triple! conn db nil e nil nil)
             (if e
-              (cond->> (dissoc (ts/eav db e) :db/id)
-                       ref-wrapper
-                       (-wrap-map-refs ref-wrapper conn db))
+              (->> (dissoc (ts/eav db e) :db/id)
+                   (-wrap-map-refs ref-fn conn db))
               m))
           (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
                                [pullexpr nil]
@@ -307,7 +304,7 @@
                 is-many (or (ts/many? db a-schema) is-reverse)
                 val-fn (when-let [fns (seq (cond-> ()
                                                    val-fn (conj val-fn)
-                                                   (and is-ref ref-wrapper) (conj (partial ref-wrapper conn))))]
+                                                   (and is-ref ref-fn) (conj #(apply-ref-fn ref-fn conn %))))]
                          (apply comp fns))
                 v (when-some [v (cond-> (get* conn db a-schema nil e a)
                                         is-many not-empty)]
@@ -326,7 +323,7 @@
                                                        pullv)
                                                do-pull #(if (and (= :... recursions) (found %))
                                                           %
-                                                          (-pull conn db ref-wrapper pullv found %))]
+                                                          (-pull conn db ref-fn pullv found %))]
                                            (if is-many
                                              (into [] (keep do-pull) v)
                                              (do-pull v)))
@@ -334,10 +331,10 @@
                             refs  #_(cond-> refs (not is-many) first))
 
                           ;; cardinality/many
-                          is-many (mapv #(-pull conn db ref-wrapper map-expr %) v)
+                          is-many (mapv #(-pull conn db ref-fn map-expr %) v)
 
                           ;; cardinality/one
-                          :else (-pull conn db ref-wrapper map-expr v)))]
+                          :else (-pull conn db ref-fn map-expr v)))]
             (cond-> m
                     (some? v)
                     (assoc alias (wrap-v v is-many val-fn))))))
@@ -356,13 +353,12 @@
   ([conn pull-expr] (fn [e] (pull conn pull-expr e)))
   ([conn pull-expr e]
    (pull conn nil pull-expr e))
-  ([conn {:keys [wrap-root wrap-ref]} pull-expr e]
+  ([conn {:keys [root-fn ref-fn]} pull-expr e]
    (let [e (cond-> e (instance? Entity e) :db/id)
-         ref-wrapper (some-> wrap-ref make-ref-wrapper)
-         root-wrapper (or wrap-root root-wrapper-default)
          db (ts/db conn)]
-     (->> (-pull conn db ref-wrapper pull-expr e)
-          (root-wrapper conn)))))
+     (cond->> (-pull conn db ref-fn pull-expr e)
+              root-fn
+              (root-fn conn)))))
 
 (defn partial-pull
   "Defines a 3-arity pull function with default options"
