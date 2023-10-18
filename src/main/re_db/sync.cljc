@@ -49,36 +49,35 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Result handling (client)
 
-(defn db-id
-  "re-db id associated with the current stream"
-  [descriptor]
-  {::id descriptor})
-
 (defn loading-promise
   "Custom promise implementation for suspense - completes via `deliver` without handling values"
   []
   #?(:clj (promise)
      :cljs
      (let [!resolved (volatile! false)
+           !value (volatile! nil)
            !callbacks (volatile! [])]
        (reify
          Object
          (then [_ f]
            (if @!resolved
-             (f nil)
+             (f @!value)
              (vswap! !callbacks conj f)))
-         (deliver [_]
+         (deliver [_ value]
            (vreset! !resolved true)
-           (doseq [f @!callbacks] (f nil))
+           (vreset! !value value)
+           (doseq [f @!callbacks] (f value))
            (vswap! !callbacks empty))))))
 
 
-(defn deliver [x]
-  #?(:cljs (.deliver ^js x)
-     :clj  (clojure.core/deliver x nil)))
+(defn deliver [x value]
+  #?(:cljs (.deliver ^js x value)
+     :clj  (clojure.core/deliver x value)))
 
-(defn read-result [qvec]
-  (d/get (db-id qvec) :result))
+(memo/defn-memo $result-ratom [qvec]
+  (r/atom nil {:dispose-delay 1000}))
+
+(defn read-result [qvec] @($result-ratom qvec))
 
 (defn- merge-result [result1 result2]
   (let [txs (:txs result2)
@@ -107,13 +106,15 @@
 (defn transact-result
   ([id message] (transact-result {} id message))
   ([result-resolvers qvec message]
-   (let [prev-result (read-result qvec)
+   (let [!result ($result-ratom qvec)
+         prev-result @!result
          {:as result :keys [txs]} (resolve-result result-resolvers prev-result message)
-         result (not-empty (dissoc result :txs))
-         txs (cond-> [[:db/add (db-id qvec) :result result]]
-                     txs (into txs))
-         tx-report (d/transact! txs)]
-     (some-> (:loading? prev-result) deliver)
+         tx-report (some-> txs d/transact!)]
+     (reset! !result (not-empty (dissoc result :txs)))
+     ;; TODO
+     ;; put these two effects into a single "transaction"?
+     ;; (wait to notify until all complete)
+     (some-> (:loading? prev-result) (deliver @!result))
      tx-report)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -210,22 +211,20 @@
 (defn client:unwatch [channel query]
   (swap! !watching update channel dissoc query)
   (send channel [::unwatch query])
-  (some-> (:loading? (read-result query)) deliver))
+  (some-> (:loading? (read-result query)) (deliver nil)))
 
-(defn start-loading! [qvec]
-  (d/transact! [[:db/add (db-id qvec) :result {:loading? (loading-promise)}]]))
+(defn query-start-promise [qvec]
+  (reset! ($result-ratom qvec) {:loading? (loading-promise)}))
 
 (memo/defn-memo $query
-  "(client) Watch a value (by query, usually a vector).
-   Returns map containing `:value`, `:error`, or `:loading?`}"
+  "(client) Watch a value (by query, usually a vector)."
   [channel qvec]
-
   ;; set initial :loading? to a `suspended` value, to be resolved
   ;; when the first result arrives.
   #?(:cljs
-     (when-not (read-result qvec) (start-loading! qvec)))
-
+     (when-not (read-result qvec) (query-start-promise qvec)))
   (r/reaction
+    {:meta {:dispose-delay 1000}}
     (hooks/use-effect
       (fn []
         (send channel [::watch qvec])
