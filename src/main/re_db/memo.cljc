@@ -51,16 +51,33 @@
   (defmacro fn-memo [& args]
     `(memoize (fn ~@args))))
 
+(defn- parse-optional-args [form preds]
+  (loop [preds preds
+         out   []
+         args  form]
+    (if-let [pred (first preds)]
+      (if (pred (first args))
+        (recur (rest preds)
+               (conj out (first args))
+               (rest args))
+        (recur (rest preds)
+               (conj out nil)
+               args))
+      (conj out args))))
+
 (sci-macro
   (defmacro def-memo
     "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
      it will be removed from the memo cache when the last reference is removed."
-    ([name doc f] `(re-db.memo/def-memo ~(with-meta name {:doc doc}) ~f))
-    ([name f]
-     (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
-     `(do (defonce ~name (memoize nil))
-          (reset-fn! ~name ~f)
-          ~name))))
+    [name & args]
+    (assert (str/starts-with? (str name) "$") "A subscription's name must begin with $")
+    (let [[doc opts f] (parse-optional-args args [string? map? any?])
+          name (with-meta name (merge {}
+                                      (when doc {:doc doc})
+                                      opts))]
+      `(do (defonce ~name (memoize nil))
+           (reset-fn! ~name ~f)
+           ~name))))
 
 (defn- without-docstring [args] (cond-> args (string? (first args)) rest))
 
@@ -69,7 +86,8 @@
     "Defines a memoized function. If the return value implements re-db.reactive/IReactiveValue,
      it will be removed from the memo cache when the last reference is removed."
     [name & args]
-    `(def-memo ~name (fn ~name ~@(without-docstring args)))))
+    (let [[doc opts args] (parse-optional-args args [string? map?])]
+      `(def-memo ~name ~@(keep identity [doc opts]) (fn ~name ~@(without-docstring args))))))
 
 (defn dispose! [memoized]
   (let [!state (::state (meta memoized))]
