@@ -52,9 +52,8 @@
 
    Recognizes only a single entity-map, or a list of entity-maps. Any other shape
    will be shipped as-is."
-  [[old-result new-value]]
-  (let [{old-value :value} old-result
-        shape (cond (:db/id new-value) :entities/one
+  [[old-value new-value]]
+  (let [shape (cond (:db/id new-value) :entities/one
                     (and (sequential? new-value)
                          (:db/id (first new-value))) :entities/many
                     :else :value)]
