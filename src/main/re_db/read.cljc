@@ -283,10 +283,10 @@
             (-depend-on-triple! conn db nil e nil nil)
             (->> (dissoc (ts/eav db e) :db/id)
                  (-wrap-map-refs ref-fn conn db)))
-          (let [[a map-expr] (if (or (keyword? pullexpr) (list? pullexpr))
+          (let [[a map-expr] (if (or (keyword? pullexpr) (seq? pullexpr))
                                [pullexpr nil]
                                (first pullexpr))
-                [a alias val-fn opts] (if (list? a)
+                [a alias val-fn opts] (if (seq? a)
                                         (let [{:as opts
                                                alias :as
                                                :or {alias (first a)}} (apply hash-map (rest a))
