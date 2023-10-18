@@ -37,10 +37,12 @@
 (defn use-derefs* [f]
   #?(:cljs
      (let [!derefs (useCallback (volatile! []) (cljs.core/array))
+           key (goog/getUid !derefs)
            out (binding [r/*captured-derefs* (doto !derefs (vreset! []))] (f))
            subscribe (useCallback (fn [changed!]
-                                    (doseq [ref @!derefs] (add-watch ref !derefs (fn [_ _ _ _] (changed!))))
-                                    #(doseq [ref @!derefs] (remove-watch ref !derefs)))
+                                    (let [derefs @!derefs]
+                                      (doseq [ref derefs] (add-watch ref key (fn [_ _ _ _] (changed!))))
+                                      #(doseq [ref derefs] (remove-watch ref key))))
                                   #js[(str/join "-" (map goog/getUid @!derefs))] #_(use-deps @!derefs))] ;; re-subscribe when derefs change (by identity, not value)
        (useSyncExternalStoreWithSelector subscribe
                                          #(mapv r/peek @!derefs) ;; get-snapshot (reads values of derefs)
