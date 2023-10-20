@@ -1,51 +1,74 @@
 (ns re-db.sync.entity-diff-2
   (:require [clojure.walk :as walk]
-            [re-db.xform :as xf]
-            [re-db.sync.transit :as t]))
+            [re-db.sync :as-alias sync]
+            [re-db.sync.transit :as t]
+            [re-db.xform :as xf]))
+
+;; sync any data structure containing entities (identifiable by id-key).
+;; flatten the result into a stream of {:value, ::entities} maps.
 
 (defn select-changed-keys [old-m new-m]
+  ;; If a new key differs from an old key, update it.
+  ;; don't assume a missing key implies a nil value - entities can show up in multiple places
+  ;; with different keys.
   (if (map? old-m)
-    (->> (into (set (keys new-m))
-               (keys old-m))
-         (reduce (fn [m k]
-                   (let [newv (new-m k)]
-                     (cond-> m
-                       (not= newv (old-m k))
-                       (assoc k newv))))
-                 nil))
+    (->> new-m
+         (reduce-kv (fn [m k newv]
+                      (if (not= newv (old-m k))
+                        (assoc m k newv)
+                        m))
+                    nil))
     new-m))
 
-(defn flatten-entities
-  ([] {::entities {}})
-  ([acc] acc)
-  ([acc form]
-   (let [!entities (volatile! (::entities acc))
-         value (->> form (walk/postwalk
-                          (fn [x]
-                            (if-let [id (:db/id x)]
-                              (do (when-let [diff (select-changed-keys (@!entities id) (dissoc x :db/id))]
-                                    (vswap! !entities assoc id diff))
-                                  (t/->Entity id))
-                              x))))]
-     {::entities @!entities
-      :value value})))
+(defn flatten-entities [id-key]
+  (fn flatten-entities* [acc form]
+    (let [{prev-value    :value
+           prev-entities ::entities} (::sync/init acc)
+          !current-entities (volatile! {})
+          !entity-changes   (volatile! {})
+          next-value        (->> form (walk/postwalk
+                                        (fn [x]
+                                          (if-let [id (id-key x)]
+                                            (let [m (dissoc x id-key)]
+                                              (vswap! !current-entities update id merge m)
+                                              (when-let [diff (select-changed-keys (prev-entities id) m)]
+                                                (vswap! !entity-changes update id merge diff))
+                                              (t/->Entity id-key id))
+                                            x))))
+          next-entities     @!entity-changes]
+      (cond-> {::sync/init     {::entities @!current-entities
+                                :value     next-value}}
+              (seq next-entities)
+              (assoc ::entities next-entities)
+              (not= next-value prev-value)
+              (assoc :value next-value)))))
 
+(defn result-handlers [id-key]
+  {::entities (fn [prev m]
+                {:txs (reduce-kv (fn [out id v] (conj out (assoc v :db/id [id-key id]))) [] m)})})
 
-(def result-handlers
-  {::entities (fn [prev m] {:txs (reduce-kv (fn [out id v] (conj out (assoc v :db/id id))) [] m)})})
+(defn transducer [id-key]
+  (xf/reducing-transducer (flatten-entities id-key)
+                          {::sync/init {::entities {}
+                                        :value     nil}}
+                          #(dissoc % ::sync/init)))
 
-(defn txs
+(defn $txs
   "Returns transactions which diff successive values of ref"
-  [ref]
-  (xf/transform ref (xf/reducing-transducer flatten-entities)))
+  [id-key ref]
+  (xf/transform ref (transducer id-key)))
 
 (comment
   (into []
-        (xf/reducing-transducer flatten-entities)
+        (transducer :db/id)
         [{:db/id 1 :foo "bar"}
-         {:db/id 1 :foo "bar" :glee "full"}])
+         {:db/id 1 :foo "baz"}
+         {:db/id 1 :foo "baz"}
+         {:db/id 1 :foo "bar"}
+         {:db/id 2 :foo "bar"}])
 
   (into []
-        (xf/reducing-transducer flatten-entities)
+        (transducer :db/id)
         [{:a {:b {:c {:db/id 1 :foo :bar}}}}
+         {:a {:b {:c {:db/id 1 :foo :baz}}}}
          {:a {:b {:c {:db/id 1 :foo :baz}}}}]))

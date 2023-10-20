@@ -84,7 +84,8 @@
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
   Lookup refs are only supported for indexed attributes."
   [db e]
-  (cond (vector? e) (resolve-lookup-ref+ db e)
+  (cond (:db/id e) [db (:db/id e)]
+        (vector? e) (resolve-lookup-ref+ db e)
         (tempid? e) (tempid+ db e)
         ;; we do not replace idents with entity-ids
         #_#_(keyword? e) (first (ave db :db/ident e))
@@ -402,14 +403,18 @@
                                        canonical-a (u/forward-attr a)
                                        a-schema (db-schema canonical-a default-schema)]
                                    (if reverse?
-                                     [(reduce (fn [db v]
-                                                (if (map? v)
-                                                  (let [[db ve m] (resolve-map-e db v true)]
-                                                    (-> db
-                                                        (add [nil ve canonical-a e])
-                                                        (add-map ve m)))
-                                                  (let [[db ve] (resolve-e+ db v)]
-                                                    (add db [nil ve canonical-a e])))) db v) new-m]
+                                     (do
+                                       [(reduce (fn [db v]
+                                                  (if (map? v)
+                                                    (let [[db ve m] (resolve-map-e db v true)]
+                                                      (-> db
+                                                          (add [nil ve canonical-a e])
+                                                          (add-map ve m)))
+                                                    (let [[db ve] (resolve-e+ db v)]
+                                                      (add db [nil ve canonical-a e]))))
+                                                db
+                                                v)
+                                        new-m])
                                      (let [is-ref (ref? a-schema)
                                            is-many (many? a-schema)
                                            v (cond-> v is-many set)

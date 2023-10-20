@@ -173,6 +173,8 @@
 
 (u/support-clj-protocols
   (deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable e-resolved? meta]
+    #?@(:cljs [IPrintWithWriter
+               (-pr-writer [o writer opts] (-write writer (str "#re-db/entity[" e "]")))])
     IEntity
     (conn [this] conn)
     (db [this] (ts/db conn))

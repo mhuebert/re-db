@@ -3,11 +3,11 @@
             [re-db.api :as db])
   #?(:clj (:import (java.io ByteArrayOutputStream ByteArrayInputStream))))
 
-(defrecord Entity [id])
+(defrecord Entity [k id])
 
-(def write-handlers {Entity (t/write-handler "re_db.sync.transit.Entity" (fn [{:keys [id]}] id))})
+(def write-handlers {Entity (t/write-handler "re_db.sync.transit.Entity" (juxt :k :id))})
 (def read-handlers {"re_db.sync.transit.Entity" (t/read-handler #?(:clj  db/entity
-                                                                   :cljs (comp db/entity (fn [x] (cond-> x (array? x) vec)))))})
+                                                                   :cljs (comp db/entity vec)))})
 
 #?(:cljs (def writer (t/writer :json {:handlers write-handlers})))
 (defn pack [x] #?(:cljs (t/write writer x)
