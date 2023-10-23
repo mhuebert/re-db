@@ -75,8 +75,7 @@
      :clj  (clojure.core/deliver x value)))
 
 (memo/defn-memo $result-ratom [qvec]
-  (r/atom {:loading? (loading-promise)}
-          {:on-dispose #(prn :dispose qvec)}))
+  (r/atom {:loading? (loading-promise)}))
 
 (defn read-result [qvec] @($result-ratom qvec))
 
@@ -218,7 +217,7 @@
   "(client) Watch a value (by query, usually a vector)."
   [channel qvec]
   (r/reaction
-    {:meta (select-keys channel [:dispose-delay])}
+    {:meta {:dispose-delay (:dispose-delay channel)}}
     (hooks/use-effect
       (fn []
         (send channel [::watch qvec])
