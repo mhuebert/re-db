@@ -20,37 +20,36 @@
                     nil))
     new-m))
 
-(defn flatten-entities [id-key]
-  (fn flatten-entities* [acc form]
-    (let [{prev-value    :value
-           prev-entities ::entities} (::sync/init acc)
-          !current-entities (volatile! {})
-          !entity-changes   (volatile! {})
-          next-value        (->> form (walk/postwalk
-                                        (fn [x]
-                                          (if-let [id (id-key x)]
-                                            (let [m (dissoc x id-key)]
-                                              (vswap! !current-entities update id merge m)
-                                              (when-let [diff (select-changed-keys (prev-entities id) m)]
-                                                (vswap! !entity-changes update id merge diff))
-                                              (t/->Entity id-key id))
-                                            x))))
-          next-entities     @!entity-changes]
-      (cond-> {::sync/init     {::entities @!current-entities
-                                :value     next-value}}
-              (seq next-entities)
-              (assoc ::entities next-entities)
-              (not= next-value prev-value)
-              (assoc :value next-value)))))
+(defn flatten-entities [acc form]
+  (let [{prev-value :value
+         [id-key prev-entities] ::entities} (::sync/init acc)
+        !current-entities (volatile! {})
+        !entity-changes (volatile! {})
+        next-value (->> form (walk/postwalk
+                              (fn [x]
+                                (if-let [id (id-key x)]
+                                  (let [m (dissoc x id-key)]
+                                    (vswap! !current-entities update id merge m)
+                                    (when-let [diff (select-changed-keys (prev-entities id) m)]
+                                      (vswap! !entity-changes update id merge diff))
+                                    (t/->Entity id-key id))
+                                  x))))
+        next-entities @!entity-changes]
+    (cond-> {::sync/init {::entities [id-key @!current-entities]
+                          :value next-value}}
+      (seq next-entities)
+      (assoc ::entities next-entities)
+      (not= next-value prev-value)
+      (assoc :value next-value))))
 
-(defn result-handlers [id-key]
-  {::entities (fn [prev m]
+(defn result-handlers []
+  {::entities (fn [prev [id-key m]]
                 {:txs (reduce-kv (fn [out id v] (conj out (assoc v :db/id [id-key id]))) [] m)})})
 
 (defn transducer [id-key]
-  (xf/reducing-transducer (flatten-entities id-key)
-                          {::sync/init {::entities {}
-                                        :value     nil}}
+  (xf/reducing-transducer flatten-entities
+                          {::sync/init {::entities [id-key {}]
+                                        :value nil}}
                           #(dissoc % ::sync/init)))
 
 (defn $txs
