@@ -38,19 +38,24 @@
     (cond-> {::sync/init {::entities [id-key @!current-entities]
                           :value next-value}}
       (seq next-entities)
-      (assoc ::entities next-entities)
+      (assoc ::entities [id-key next-entities])
       (not= next-value prev-value)
       (assoc :value next-value))))
 
-(defn result-handlers []
-  {::entities (fn [prev [id-key m]]
-                {:txs (reduce-kv (fn [out id v] (conj out (assoc v :db/id [id-key id]))) [] m)})})
+(defn resolve-entities [prev [id-key m]]
+  (let [wrap-id (if (= :db/id id-key)
+                  identity
+                  (partial vector id-key))]
+    {:txs (reduce-kv (fn [out id v] (conj out (assoc v :db/id (wrap-id id)))) [] m)}))
+
+(def result-handlers
+  {::entities resolve-entities})
 
 (defn transducer [id-key]
   (xf/reducing-transducer flatten-entities
                           {::sync/init {::entities [id-key {}]
                                         :value nil}}
-                          #(dissoc % ::sync/init)))
+                          identity))
 
 (defn $txs
   "Returns transactions which diff successive values of ref"

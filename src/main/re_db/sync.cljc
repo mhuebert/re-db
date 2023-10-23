@@ -75,7 +75,8 @@
      :clj  (clojure.core/deliver x value)))
 
 (memo/defn-memo $result-ratom [qvec]
-  (r/atom nil {:dispose-delay 1000}))
+  (r/atom {:loading? (loading-promise)}
+          {:on-dispose #(prn :dispose qvec)}))
 
 (defn read-result [qvec] @($result-ratom qvec))
 
@@ -128,14 +129,14 @@
 (defn watch
   "(server) Adds watch for a local ref, sending messages to client via ::result messages.
    A ref's value may specify an `::init` result to send upon connection."
-  [channel query !ref]
-  (reset! !last-event {:event :watch-ref :channel channel :query-id query})
-  (alter-meta! !ref assoc ::query-id query)                 ;; mutate meta of !ref to include query-id for monitoring
+  [channel qvec !ref]
+  (reset! !last-event {:event :watch-ref :channel channel :query-id qvec})
+  (alter-meta! !ref assoc ::query-id qvec)                 ;; mutate meta of !ref to include query-id for monitoring
   (swap! !watches update channel (fnil conj #{}) !ref)
   (add-watch !ref channel (fn [_ _ _ value]
-                            (send channel (wrap-result query (dissoc value ::init)))))
+                            (send channel (wrap-result qvec (dissoc value ::init)))))
   (let [v @!ref]
-    (send channel (wrap-result query (or (::init v)
+    (send channel (wrap-result qvec (or (::init v)
                                          (dissoc v ::init))))))
 
 (defn unwatch
@@ -213,18 +214,11 @@
   (send channel [::unwatch query])
   (some-> (:loading? (read-result query)) (deliver nil)))
 
-(defn query-start-promise [qvec]
-  (reset! ($result-ratom qvec) {:loading? (loading-promise)}))
-
 (memo/defn-memo $query
   "(client) Watch a value (by query, usually a vector)."
   [channel qvec]
-  ;; set initial :loading? to a `suspended` value, to be resolved
-  ;; when the first result arrives.
-  #?(:cljs
-     (when-not (read-result qvec) (query-start-promise qvec)))
   (r/reaction
-    {:meta {:dispose-delay 1000}}
+    {:meta (select-keys channel [:dispose-delay])}
     (hooks/use-effect
       (fn []
         (send channel [::watch qvec])
