@@ -251,7 +251,7 @@
 
 (defn dispose-derefs! [consumer] (handle-new-derefs! consumer nil))
 
-(defn dispose-empty! [consumer]
+(defn dispose-unwatched! [consumer]
   (when-not (seq (get-watches consumer))
     (dispose! consumer)))
 
@@ -348,7 +348,7 @@
       (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
         (if-let [delay (:dispose-delay meta)]
-          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose-empty! this) delay))
+          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose-unwatched! this) delay))
           (dispose! this)))
       this)))
 
@@ -484,7 +484,7 @@
       (util/set-swap! watches dissoc key)
       (when (and (empty? watches) (not detached))
         (if-let [delay (:dispose-delay meta)]
-          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose-empty! this) delay))
+          (util/set-swap! meta assoc :dispose-timer (set-timeout! #(dispose-unwatched! this) delay))
           (dispose! this)))
       this)
     ITrackDerefs

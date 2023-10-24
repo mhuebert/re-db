@@ -74,10 +74,34 @@
   #?(:cljs (.deliver ^js x value)
      :clj  (clojure.core/deliver x value)))
 
-(memo/defn-memo $result-ratom [qvec]
+(memo/defn-memo $result-ratom
+  "Ratom for storing the result of a query."
+  [qvec]
   (r/atom {:loading? (loading-promise)}))
 
-(defn read-result [qvec] @($result-ratom qvec))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; `Watch` bookkeeping (client) - which queries are being watched by this client
+
+;; a map of {channel, {ref-id, #{...rx}}}
+(defonce !watching (atom {}))
+
+(defn client:unwatch [channel qvec]
+  (swap! !watching update channel dissoc qvec)
+  (send channel [::unwatch qvec])
+  (some-> (:loading? @($result-ratom qvec)) (deliver nil)))
+
+(memo/defn-memo $query
+  "(client) Watch a value (by query, usually a vector)."
+  [channel qvec]
+  (r/reaction
+    {:meta {:dispose-delay (:dispose-delay channel)}}
+    (hooks/use-effect
+     (fn []
+       (send channel [::watch qvec])
+       (swap! !watching update channel assoc qvec r/*owner*)
+       #(client:unwatch channel qvec)))
+    @($result-ratom qvec)))
+
 
 (defn- merge-result [result1 result2]
   (let [txs (:txs result2)
@@ -93,7 +117,7 @@
                  (if (= k :txs)
                    (update result :txs (fnil into []) v)
                    (assoc result k v))))
-             {}
+             (select-keys prev [:value])
              result))
 
 (comment
@@ -155,12 +179,6 @@
   nil)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; `Watch` bookkeeping (client) - which queries are being watched by this client
-
-;; a map of {channel, {ref-id, #{...rx}}}
-(defonce !watching (atom {}))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Websocket message utilities
 
 (defn result-handlers
@@ -207,23 +225,6 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Query utils (client)
-
-(defn client:unwatch [channel query]
-  (swap! !watching update channel dissoc query)
-  (send channel [::unwatch query])
-  (some-> (:loading? (read-result query)) (deliver nil)))
-
-(memo/defn-memo $query
-  "(client) Watch a value (by query, usually a vector)."
-  [channel qvec]
-  (r/reaction
-    {:meta {:dispose-delay (:dispose-delay channel)}}
-    (hooks/use-effect
-      (fn []
-        (send channel [::watch qvec])
-        (swap! !watching update channel assoc qvec r/*owner*)
-        #(client:unwatch channel qvec)))
-    (read-result qvec)))
 
 (memo/defn-memo $all
   "Compose queries (by id). Returns first :loading? or :error,
