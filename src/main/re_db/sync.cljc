@@ -117,7 +117,7 @@
                  (if (= k :txs)
                    (update result :txs (fnil into []) v)
                    (assoc result k v))))
-             (select-keys prev [:value])
+             (dissoc prev :txs :loading?)
              result))
 
 (comment
@@ -133,8 +133,9 @@
    (let [!result ($result-ratom qvec)
          prev-result @!result
          {:as result :keys [txs]} (resolve-result result-resolvers prev-result message)
-         tx-report (some-> txs d/transact!)]
-     (reset! !result (not-empty (dissoc result :txs)))
+         tx-report (some-> txs d/transact!)
+         result (not-empty (dissoc result :txs))]
+     (reset! !result result)
      ;; TODO
      ;; put these two effects into a single "transaction"?
      ;; (wait to notify until all complete)
