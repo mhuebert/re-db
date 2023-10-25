@@ -84,9 +84,9 @@
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
   Lookup refs are only supported for indexed attributes."
   [db e]
-  (cond (:db/id e) [db (:db/id e)]
-        (vector? e) (resolve-lookup-ref+ db e)
+  (cond (vector? e) (resolve-lookup-ref+ db e)
         (tempid? e) (tempid+ db e)
+        (:db/id e) (resolve-e+ db (:db/id e))
         ;; we do not replace idents with entity-ids
         #_#_(keyword? e) (first (ave db :db/ident e))
         :else [db e]))
