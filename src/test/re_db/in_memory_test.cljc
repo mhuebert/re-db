@@ -4,7 +4,7 @@
             [re-db.in-memory :as mem]
             [re-db.api :as db :refer [entity pull]]
             [re-db.read :as read :refer [#?(:cljs Entity)]]
-            [re-db.schema :as s]
+            [re-db.schema :as rs]
             [re-db.schema :as schema]
             [re-db.util :as util])
   #?(:clj (:import [re_db.read Entity])))
@@ -642,7 +642,7 @@
                          {:db/id "B"
                           :foo 2}])
     (is (= #{} (-> @conn :ae :foo set)))
-    (mem/merge-schema! conn {:foo s/ae})
+    (mem/merge-schema! conn {:foo rs/ae})
     (is (mem/ae? (mem/get-schema @conn :foo))
         "After merging schema, :foo has an ae-index")
     (is (= #{"A" "B"} (-> @conn :ae :foo set))
@@ -744,6 +744,6 @@
 (deftest schema-data
   (db/with-conn {}
     (db/merge-schema! {:a (merge {:foo :bar}
-                                 s/unique-id)})
+                                 rs/unique-id)})
     (is (mem/unique? (mem/get-schema @(db/conn) :a)))
     (is (= :db.unique/identity (db/get [:db/ident :a] :db/unique)))))

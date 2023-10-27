@@ -3,8 +3,7 @@
             [datalevin.core :as d]
             datalevin.datom
             [datalevin.db :as db]
-            [re-db.triplestore :as ts]
-            [re-db.schema :as s])
+            [re-db.triplestore :as ts])
   (:import datalevin.db.DB
            datalevin.datom.Datom))
 
