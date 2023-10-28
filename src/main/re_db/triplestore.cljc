@@ -16,10 +16,10 @@
 (defprotocol ITripleStore
   (eav
     [db e]
-    [db a-schema e a]  "Returns a value or a map of attributes to values")
-  (ave [db a-schema a v] "Returns a list of entity ids")
-  (ae [db a-schema a] "Returns a list of entity ids for entities containing a")
-  (datom-a [db a] "Return attribute as represented in a datom")
+    [db a-schema e a]  "a value ([e a]) or a map of attributes to values ([e])")
+  (ave [db a-schema a v] "a list of entities containing {a, v}")
+  (ae [db a-schema a] "a list of entities containing a")
+  (datom-a [db a] "how the attribute is represented in a datom")
   (-get-schema [db a])
   (ref? [db a-schema])
   (unique? [db a-schema])
