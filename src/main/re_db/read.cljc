@@ -223,15 +223,15 @@
     (-lookup [o a]
       (let [db (ts/db conn)]
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-        (when e-resolved?
-          (get* conn db (ts/get-schema db a) entity e a))))
+        (cond e-resolved? (get* conn db (ts/get-schema db a) entity e a)
+              (= :db/id a) e)))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
         (let [db (ts/db conn)]
           (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-          (when e-resolved?
-            (get* conn db (ts/get-schema db a) nil e a)))
+          (cond e-resolved? (get* conn db (ts/get-schema db a) nil e a)
+                (= :db/id a) e))
         (if-some [v (clojure.core/get o a)] v nf)))
     IDeref
     (-deref [this]
