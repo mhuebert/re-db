@@ -39,6 +39,13 @@
   '{ILookup clojure.lang.ILookup
     -lookup valAt
 
+    -reduce-kv reduce-kv
+
+    IAssociative clojure.lang.Associative
+    -assoc assoc
+    IMap clojure.lang.IPersistentMap
+    -dissoc without
+
     ISeqable clojure.lang.Seqable
     -seq seq
 

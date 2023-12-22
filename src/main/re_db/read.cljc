@@ -197,6 +197,14 @@
   (deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable e-resolved? meta]
     #?@(:cljs [IPrintWithWriter
                (-pr-writer [o writer opts] (-write writer (str "#re-db/entity[" e "]")))])
+    IKVReduce
+    (-kv-reduce [coll f init] (reduce-kv f init @coll))
+    IAssociative
+    (-assoc [this k v]
+      (assoc @this k v))
+    IMap
+    (-dissoc [this k]
+      (dissoc @this k))
     IEntity
     (conn [this] conn)
     (db [this] (ts/db conn))
@@ -239,7 +247,16 @@
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
         (when e-resolved?
           (-depend-on-triple! conn db nil e nil nil)
-          (ts/eav db e))))
+          (let [m (ts/eav db e)]
+            (reduce-kv (fn [m a v]
+                         (let [a-schema (ts/get-schema db a)]
+                           (if (ts/ref? db a-schema)
+                             (assoc m a (if (ts/many? db a-schema)
+                                          (mapv #(entity conn %) v)
+                                          (entity conn v)))
+                             m)))
+                       m
+                       m)))))
     ISeqable
     (-seq [this] (seq @this))))
 
