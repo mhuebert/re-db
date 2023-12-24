@@ -35,11 +35,14 @@
            (list* (pmap (first x) (first x)) (rest x))
            (pmap x x))) forms))
 
+(comment
+  defrecord)
 (def prot-substitutions
   '{ILookup clojure.lang.ILookup
     -lookup valAt
 
-    -reduce-kv reduce-kv
+    IKVReduce clojure.lang.IKVReduce
+    -kv-reduce kvreduce
 
     IAssociative clojure.lang.Associative
     -assoc assoc
@@ -64,8 +67,8 @@
     IFn clojure.lang.IFn
     -invoke invoke
 
-    IHash clojure.lang.IHashEq
-    -hash hasheq
+    IHash Object
+    -hash hashCode
 
     IEquiv Object
     -equiv equals

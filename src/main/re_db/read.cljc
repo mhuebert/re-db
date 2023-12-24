@@ -19,7 +19,7 @@
 
 (defn- make-listener! [conn e a v]
   (let [listener (r/atom 0
-                         :meta {:pattern [e a v]            ;; for debugging
+                         :meta {:pattern       [e a v]      ;; for debugging
                                 :dispose-delay 1000}
                          :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))]
     (swap! !listeners assoc-in [conn e a v] listener)
@@ -34,23 +34,23 @@
   [conn tx-report]
   (when tx-report
     (if-let [listeners (@!listeners conn)]
-      (let [result (volatile! #{})
-            collect! #(some->> % (vswap! result conj))
-            _ (ts/report-triples
-               (ts/db conn)
-               tx-report
-               (fn [e a v]
-                 ;; triggers patterns for datom, with "early termination"
-                 ;; for paths that don't lead to any invalidators.
-                 (when-some [e (listeners e)]
-                   (collect! (fast/gets-some e nil nil))    ;; e__
-                   (collect! (fast/gets-some e a nil)))     ;; ea_
-                 (when-some [_ (listeners nil)]
-                   (when-some [__ (_ nil)]
-                     (collect! (__ v)))                     ;; __v (used for refs)
-                   (when-some [_a (_ a)]
-                     (collect! (_a v))                      ;; _av
-                     (collect! (_a nil))))))                ;; _a_
+      (let [result      (volatile! #{})
+            collect!    #(some->> % (vswap! result conj))
+            _           (ts/report-triples
+                          (ts/db conn)
+                          tx-report
+                          (fn [e a v]
+                            ;; triggers patterns for datom, with "early termination"
+                            ;; for paths that don't lead to any invalidators.
+                            (when-some [e (listeners e)]
+                              (collect! (fast/gets-some e nil nil)) ;; e__
+                              (collect! (fast/gets-some e a nil))) ;; ea_
+                            (when-some [_ (listeners nil)]
+                              (when-some [__ (_ nil)]
+                                (collect! (__ v)))          ;; __v (used for refs)
+                              (when-some [_a (_ a)]
+                                (collect! (_a v))           ;; _av
+                                (collect! (_a nil))))))     ;; _a_
 
             invalidated @result]
         #_(prn :invalidating (mapv (comp :pattern meta) invalidated))
@@ -70,8 +70,8 @@
               (resolve-v conn db a-schema a v)
               v)]
       (r/collect-deref!                                     ;; directly create dependency
-       (or (fast/gets-some @!listeners conn e a v)
-           (make-listener! conn e a v)))
+        (or (fast/gets-some @!listeners conn e a v)
+            (make-listener! conn e a v)))
       nil)))
 
 (defn- -ae [conn db a-schema a]
@@ -92,11 +92,11 @@
                                                                     (v 0)
                                                                     (v 1)))
        (or
-        (first (ts/ave db a-schema a v))
-        ;; only depend on triple if lookup ref is not found; these are IDs and we don't expect them to change.
-        ;; TO TEST - edge cases?
-        (-depend-on-triple! conn db a-schema nil a v)
-        nil)))))
+         (first (ts/ave db a-schema a v))
+         ;; only depend on triple if lookup ref is not found; these are IDs and we don't expect them to change.
+         ;; TO TEST - edge cases?
+         (-depend-on-triple! conn db a-schema nil a v)
+         nil)))))
 
 (defn- -resolve-e [conn db e]
   (if (vector? e)
@@ -146,11 +146,11 @@
       (if-let [resolver (*attribute-resolvers* a)]
         (resolver (entity conn e))
         (let [is-reverse (u/reverse-attr? a)
-              a (cond-> a is-reverse u/forward-attr)
-              is-ref (ts/ref? db a-schema)
-              v (if is-reverse
-                  (ts/ave db a-schema a e)
-                  (ts/eav db a-schema e a))] ;; [e a _]
+              a          (cond-> a is-reverse u/forward-attr)
+              is-ref     (ts/ref? db a-schema)
+              v          (if is-reverse
+                           (ts/ave db a-schema a e)
+                           (ts/eav db a-schema e a))]       ;; [e a _]
           (if (and is-ref ref-fn)
             (let [is-many (ts/many? db a-schema)]
               (when (some-val is-many v)
@@ -166,11 +166,11 @@
       (if-let [resolver (*attribute-resolvers* a)]
         (resolver (entity conn e))
         (let [is-reverse (u/reverse-attr? a)
-              a (cond-> a is-reverse u/forward-attr)
-              is-ref (ts/ref? db a-schema)
-              v (if is-reverse
-                  (ts/ave db a-schema a e)
-                  (ts/eav db a-schema e a))]
+              a          (cond-> a is-reverse u/forward-attr)
+              is-ref     (ts/ref? db a-schema)
+              v          (if is-reverse
+                           (ts/ave db a-schema a e)
+                           (ts/eav db a-schema e a))]
           (if is-reverse
             (-depend-on-triple! conn db a-schema nil a e)   ;; [_ a v]
             (-depend-on-triple! conn db a-schema e a nil))  ;; [e a _]
@@ -197,14 +197,6 @@
   (deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable e-resolved? meta]
     #?@(:cljs [IPrintWithWriter
                (-pr-writer [o writer opts] (-write writer (str "#re-db/entity[" e "]")))])
-    IKVReduce
-    (-kv-reduce [coll f init] (reduce-kv f init @coll))
-    IAssociative
-    (-assoc [this k v]
-      (assoc @this k v))
-    IMap
-    (-dissoc [this k]
-      (dissoc @this k))
     IEntity
     (conn [this] conn)
     (db [this] (ts/db conn))
@@ -219,7 +211,7 @@
     (-hash [this]
       (let [db (ts/db conn)]
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-        (hash [e (ts/eav db e)])))
+        (hash [conn e (ts/eav db e)])))
 
     IEquiv
     (-equiv [this other]
@@ -262,13 +254,13 @@
 
 (defn entity [conn e]
   (let [db (ts/db conn)
-        e (or (-resolve-e conn db e) e)]
+        e  (or (-resolve-e conn db e) e)]
     (->Entity conn e false nil)))
 
 (defn touch [the-entity]
-  (let [m @the-entity
+  (let [m    @the-entity
         conn (conn the-entity)
-        db (ts/db conn)]
+        db   (ts/db conn)]
     (reduce-kv (fn [m a v]
                  (let [a-schema (ts/get-schema db a)]
                    (if (ts/component? db a-schema)
@@ -322,62 +314,62 @@
    (when-let [e (-resolve-e conn db e)]
      (when lite? (-depend-on-triple! conn db nil e nil nil))
      (reduce-kv
-      (fn pull [m i pullexpr]
-        (if (#{'* :*} pullexpr)
-          (do
-            (when-not lite? (-depend-on-triple! conn db nil e nil nil))
-            (->> (dissoc (ts/eav db e) :db/id)
-                 (-wrap-map-refs ref-fn conn db)))
-          (let [[a map-expr] (if (or (keyword? pullexpr) (seq? pullexpr))
-                               [pullexpr nil]
-                               (first pullexpr))
-                [a alias val-fn opts] (if (seq? a)
-                                        (let [{:as opts
-                                               alias :as
-                                               :or {alias (first a)}} (apply hash-map (rest a))
-                                              a (first a)]
-                                          (if (:db/id opts)
-                                            [a :db/id #(vector a %) opts]
-                                            [a alias (compose-pull-xf opts) opts]))
-                                        [a a nil nil])
-                is-reverse (u/reverse-attr? a)
-                forward-a (cond-> a is-reverse u/forward-attr)
-                a-schema (ts/get-schema db forward-a)
-                is-ref (ts/ref? db a-schema)
-                is-many (or (ts/many? db a-schema) is-reverse)
-                v (let [v (if lite?
-                            (peek* conn db a-schema nil e a)
-                            (get* conn db a-schema nil e a))]
-                    (cond (not is-ref) v
-                          (nil? map-expr) (wrap-v v is-many ref-fn)        ;; ref without pull-expr
-                          ;; recurse
-                          (or (number? map-expr) (#{'... :...} map-expr))
-                          (let [recursions (if (= 0 map-expr) false map-expr)]
-                            (when v
-                              (if recursions
-                                (let [found (conj found e)
-                                      pullv (if (number? recursions)
-                                              ;; decrement recurse parameter
-                                              (update-in pullv [i forward-a] dec)
-                                              pullv)
-                                      do-pull #(if (and (= :... recursions) (found %))
-                                                 %
-                                                 (-pull conn db lite? ref-fn pullv found %))]
-                                  (if is-many
-                                    (into [] (keep do-pull) v)
-                                    (do-pull v)))
-                                v)))
+       (fn pull [m i pullexpr]
+         (if (#{'* :*} pullexpr)
+           (do
+             (when-not lite? (-depend-on-triple! conn db nil e nil nil))
+             (->> (dissoc (ts/eav db e) :db/id)
+                  (-wrap-map-refs ref-fn conn db)))
+           (let [[a map-expr] (if (or (keyword? pullexpr) (seq? pullexpr))
+                                [pullexpr nil]
+                                (first pullexpr))
+                 [a alias val-fn opts] (if (seq? a)
+                                         (let [{:as   opts
+                                                alias :as
+                                                :or   {alias (first a)}} (apply hash-map (rest a))
+                                               a (first a)]
+                                           (if (:db/id opts)
+                                             [a :db/id #(vector a %) opts]
+                                             [a alias (compose-pull-xf opts) opts]))
+                                         [a a nil nil])
+                 is-reverse (u/reverse-attr? a)
+                 forward-a  (cond-> a is-reverse u/forward-attr)
+                 a-schema   (ts/get-schema db forward-a)
+                 is-ref     (ts/ref? db a-schema)
+                 is-many    (or (ts/many? db a-schema) is-reverse)
+                 v          (let [v (if lite?
+                                      (peek* conn db a-schema nil e a)
+                                      (get* conn db a-schema nil e a))]
+                              (cond (not is-ref) v
+                                    (nil? map-expr) (wrap-v v is-many ref-fn) ;; ref without pull-expr
+                                    ;; recurse
+                                    (or (number? map-expr) (#{'... :...} map-expr))
+                                    (let [recursions (if (= 0 map-expr) false map-expr)]
+                                      (when v
+                                        (if recursions
+                                          (let [found   (conj found e)
+                                                pullv   (if (number? recursions)
+                                                          ;; decrement recurse parameter
+                                                          (update-in pullv [i forward-a] dec)
+                                                          pullv)
+                                                do-pull #(if (and (= :... recursions) (found %))
+                                                           %
+                                                           (-pull conn db lite? ref-fn pullv found %))]
+                                            (if is-many
+                                              (into [] (keep do-pull) v)
+                                              (do-pull v)))
+                                          v)))
 
-                          ;; cardinality/many
-                          is-many (mapv #(-pull conn db lite? ref-fn map-expr %) v)
+                                    ;; cardinality/many
+                                    is-many (mapv #(-pull conn db lite? ref-fn map-expr %) v)
 
-                          ;; cardinality/one
-                          :else (-pull conn db lite? ref-fn map-expr v)))]
-            (cond-> m
-                    (some-val is-many v)
-                    (assoc alias (wrap-v v is-many val-fn))))))
-      nil
-      pullv))))
+                                    ;; cardinality/one
+                                    :else (-pull conn db lite? ref-fn map-expr v)))]
+             (cond-> m
+                     (some-val is-many v)
+                     (assoc alias (wrap-v v is-many val-fn))))))
+       nil
+       pullv))))
 
 (defn pull
   "Returns entity as map, as well as linked entities specified in `pull`.
@@ -392,8 +384,8 @@
   ([conn pull-expr e]
    (pull conn nil pull-expr e))
   ([conn {:keys [wrap-root wrap-ref lite?]
-          :or {lite? false}} pull-expr e]
-   (let [e (:db/id e e) #_(cond-> e (instance? Entity e) :db/id)
+          :or   {lite? false}} pull-expr e]
+   (let [e  (:db/id e e) #_(cond-> e (instance? Entity e) :db/id)
          db (ts/db conn)]
      (cond->> (-pull conn db lite? wrap-ref pull-expr e)
               wrap-root
@@ -432,9 +424,9 @@
 
 (defn where
   [conn clauses]
-  (let [db (ts/db conn)
+  (let [db         (ts/db conn)
         [clause & clauses] clauses
-        _ (assert (not (fn? clause)) "where cannot begin with function (scans entire db)")
+        _          (assert (not (fn? clause)) "where cannot begin with function (scans entire db)")
         entity-ids (if (keyword? clause)
                      (-ae conn db (ts/get-schema db clause) clause)
                      (let [[a v] clause
@@ -465,7 +457,7 @@
    (u/some-or (get conn e a) not-found)))
 
 (defn depend-on-triple! [conn e a v]
-  (let [db (ts/db conn)
+  (let [db         (ts/db conn)
         e-resolved (-resolve-e conn db e)]
     (when (or (nil? e) e-resolved)
       (-depend-on-triple! conn db
