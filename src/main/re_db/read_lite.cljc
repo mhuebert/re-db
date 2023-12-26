@@ -25,7 +25,7 @@
     (-hash [this]
       (let [db (ts/db conn)]
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
-        (hash [e (ts/eav db e)])))
+        (hash [e (when e-resolved? (ts/eav db e))])))
 
     IEquiv
     (-equiv [this other]
