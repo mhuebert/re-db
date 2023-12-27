@@ -166,23 +166,22 @@
       e
       (if-let [resolver (*attribute-resolvers* a)]
         (resolver (entity conn e))
-        (when-let [e (-resolve-e conn db e)]
-          (let [is-reverse (u/reverse-attr? a)
-                a          (cond-> a is-reverse u/forward-attr)
-                is-ref     (ts/ref? db a-schema)
-                v          (if is-reverse
-                             (ts/ave db a-schema a e)
-                           (ts/eav db a-schema e a))]
-            (if is-reverse
-              (-depend-on-triple! conn db a-schema nil a e) ;; [_ a v]
-              (-depend-on-triple! conn db a-schema e a nil)) ;; [e a _]
-            (if (and is-ref ref-fn)
-              (let [is-many (ts/many? db a-schema)]
-                (when (some-val is-many v)
-                  (if (or is-reverse is-many)
-                    (mapv (partial apply-ref-fn ref-fn conn) v)
-                    (apply-ref-fn ref-fn conn v))))
-              v)))))))
+        (let [is-reverse (u/reverse-attr? a)
+              a (cond-> a is-reverse u/forward-attr)
+              is-ref (ts/ref? db a-schema)
+              v (if is-reverse
+                  (ts/ave db a-schema a e)
+                  (ts/eav db a-schema e a))]
+          (if is-reverse
+            (-depend-on-triple! conn db a-schema nil a e)   ;; [_ a v]
+            (-depend-on-triple! conn db a-schema e a nil))  ;; [e a _]
+          (if (and is-ref ref-fn)
+            (let [is-many (ts/many? db a-schema)]
+              (when (some-val is-many v)
+                (if (or is-reverse is-many)
+                  (mapv (partial apply-ref-fn ref-fn conn) v)
+                  (apply-ref-fn ref-fn conn v))))
+            v))))))
 
 (defmacro -resolve-entity-e! [conn db e-sym e-resolved-sym]
   `(do (when-not ~e-resolved-sym

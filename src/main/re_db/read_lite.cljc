@@ -1,11 +1,14 @@
 (ns re-db.read-lite
-  "Reactive API for re-db (with explicit connection argument)."
+  "experimental - entity with less granular reactivity (all-or-nothing)"
   (:refer-clojure :exclude [get])
   (:require [re-db.read :as read]
             [re-db.triplestore :as ts]
             [re-db.util :as u])
   #?(:cljs (:require-macros [re-db.read])))
 
+;; EXPERIMENTAL -
+
+(declare entity)
 
 (u/support-clj-protocols
   (deftype Entity [conn ^:volatile-mutable e ^:volatile-mutable e-resolved? meta]
@@ -38,8 +41,8 @@
       (let [db (ts/db conn)]
         (re-db.read/-resolve-entity-e! conn db e e-resolved?)
         (when e-resolved?
-
-          (read/peek* conn db (ts/get-schema db a) read/entity e a))))
+          (read/-depend-on-triple! conn db nil e nil nil)
+          (read/peek* conn db (ts/get-schema db a) entity e a))))
     (-lookup [o a nf]
       (case nf
         ::unwrapped
@@ -47,7 +50,7 @@
           (re-db.read/-resolve-entity-e! conn db e e-resolved?)
           (when e-resolved?
             (read/-depend-on-triple! conn db nil e nil nil)
-            (read/peek* conn db (ts/get-schema db a) nil e a)))
+            (read/peek* conn db (ts/get-schema db a) entity e a)))
         (if-some [v (clojure.core/get o a)] v nf)))
     IDeref
     (-deref [this]
@@ -60,6 +63,7 @@
     (-seq [this] (seq @this))))
 
 (defn entity [conn e]
-  (let [db (ts/db conn)
-        e (or (read/-resolve-e conn db e) e)]
-    (->Entity conn e false nil)))
+  (let [db (ts/db conn)]
+    (if-let [e (read/-resolve-e conn db e)]
+      (->Entity conn e true nil)
+      (->Entity conn e false nil))))
