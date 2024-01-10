@@ -253,6 +253,14 @@
     ISeqable
     (-seq [this] (seq @this))))
 
+#?(:clj
+   (defmethod print-method re_db.read.Entity
+     [^re_db.read.Entity x w]
+     (#'clojure.core/print-meta x w)
+     (.write w "#")
+     (.write w (.getName re_db.read.Entity))
+     (#'clojure.core/print-map {:e (:db/id x)} #'clojure.core/pr-on w)))
+
 (defn entity [conn e]
   (let [db (ts/db conn)
         e  (or (-resolve-e conn db e) e)]
