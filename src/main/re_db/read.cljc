@@ -262,9 +262,11 @@
      (#'clojure.core/print-map {:e (:db/id x)} #'clojure.core/pr-on w)))
 
 (defn entity [conn e]
-  (let [db (ts/db conn)
-        e  (or (-resolve-e conn db e) e)]
-    (->Entity conn e false nil)))
+  (if (instance? Entity e)
+    e
+    (let [db (ts/db conn)
+          e  (or (-resolve-e conn db e) e)]
+      (->Entity conn e false nil))))
 
 (defn touch [the-entity]
   (let [m    @the-entity
