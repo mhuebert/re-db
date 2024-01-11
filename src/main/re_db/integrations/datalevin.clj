@@ -56,5 +56,5 @@
  (ts/get-schema @conn :a)
 
  (:require '[clojure.java.shell :as sh])
-
+ @(re-db.api/entity [:entity/id (java.util.UUID/fromString "a3ca2bc8-ab17-304a-af98-3806392a51aa")])
  )
