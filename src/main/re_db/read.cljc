@@ -20,7 +20,7 @@
 (defn- make-listener! [conn e a v]
   (let [listener (r/atom 0
                          :meta {:pattern       [e a v]      ;; for debugging
-                                :dispose-delay 1000}
+                                :dispose-delay 10}
                          :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))]
     (swap! !listeners assoc-in [conn e a v] listener)
     listener))
@@ -151,7 +151,7 @@
                 is-ref     (ts/ref? db a-schema)
                 v          (if is-reverse
                              (ts/ave db a-schema a e)
-                           (ts/eav db a-schema e a))]       ;; [e a _]
+                             (ts/eav db a-schema e a))]     ;; [e a _]
             (if (and is-ref ref-fn)
               (let [is-many (ts/many? db a-schema)]
                 (when (some-val is-many v)
@@ -167,11 +167,11 @@
       (if-let [resolver (*attribute-resolvers* a)]
         (resolver (entity conn e))
         (let [is-reverse (u/reverse-attr? a)
-              a (cond-> a is-reverse u/forward-attr)
-              is-ref (ts/ref? db a-schema)
-              v (if is-reverse
-                  (ts/ave db a-schema a e)
-                  (ts/eav db a-schema e a))]
+              a          (cond-> a is-reverse u/forward-attr)
+              is-ref     (ts/ref? db a-schema)
+              v          (if is-reverse
+                           (ts/ave db a-schema a e)
+                           (ts/eav db a-schema e a))]
           (if is-reverse
             (-depend-on-triple! conn db a-schema nil a e)   ;; [_ a v]
             (-depend-on-triple! conn db a-schema e a nil))  ;; [e a _]
