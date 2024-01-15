@@ -20,8 +20,10 @@
 (defn- make-listener! [conn e a v]
   (let [listener (r/atom 0
                          :meta {:pattern       [e a v]      ;; for debugging
-                                :dispose-delay 10}
-                         :on-dispose (fn [_] (swap! !listeners u/dissoc-in [conn e a v])))]
+                                :dispose-delay 0}
+                         :on-dispose (fn [_]
+                                       (tap> [:dispose! [e a v]])
+                                       (swap! !listeners u/dissoc-in [conn e a v])))]
     (swap! !listeners assoc-in [conn e a v] listener)
     listener))
 
