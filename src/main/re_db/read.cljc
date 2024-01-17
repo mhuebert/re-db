@@ -22,7 +22,6 @@
                          :meta {:pattern       [e a v]      ;; for debugging
                                 :dispose-delay 0}
                          :on-dispose (fn [_]
-                                       (tap> [:dispose! [e a v]])
                                        (swap! !listeners u/dissoc-in [conn e a v])))]
     (swap! !listeners assoc-in [conn e a v] listener)
     listener))
