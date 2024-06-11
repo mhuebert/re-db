@@ -50,7 +50,7 @@
 (defn gen-e [] (vswap! *last-e* inc))
 
 ;; generate internal db uuids
-(defn tempid? [x] (and (number? x) (neg? x)))
+(defn tempid? [x] (or (string? x) (and (number? x) (neg? x))))
 
 (defn resolve-e
   "Returns entity id, resolving lookup refs (vectors of the form `[attribute value]`) to ids.
