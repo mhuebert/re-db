@@ -1,7 +1,10 @@
 (ns re-db.sync.entity-diff-2
-  (:require [clojure.walk :as walk]
+  (:require [clojure.string :as str]
+            [clojure.walk :as walk]
+            [re-db.api :refer [*conn*]]
             [re-db.sync :as-alias sync]
             [re-db.sync.transit :as t]
+            [re-db.triplestore :as ts]
             [re-db.xform :as xf]))
 
 ;; sync any data structure containing entities (identifiable by id-key).
@@ -34,8 +37,31 @@
                                       (vswap! !entity-changes update id merge diff))
                                     (t/->Entity id-key id))
                                   x))))
-        next-entities @!entity-changes]
-    (cond-> {::sync/init {::entities [id-key @!current-entities]
+        current-entities @!current-entities
+        ;; The client can get the same datom through multiple queries.
+        ;; Therefore if the a datom disappears from this query result
+        ;; we cannot automatically tell the client to retract it from
+        ;; their cache. Therefore we first check the DB for any datom
+        ;; that is no longer in the query result.
+
+        ;; HACK although this approach seems to work in practice there are multiple issues with it:
+        ;; - instead of properly retracting the datoms we set the value to nil.
+        ;; - This function (`flatten-entities`) shouldn't know anything about DBs.
+        ;; - A datom being retracted from the DB is not the only possible reason it should be retracted from the client cache.
+        ;;   - The client could also have lost read permission for that datom
+        retracted-entities (let [db (ts/db *conn*)]
+                             (into {}
+                                   (keep (fn [[id entity]]
+                                           (some->> (keys entity)
+                                                    (into {} (comp (filter #(and (not (str/starts-with? (name %) "_"))
+                                                                                 (not (contains? (current-entities id) %))
+                                                                                 (nil? (ts/eav db (ts/get-schema db %) [id-key id] %))))
+                                                                   (map #(vector % nil))))
+                                                    not-empty
+                                                    (vector id))))
+                                   prev-entities))
+        next-entities (merge @!entity-changes retracted-entities)]
+    (cond-> {::sync/init {::entities [id-key current-entities]
                           :value next-value}}
       (seq next-entities)
       (assoc ::entities [id-key next-entities])
