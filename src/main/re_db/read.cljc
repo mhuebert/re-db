@@ -328,9 +328,7 @@
 
                           ;; cardinality/one
                           :else (-pull conn db ref-fn map-expr v)))]
-            (cond-> m
-                    (some-val is-many v)
-                    (assoc alias (wrap-v v is-many val-fn))))))
+            (assoc m alias (wrap-v v is-many val-fn)))))
       nil
       pullv))))
 
