@@ -84,7 +84,8 @@
    (when-not (ts/unique? db a-schema)
      (throw (ex-info "Lookup ref attribute must be unique" {:lookup-ref [a v]})))
    (when (some? v)
-     (if (vector? v)                                        ;; nested lookup ref
+     (if (and (vector? v)
+              (not (:db/tupleAttrs a-schema))) ;; nested lookup ref
        (-resolve-lookup-ref conn db a-schema a (-resolve-lookup-ref conn db
                                                                     (ts/get-schema db (v 0))
                                                                     (v 0)
